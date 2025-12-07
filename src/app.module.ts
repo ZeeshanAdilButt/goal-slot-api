@@ -10,6 +10,7 @@ import { SharingModule } from './modules/sharing/sharing.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
+import { TasksModule } from './modules/tasks/tasks.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { SupabaseModule } from './supabase/supabase.module';
     ReportsModule,
     SharingModule,
     StripeModule,
+    TasksModule,
   ],
 })
 export class AppModule {}

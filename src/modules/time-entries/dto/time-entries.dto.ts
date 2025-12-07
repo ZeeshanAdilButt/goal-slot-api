@@ -29,6 +29,11 @@ export class CreateTimeEntryDto {
   @IsOptional()
   @IsUUID()
   scheduleBlockId?: string;
+
+  @ApiPropertyOptional({ description: 'Link to a task (auto-set when completing tasks)' })
+  @IsOptional()
+  @IsUUID()
+  taskId?: string;
 }
 
 export class UpdateTimeEntryDto extends PartialType(CreateTimeEntryDto) {}

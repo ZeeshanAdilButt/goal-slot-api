@@ -50,6 +50,12 @@ enum ScheduleCategory {
   OTHER
 }
 
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
 // Main User model
 model User {
   id            String    @id @default(uuid())
@@ -82,6 +88,7 @@ model User {
   goals         Goal[]
   timeEntries   TimeEntry[]
   scheduleBlocks ScheduleBlock[]
+  tasks         Task[]
   sharedWithMe  SharedAccess[] @relation("SharedWith")
   sharedByMe    SharedAccess[] @relation("SharedBy")
   
@@ -106,6 +113,7 @@ model Goal {
   
   timeEntries   TimeEntry[]
   scheduleBlocks ScheduleBlock[]
+  tasks         Task[]
   
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -135,6 +143,9 @@ model TimeEntry {
   // Link to schedule block if logged from schedule
   scheduleBlockId String?
   scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
+
+  taskId        String?
+  task          Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -162,12 +173,44 @@ model ScheduleBlock {
   goal          Goal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
   
   timeEntries   TimeEntry[]
+  tasks         Task[]
   
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   
   @@index([userId])
   @@index([dayOfWeek])
+}
+
+// Tasks linked to schedule blocks and goals
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  status          TaskStatus   @default(PENDING)
+  estimatedMinutes Int?
+  actualMinutes   Int?
+  dueDate         DateTime?
+  completedAt     DateTime?
+
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  scheduleBlockId String?
+  scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
+
+  goalId          String?
+  goal            Goal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  timeEntries     TimeEntry[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([scheduleBlockId])
+  @@index([goalId])
+  @@index([status])
 }
 
 // Shared access for collaboration

@@ -41,6 +41,7 @@ export class TimeEntriesService {
         userId,
         goalId: dto.goalId,
         scheduleBlockId: dto.scheduleBlockId,
+        taskId: dto.taskId,
       },
       include: {
         goal: true,
