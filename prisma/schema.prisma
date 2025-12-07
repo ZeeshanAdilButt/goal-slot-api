@@ -1,0 +1,216 @@
+// DevWeekends Time Master - Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User roles and types
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum UserType {
+  INTERNAL    // DevWeekends members - always free
+  EXTERNAL    // External users - need subscription
+}
+
+enum PlanType {
+  FREE
+  PRO
+}
+
+enum GoalCategory {
+  LEARNING
+  WORK
+  HEALTH
+  CREATIVE
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+}
+
+enum ScheduleCategory {
+  DEEP_WORK
+  LEARNING
+  EXERCISE
+  SIDE_PROJECT
+  DSA
+  MEETING
+  BREAK
+  OTHER
+}
+
+// Main User model
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String?   // Null if SSO user
+  name          String
+  avatar        String?
+  
+  role          UserRole  @default(USER)
+  userType      UserType  @default(EXTERNAL)
+  plan          PlanType  @default(FREE)
+  
+  // SSO fields
+  ssoProvider   String?   // 'devweekends', 'google', etc.
+  ssoId         String?   // External SSO ID
+  
+  // Stripe fields
+  stripeCustomerId    String?
+  stripeSubscriptionId String?
+  subscriptionStatus  String?   // 'active', 'canceled', 'past_due'
+  subscriptionEndDate DateTime?
+  
+  // Plan limits override (for internal users or special cases)
+  unlimitedAccess Boolean @default(false)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  goals         Goal[]
+  timeEntries   TimeEntry[]
+  scheduleBlocks ScheduleBlock[]
+  sharedWithMe  SharedAccess[] @relation("SharedWith")
+  sharedByMe    SharedAccess[] @relation("SharedBy")
+  
+  @@index([email])
+  @@index([ssoProvider, ssoId])
+}
+
+// Goals for tracking objectives
+model Goal {
+  id            String       @id @default(uuid())
+  title         String
+  description   String?
+  category      GoalCategory
+  targetHours   Float
+  loggedHours   Float        @default(0)
+  deadline      DateTime?
+  status        GoalStatus   @default(ACTIVE)
+  color         String       @default("#FFD700")
+  
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  timeEntries   TimeEntry[]
+  scheduleBlocks ScheduleBlock[]
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+}
+
+// Time entries for logging work
+model TimeEntry {
+  id            String    @id @default(uuid())
+  taskName      String
+  duration      Int       // Duration in minutes
+  date          DateTime
+  dayOfWeek     Int       // 0-6 (Sunday-Saturday)
+  notes         String?
+  
+  // Progress percentage at time of entry
+  progressPercent Float?
+  
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  goalId        String?
+  goal          Goal?     @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  
+  // Link to schedule block if logged from schedule
+  scheduleBlockId String?
+  scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([date])
+  @@index([goalId])
+}
+
+// Schedule blocks for planning
+model ScheduleBlock {
+  id            String           @id @default(uuid())
+  title         String
+  startTime     String           // "09:00" format
+  endTime       String           // "12:00" format
+  dayOfWeek     Int              // 0-6 (Sunday-Saturday)
+  category      ScheduleCategory
+  color         String           @default("#FFD700")
+  isRecurring   Boolean          @default(true)
+  
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  goalId        String?
+  goal          Goal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  
+  timeEntries   TimeEntry[]
+  
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  
+  @@index([userId])
+  @@index([dayOfWeek])
+}
+
+// Shared access for collaboration
+model SharedAccess {
+  id            String    @id @default(uuid())
+  
+  // User who shared
+  ownerId       String
+  owner         User      @relation("SharedBy", fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  // User who received access
+  sharedWithId  String
+  sharedWith    User      @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  
+  // Invitation email (for pending invites)
+  inviteEmail   String?
+  inviteToken   String?   @unique
+  inviteExpires DateTime?
+  
+  isAccepted    Boolean   @default(false)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@unique([ownerId, sharedWithId])
+  @@index([ownerId])
+  @@index([sharedWithId])
+  @@index([inviteEmail])
+}
+
+// Audit log for tracking changes
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

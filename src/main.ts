@@ -1,0 +1,58 @@
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // Enable CORS
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN || ['http://localhost:3000', 'http://localhost:3001'],
+    credentials: true,
+  });
+
+  // Global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+
+  // API prefix
+  app.setGlobalPrefix('api');
+
+  // Swagger documentation
+  const config = new DocumentBuilder()
+    .setTitle('DevWeekends Time Master API')
+    .setDescription('API for productivity tracking and goal management')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .addTag('auth', 'Authentication endpoints')
+    .addTag('users', 'User management')
+    .addTag('goals', 'Goals management')
+    .addTag('time-entries', 'Time tracking')
+    .addTag('schedule', 'Schedule planning')
+    .addTag('reports', 'Analytics and reports')
+    .addTag('sharing', 'Access sharing')
+    .addTag('stripe', 'Subscription management')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
+
+  const port = process.env.PORT || 4000;
+  await app.listen(port);
+  
+  console.log(`
+  ⚡ DevWeekends Time Master API
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🚀 Server running on: http://localhost:${port}
+  📚 API Docs: http://localhost:${port}/api/docs
+  🔑 Environment: ${process.env.NODE_ENV || 'development'}
+  `);
+}
+
+bootstrap();
