@@ -15,6 +15,16 @@ export class TimeEntriesService {
   async create(userId: string, dto: CreateTimeEntryDto) {
     const date = new Date(dto.date);
     const dayOfWeek = date.getDay();
+    const startedAt = dto.startedAt ? new Date(dto.startedAt) : date;
+
+    let taskTitle = dto.taskTitle;
+    if (dto.taskId && !taskTitle) {
+      const task = await this.prisma.task.findFirst({
+        where: { id: dto.taskId, userId },
+        select: { title: true },
+      });
+      taskTitle = task?.title;
+    }
 
     // Check daily task limit
     const todayStart = new Date(date);
@@ -42,6 +52,8 @@ export class TimeEntriesService {
         goalId: dto.goalId,
         scheduleBlockId: dto.scheduleBlockId,
         taskId: dto.taskId,
+        taskTitle,
+        startedAt,
       },
       include: {
         goal: true,
@@ -73,7 +85,11 @@ export class TimeEntriesService {
           select: { id: true, title: true },
         },
       },
-      orderBy: { date: 'asc' },
+      orderBy: [
+        { date: 'desc' },
+        { startedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
     });
   }
 
@@ -98,12 +114,23 @@ export class TimeEntriesService {
     const oldDuration = entry.duration;
     const oldGoalId = entry.goalId;
 
+    let taskTitle = dto.taskTitle;
+    if (dto.taskId && !taskTitle) {
+      const task = await this.prisma.task.findFirst({
+        where: { id: dto.taskId, userId },
+        select: { title: true },
+      });
+      taskTitle = task?.title;
+    }
+
     const updated = await this.prisma.timeEntry.update({
       where: { id: entryId },
       data: {
         ...dto,
         date: dto.date ? new Date(dto.date) : undefined,
         dayOfWeek: dto.date ? new Date(dto.date).getDay() : undefined,
+        startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
+        taskTitle,
       },
       include: { goal: true },
     });
@@ -194,7 +221,10 @@ export class TimeEntriesService {
   async getRecentEntries(userId: string, limit = 5) {
     return this.prisma.timeEntry.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { startedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
       take: limit,
       include: {
         goal: {

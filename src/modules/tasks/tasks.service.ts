@@ -20,6 +20,7 @@ export class TasksService {
       data: {
         title: dto.title,
         description: dto.description,
+        category: dto.category,
         status: dto.status || TaskStatus.PENDING,
         estimatedMinutes: dto.estimatedMinutes,
         userId,
@@ -46,14 +47,21 @@ export class TasksService {
       where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
     }
 
-    return this.prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where,
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
+        timeEntries: { select: { duration: true } },
       },
     });
+
+    return tasks.map((task) => ({
+      ...task,
+      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      timeEntries: undefined,
+    }));
   }
 
   async findOne(userId: string, taskId: string) {
@@ -62,6 +70,7 @@ export class TasksService {
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
+        timeEntries: { select: { duration: true } },
       },
     });
 
@@ -69,7 +78,11 @@ export class TasksService {
       throw new NotFoundException('Task not found');
     }
 
-    return task;
+    return {
+      ...task,
+      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      timeEntries: undefined,
+    };
   }
 
   async update(userId: string, taskId: string, dto: UpdateTaskDto) {
@@ -153,6 +166,19 @@ export class TasksService {
     }
 
     return { task: updatedTask, timeEntry };
+  }
+
+  async delete(userId: string, taskId: string) {
+    const task = await this.prisma.task.findFirst({ where: { id: taskId, userId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    await this.prisma.task.delete({
+      where: { id: taskId },
+    });
+
+    return { message: 'Task deleted successfully' };
   }
 
   private async validateRelations(userId: string, goalId?: string, scheduleBlockId?: string) {

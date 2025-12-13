@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { TasksService } from './tasks.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
@@ -45,6 +45,12 @@ export class TasksController {
   @ApiOperation({ summary: 'Complete a task and log time to schedule/goal' })
   async complete(@Request() req: any, @Param('id') id: string, @Body() dto: CompleteTaskDto) {
     return this.tasksService.complete(req.user.sub, id, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a task' })
+  async delete(@Request() req: any, @Param('id') id: string) {
+    return this.tasksService.delete(req.user.sub, id);
   }
 }
 
