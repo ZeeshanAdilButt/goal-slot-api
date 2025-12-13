@@ -4,6 +4,7 @@ import { TasksService } from './tasks.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TaskStatus } from '@prisma/client';
+import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -24,19 +25,8 @@ export class TasksController {
   @ApiQuery({ name: 'scheduleBlockId', required: false })
   @ApiQuery({ name: 'goalId', required: false })
   @ApiQuery({ name: 'dayOfWeek', required: false, description: '0 (Sun) - 6 (Sat)' })
-  async findAll(
-    @Request() req: any,
-    @Query('status') status?: TaskStatus,
-    @Query('scheduleBlockId') scheduleBlockId?: string,
-    @Query('goalId') goalId?: string,
-    @Query('dayOfWeek') dayOfWeek?: number,
-  ) {
-    return this.tasksService.findAll(req.user.sub, {
-      status,
-      scheduleBlockId,
-      goalId,
-      dayOfWeek: dayOfWeek !== undefined ? Number(dayOfWeek) : undefined,
-    });
+  async findAll(@Request() req: any, @Query() query: ListTasksQueryDto) {
+    return this.tasksService.findAll(req.user.sub, query);
   }
 
   @Get(':id')
@@ -57,7 +47,6 @@ export class TasksController {
     return this.tasksService.complete(req.user.sub, id, dto);
   }
 }
-
 
 
 

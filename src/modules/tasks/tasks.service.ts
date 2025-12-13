@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
-import { TaskStatus } from '@prisma/client';
+import { Prisma, TaskStatus } from '@prisma/client';
 
 @Injectable()
 export class TasksService {
@@ -38,12 +38,12 @@ export class TasksService {
     userId: string,
     filters: { status?: TaskStatus; scheduleBlockId?: string; goalId?: string; dayOfWeek?: number },
   ) {
-    const where: any = { userId };
+    const where: Prisma.TaskWhereInput = { userId };
     if (filters.status) where.status = filters.status;
     if (filters.scheduleBlockId) where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
     if (filters.dayOfWeek !== undefined) {
-      where.scheduleBlock = { dayOfWeek: Number(filters.dayOfWeek) };
+      where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
     }
 
     return this.prisma.task.findMany({
@@ -167,7 +167,6 @@ export class TasksService {
     }
   }
 }
-
 
 
 
