@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
-import { Prisma, TaskStatus } from '@prisma/client';
+import { Prisma, TaskStatus, TimeEntrySource } from '@prisma/client';
 
 @Injectable()
 export class TasksService {
@@ -119,6 +119,18 @@ export class TasksService {
     const logDate = dto.date ? new Date(dto.date) : new Date();
     const dayOfWeek = logDate.getDay();
 
+    // Get already tracked time from TRACKER source entries
+    const trackedEntries = await this.prisma.timeEntry.findMany({
+      where: {
+        taskId: taskId,
+        source: TimeEntrySource.TRACKER,
+      },
+      select: { duration: true },
+    });
+
+    const alreadyTrackedMinutes = trackedEntries.reduce((sum, entry) => sum + entry.duration, 0);
+    const remainingMinutes = Math.max(0, dto.actualMinutes - alreadyTrackedMinutes);
+
     // Plan limit: tasks per day are enforced via time entries count
     const dayStart = new Date(logDate);
     dayStart.setHours(0, 0, 0, 0);
@@ -130,23 +142,28 @@ export class TasksService {
     });
     await this.authService.checkPlanLimit(userId, 'tasksPerDay', entriesToday);
 
-    const timeEntry = await this.prisma.timeEntry.create({
-      data: {
-        taskName: task.title,
-        duration: dto.actualMinutes,
-        date: logDate,
-        dayOfWeek,
-        notes: dto.notes || 'Logged from task completion',
-        userId,
-        goalId: task.goalId,
-        scheduleBlockId: task.scheduleBlockId,
-        taskId: task.id,
-      },
-      include: {
-        goal: true,
-        scheduleBlock: true,
-      },
-    });
+    // Only create time entry if there's remaining time to log
+    let timeEntry = null;
+    if (remainingMinutes > 0) {
+      timeEntry = await this.prisma.timeEntry.create({
+        data: {
+          taskName: task.title,
+          duration: remainingMinutes,
+          date: logDate,
+          dayOfWeek,
+          notes: dto.notes || 'Logged from task completion',
+          userId,
+          goalId: task.goalId,
+          scheduleBlockId: task.scheduleBlockId,
+          taskId: task.id,
+          source: TimeEntrySource.COMPLETION,
+        },
+        include: {
+          goal: true,
+          scheduleBlock: true,
+        },
+      });
+    }
 
     const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
@@ -161,13 +178,79 @@ export class TasksService {
       },
     });
 
+    // Update goal progress with only the remaining time (or total if no tracked time)
     if (task.goalId) {
-      await this.goalsService.updateProgress(task.goalId, dto.actualMinutes);
+      const minutesToAdd = remainingMinutes > 0 ? remainingMinutes : dto.actualMinutes;
+      await this.goalsService.updateProgress(task.goalId, minutesToAdd);
     }
 
-    return { task: updatedTask, timeEntry };
+    return { 
+      task: updatedTask, 
+      timeEntry,
+      alreadyTrackedMinutes,
+      remainingMinutes,
+      totalMinutes: dto.actualMinutes,
+    };
   }
 
+  async restore(userId: string, taskId: string) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, userId },
+      include: { goal: true },
+    });
+
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    // Find the completion time entry
+    const completionEntry = await this.prisma.timeEntry.findFirst({
+      where: {
+        taskId: taskId,
+        source: TimeEntrySource.COMPLETION,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Transaction to ensure consistency
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Update Task
+      await tx.task.update({
+        where: { id: taskId },
+        data: {
+          status: TaskStatus.PENDING,
+          actualMinutes: null,
+          completedAt: null,
+        },
+      });
+
+      // 2. Handle Goal Progress
+      // Only subtract the completion entry duration if it exists
+      // (If no completion entry exists, all time was already tracked, so nothing was added to goal)
+      if (task.goalId && completionEntry) {
+        const minutesToSubtract = completionEntry.duration;
+        const hoursToSubtract = minutesToSubtract / 60;
+        
+        await tx.goal.update({
+            where: { id: task.goalId },
+            data: {
+                loggedHours: { decrement: hoursToSubtract }
+            }
+        });
+      }
+
+      // 3. Handle Time Entry
+      if (completionEntry) {
+        await tx.timeEntry.delete({
+          where: { id: completionEntry.id },
+        });
+      }
+    });
+
+    return { message: 'Task restored successfully' };
+  }
+
+  
   async delete(userId: string, taskId: string) {
     const task = await this.prisma.task.findFirst({ where: { id: taskId, userId } });
     if (!task) {

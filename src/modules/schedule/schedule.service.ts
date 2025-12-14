@@ -38,6 +38,9 @@ export class ScheduleService {
         goal: {
           select: { id: true, title: true, color: true },
         },
+        tasks: {
+          select: { id: true, title: true, status: true },
+        },
       },
     });
   }
