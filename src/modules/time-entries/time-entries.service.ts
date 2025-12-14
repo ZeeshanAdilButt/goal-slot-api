@@ -79,10 +79,13 @@ export class TimeEntriesService {
       },
       include: {
         goal: {
-          select: { id: true, title: true, color: true },
+          select: { id: true, title: true, color: true, category: true },
         },
         scheduleBlock: {
-          select: { id: true, title: true },
+          select: { id: true, title: true, category: true },
+        },
+        task: {
+          select: { id: true, title: true, category: true },
         },
       },
       orderBy: [
