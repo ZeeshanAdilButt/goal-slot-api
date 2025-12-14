@@ -178,10 +178,10 @@ export class TasksService {
       },
     });
 
-    // Update goal progress with only the remaining time (or total if no tracked time)
-    if (task.goalId) {
-      const minutesToAdd = remainingMinutes > 0 ? remainingMinutes : dto.actualMinutes;
-      await this.goalsService.updateProgress(task.goalId, minutesToAdd);
+    // Update goal progress with only the remaining time
+    // Note: Tracked time entries already updated the goal, so we only add remaining time
+    if (task.goalId && remainingMinutes > 0) {
+      await this.goalsService.updateProgress(task.goalId, remainingMinutes);
     }
 
     return { 
