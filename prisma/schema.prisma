@@ -56,6 +56,11 @@ enum TaskStatus {
   COMPLETED
 }
 
+enum TimeEntrySource {
+  COMPLETION
+  TRACKER
+}
+
 // Main User model
 model User {
   id            String    @id @default(uuid())
@@ -148,10 +153,10 @@ model TimeEntry {
 
   taskId        String?
   task          Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  
+  source        TimeEntrySource @default(TRACKER)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
   @@index([userId])
   @@index([date])
   @@index([goalId])

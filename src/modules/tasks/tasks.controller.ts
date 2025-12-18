@@ -47,6 +47,12 @@ export class TasksController {
     return this.tasksService.complete(req.user.sub, id, dto);
   }
 
+  @Post(':id/restore')
+  @ApiOperation({ summary: 'Restore a completed task and revert time/goal progress' })
+  async restore(@Request() req: any, @Param('id') id: string) {
+    return this.tasksService.restore(req.user.sub, id);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a task' })
   async delete(@Request() req: any, @Param('id') id: string) {
