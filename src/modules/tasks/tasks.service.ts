@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
-import { TaskStatus } from '@prisma/client';
+import { Prisma, TaskStatus } from '@prisma/client';
 
 @Injectable()
 export class TasksService {
@@ -20,6 +20,7 @@ export class TasksService {
       data: {
         title: dto.title,
         description: dto.description,
+        category: dto.category,
         status: dto.status || TaskStatus.PENDING,
         estimatedMinutes: dto.estimatedMinutes,
         userId,
@@ -38,22 +39,29 @@ export class TasksService {
     userId: string,
     filters: { status?: TaskStatus; scheduleBlockId?: string; goalId?: string; dayOfWeek?: number },
   ) {
-    const where: any = { userId };
+    const where: Prisma.TaskWhereInput = { userId };
     if (filters.status) where.status = filters.status;
     if (filters.scheduleBlockId) where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
     if (filters.dayOfWeek !== undefined) {
-      where.scheduleBlock = { dayOfWeek: Number(filters.dayOfWeek) };
+      where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
     }
 
-    return this.prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where,
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
+        timeEntries: { select: { duration: true } },
       },
     });
+
+    return tasks.map((task) => ({
+      ...task,
+      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      timeEntries: undefined,
+    }));
   }
 
   async findOne(userId: string, taskId: string) {
@@ -62,6 +70,7 @@ export class TasksService {
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
+        timeEntries: { select: { duration: true } },
       },
     });
 
@@ -69,7 +78,11 @@ export class TasksService {
       throw new NotFoundException('Task not found');
     }
 
-    return task;
+    return {
+      ...task,
+      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      timeEntries: undefined,
+    };
   }
 
   async update(userId: string, taskId: string, dto: UpdateTaskDto) {
@@ -155,6 +168,19 @@ export class TasksService {
     return { task: updatedTask, timeEntry };
   }
 
+  async delete(userId: string, taskId: string) {
+    const task = await this.prisma.task.findFirst({ where: { id: taskId, userId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    await this.prisma.task.delete({
+      where: { id: taskId },
+    });
+
+    return { message: 'Task deleted successfully' };
+  }
+
   private async validateRelations(userId: string, goalId?: string, scheduleBlockId?: string) {
     if (goalId) {
       const goal = await this.prisma.goal.findFirst({ where: { id: goalId, userId } });
@@ -167,7 +193,6 @@ export class TasksService {
     }
   }
 }
-
 
 
 

@@ -20,6 +20,16 @@ export class CreateTimeEntryDto {
   @IsString()
   notes?: string;
 
+  @ApiPropertyOptional({ example: '2025-12-02T09:00:00Z', description: 'When the work started' })
+  @IsOptional()
+  @IsDateString()
+  startedAt?: string;
+
+  @ApiPropertyOptional({ example: 'Implement login page', description: 'Snapshot of task title' })
+  @IsOptional()
+  @IsString()
+  taskTitle?: string;
+
   @ApiPropertyOptional({ description: 'Link to a goal' })
   @IsOptional()
   @IsUUID()

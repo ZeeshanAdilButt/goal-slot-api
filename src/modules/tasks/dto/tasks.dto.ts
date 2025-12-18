@@ -12,6 +12,11 @@ export class CreateTaskDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({ example: 'DEEP_WORK', description: 'Task category' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
   @ApiPropertyOptional({ enum: TaskStatus })
   @IsOptional()
   @IsEnum(TaskStatus)

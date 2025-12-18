@@ -126,8 +126,10 @@ model Goal {
 model TimeEntry {
   id            String    @id @default(uuid())
   taskName      String
+  taskTitle     String?   // Snapshot of linked task title for reporting
   duration      Int       // Duration in minutes
   date          DateTime
+  startedAt     DateTime? // When the work started
   dayOfWeek     Int       // 0-6 (Sunday-Saturday)
   notes         String?
   
@@ -188,6 +190,7 @@ model Task {
   title           String
   description     String?
   status          TaskStatus   @default(PENDING)
+  category        String?      // Task category (e.g., DEEP_WORK, LEARNING)
   estimatedMinutes Int?
   actualMinutes   Int?
   dueDate         DateTime?
