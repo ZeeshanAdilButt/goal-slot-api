@@ -26,28 +26,10 @@ enum PlanType {
   PRO
 }
 
-enum GoalCategory {
-  LEARNING
-  WORK
-  HEALTH
-  CREATIVE
-}
-
 enum GoalStatus {
   ACTIVE
   COMPLETED
   PAUSED
-}
-
-enum ScheduleCategory {
-  DEEP_WORK
-  LEARNING
-  EXERCISE
-  SIDE_PROJECT
-  DSA
-  MEETING
-  BREAK
-  OTHER
 }
 
 enum TaskStatus {
@@ -59,6 +41,23 @@ enum TaskStatus {
 enum TimeEntrySource {
   COMPLETION
   TRACKER
+}
+
+model Category {
+  id            String       @id @default(uuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String       // Display name (e.g., "Learning")
+  value         String       // Value used in code (e.g., "LEARNING")
+  color         String       // Color class or hex (e.g., "bg-accent-blue")
+  isDefault     Boolean      @default(false) // System default categories
+  order         Int          @default(0) // For sorting
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@unique([userId, value])
+  @@index([userId])
 }
 
 // Main User model
@@ -94,6 +93,7 @@ model User {
   timeEntries   TimeEntry[]
   scheduleBlocks ScheduleBlock[]
   tasks         Task[]
+  categories    Category[]
   sharedWithMe  SharedAccess[] @relation("SharedWith")
   sharedByMe    SharedAccess[] @relation("SharedBy")
   
@@ -106,7 +106,7 @@ model Goal {
   id            String       @id @default(uuid())
   title         String
   description   String?
-  category      GoalCategory
+  category      String?      // Dynamic category from Category model (nullable if category deleted)
   targetHours   Float
   loggedHours   Float        @default(0)
   deadline      DateTime?
@@ -169,7 +169,7 @@ model ScheduleBlock {
   startTime     String           // "09:00" format
   endTime       String           // "12:00" format
   dayOfWeek     Int              // 0-6 (Sunday-Saturday)
-  category      ScheduleCategory
+  category      String?          // Dynamic category from Category model (nullable if category deleted)
   color         String           @default("#FFD700")
   isRecurring   Boolean          @default(true)
   

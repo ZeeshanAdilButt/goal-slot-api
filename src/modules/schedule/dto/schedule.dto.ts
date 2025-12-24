@@ -1,6 +1,5 @@
-import { IsString, IsNumber, IsOptional, IsEnum, IsBoolean, IsUUID, Min, Max, Matches } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsUUID, Min, Max, Matches } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { ScheduleCategory } from '@prisma/client';
 
 export class CreateScheduleBlockDto {
   @ApiProperty({ example: 'Deep Work' })
@@ -23,9 +22,9 @@ export class CreateScheduleBlockDto {
   @Max(6)
   dayOfWeek: number;
 
-  @ApiProperty({ enum: ScheduleCategory, example: 'DEEP_WORK' })
-  @IsEnum(ScheduleCategory)
-  category: ScheduleCategory;
+  @ApiProperty({ example: 'DEEP_WORK', description: 'Category value from user\'s categories' })
+  @IsString()
+  category: string;
 
   @ApiPropertyOptional({ example: '#FFD700' })
   @IsOptional()

@@ -57,6 +57,9 @@ export class AuthService {
       },
     });
 
+    // Seed default categories for new user
+    await this.seedDefaultCategories(user.id);
+
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email, user.role);
 
@@ -119,6 +122,9 @@ export class AuthService {
           unlimitedAccess: true,
         },
       });
+
+      // Seed default categories for new user
+      await this.seedDefaultCategories(user.id);
     } else if (!user.ssoId) {
       // Link existing account to SSO
       user = await this.prisma.user.update({
@@ -215,5 +221,44 @@ export class AuthService {
     }
 
     return true;
+  }
+
+  private async seedDefaultCategories(userId: string) {
+    const defaultCategories = [
+      { name: 'Learning', value: 'LEARNING', color: '#3B82F6', order: 1 }, // blue-500
+      { name: 'Work', value: 'WORK', color: '#22D3EE', order: 2 }, // cyan-400
+      { name: 'Health', value: 'HEALTH', color: '#22C55E', order: 3 }, // green-500
+      { name: 'Creative', value: 'CREATIVE', color: '#EC4899', order: 4 }, // pink-500
+      { name: 'Deep Work', value: 'DEEP_WORK', color: '#FFD700', order: 5 }, // yellow/gold
+      { name: 'Exercise', value: 'EXERCISE', color: '#F97316', order: 6 }, // orange-500
+      { name: 'Side Project', value: 'SIDE_PROJECT', color: '#EC4899', order: 7 }, // pink-500
+      { name: 'DSA', value: 'DSA', color: '#FFD700', order: 8 }, // yellow/gold
+      { name: 'Meeting', value: 'MEETING', color: '#8B5CF6', order: 9 }, // purple-500
+      { name: 'Admin', value: 'ADMIN', color: '#9CA3AF', order: 10 }, // gray-400
+      { name: 'Break', value: 'BREAK', color: '#D1D5DB', order: 11 }, // gray-300
+      { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 12 }, // gray-400
+    ];
+
+    // Check if user already has categories
+    const existingCount = await this.prisma.category.count({
+      where: { userId },
+    });
+
+    if (existingCount > 0) {
+      return; // Already seeded
+    }
+
+    // Create default categories
+    await Promise.all(
+      defaultCategories.map((cat) =>
+        this.prisma.category.create({
+          data: {
+            ...cat,
+            userId,
+            isDefault: true,
+          },
+        }),
+      ),
+    );
   }
 }
