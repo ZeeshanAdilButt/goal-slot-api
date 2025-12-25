@@ -1,6 +1,7 @@
 import { IsString, IsOptional, IsNumber, IsEnum, IsDateString, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { GoalCategory, GoalStatus } from '@prisma/client';
+import { GoalStatus } from '@prisma/client';
+
 
 export class CreateGoalDto {
   @ApiProperty({ example: 'Learn React' })
@@ -12,9 +13,9 @@ export class CreateGoalDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({ enum: GoalCategory, example: 'LEARNING' })
-  @IsEnum(GoalCategory)
-  category: GoalCategory;
+  @ApiProperty({ example: 'LEARNING', description: 'Category value from user\'s categories' })
+  @IsString()
+  category: string;
 
   @ApiProperty({ example: 40 })
   @IsNumber()
