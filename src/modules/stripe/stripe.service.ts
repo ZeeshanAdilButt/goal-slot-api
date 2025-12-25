@@ -104,8 +104,14 @@ export class StripeService {
       case 'customer.subscription.deleted':
         await this.handleSubscriptionChange(event.data.object as Stripe.Subscription);
         break;
+      case 'invoice.paid':
+        await this.handleInvoicePaid(event.data.object as Stripe.Invoice);
+        break;
       case 'invoice.payment_failed':
         await this.handlePaymentFailed(event.data.object as Stripe.Invoice);
+        break;
+      case 'invoice.finalized':
+        await this.handleInvoiceFinalized(event.data.object as Stripe.Invoice);
         break;
     }
 
@@ -156,8 +162,62 @@ export class StripeService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { subscriptionStatus: 'past_due' },
+      data: {
+        subscriptionStatus: 'past_due',
+        invoicePending: true,
+        lastInvoiceId: invoice.id,
+      },
     });
+  }
+
+  private async handleInvoicePaid(invoice: Stripe.Invoice) {
+    const customerId = invoice.customer as string;
+    const user = await this.prisma.user.findFirst({
+      where: { stripeCustomerId: customerId },
+    });
+    if (!user) return;
+
+    const now = new Date();
+    const updateData: any = {
+      lastPaymentDate: now,
+      invoicePending: false,
+      lastInvoiceId: invoice.id,
+    };
+
+    // Set first payment date if not already set
+    if (!user.firstPaymentDate) {
+      updateData.firstPaymentDate = now;
+    }
+
+    // Clear past_due status if subscription is now active
+    if (user.subscriptionStatus === 'past_due') {
+      updateData.subscriptionStatus = 'active';
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+    });
+  }
+
+  private async handleInvoiceFinalized(invoice: Stripe.Invoice) {
+    // Invoice finalized means it's been created and is awaiting payment
+    const customerId = invoice.customer as string;
+    const user = await this.prisma.user.findFirst({
+      where: { stripeCustomerId: customerId },
+    });
+    if (!user) return;
+
+    // Only mark as pending if the invoice is not already paid
+    if (invoice.status === 'open') {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          invoicePending: true,
+          lastInvoiceId: invoice.id,
+        },
+      });
+    }
   }
 
   async getSubscriptionStatus(userId: string) {
@@ -169,6 +229,10 @@ export class StripeService {
         subscriptionEndDate: true,
         unlimitedAccess: true,
         userType: true,
+        firstPaymentDate: true,
+        lastPaymentDate: true,
+        invoicePending: true,
+        lastInvoiceId: true,
       },
     });
 
@@ -180,10 +244,103 @@ export class StripeService {
       endsAt: user.subscriptionEndDate,
       hasUnlimitedAccess: user.unlimitedAccess,
       isInternal: user.userType === 'INTERNAL',
+      // Billing tracking
+      firstPaymentDate: user.firstPaymentDate,
+      lastPaymentDate: user.lastPaymentDate,
+      invoicePending: user.invoicePending,
+      lastInvoiceId: user.lastInvoiceId,
+      // Flags for UI
+      requiresPaymentAction: user.invoicePending || user.subscriptionStatus === 'past_due',
       price: '$10/month',
       features: {
         free: ['3 goals', '5 schedules', '3 tasks/day', 'Basic analytics'],
         pro: ['Unlimited goals', 'Unlimited schedules', 'Unlimited tasks', 'Advanced analytics', 'Priority support'],
+      },
+    };
+  }
+
+  /**
+   * Get detailed billing history from Stripe
+   */
+  async getBillingDetails(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+        firstPaymentDate: true,
+        lastPaymentDate: true,
+        invoicePending: true,
+        subscriptionStatus: true,
+        plan: true,
+      },
+    });
+
+    if (!user) throw new BadRequestException('User not found');
+
+    // Return basic info if no Stripe customer
+    if (!user.stripeCustomerId || this.isMock) {
+      return {
+        customer: null,
+        subscription: null,
+        invoices: [],
+        paymentMethods: [],
+        billingHistory: {
+          firstPaymentDate: user.firstPaymentDate,
+          lastPaymentDate: user.lastPaymentDate,
+          invoicePending: user.invoicePending,
+        },
+      };
+    }
+
+    // Fetch data from Stripe
+    const [subscription, invoices, paymentMethods] = await Promise.all([
+      user.stripeSubscriptionId
+        ? this.stripe.subscriptions.retrieve(user.stripeSubscriptionId)
+        : null,
+      this.stripe.invoices.list({
+        customer: user.stripeCustomerId,
+        limit: 12,
+      }),
+      this.stripe.paymentMethods.list({
+        customer: user.stripeCustomerId,
+        type: 'card',
+      }),
+    ]);
+
+    return {
+      subscription: subscription ? {
+        id: subscription.id,
+        status: subscription.status,
+        currentPeriodStart: new Date(subscription.current_period_start * 1000),
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        cancelAt: subscription.cancel_at ? new Date(subscription.cancel_at * 1000) : null,
+      } : null,
+      invoices: invoices.data.map(inv => ({
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        amount: inv.amount_due / 100,
+        currency: inv.currency,
+        created: new Date(inv.created * 1000),
+        paidAt: inv.status_transitions.paid_at
+          ? new Date(inv.status_transitions.paid_at * 1000)
+          : null,
+        hostedInvoiceUrl: inv.hosted_invoice_url,
+        invoicePdf: inv.invoice_pdf,
+      })),
+      paymentMethods: paymentMethods.data.map(pm => ({
+        id: pm.id,
+        brand: pm.card?.brand,
+        last4: pm.card?.last4,
+        expMonth: pm.card?.exp_month,
+        expYear: pm.card?.exp_year,
+      })),
+      billingHistory: {
+        firstPaymentDate: user.firstPaymentDate,
+        lastPaymentDate: user.lastPaymentDate,
+        invoicePending: user.invoicePending,
       },
     };
   }

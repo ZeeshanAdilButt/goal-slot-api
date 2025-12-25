@@ -28,11 +28,11 @@ export class LoginDto {
 }
 
 export class SSOLoginDto {
-  @ApiProperty({ description: 'SSO token from DevWeekends platform' })
+  @ApiProperty({ description: 'SSO token from platform' })
   @IsString()
   token: string;
 
-  @ApiProperty({ example: 'user@devweekends.com' })
+  @ApiProperty({ example: 'user@example.com' })
   @IsEmail()
   email: string;
 

@@ -26,7 +26,7 @@ async function bootstrap() {
 
   // Swagger documentation
   const config = new DocumentBuilder()
-    .setTitle('DevWeekends Time Master API')
+    .setTitle('Time Master API')
     .setDescription('API for productivity tracking and goal management')
     .setVersion('1.0')
     .addBearerAuth()
@@ -48,7 +48,7 @@ async function bootstrap() {
   await app.listen(port);
   
   console.log(`
-  ⚡ DevWeekends Time Master API
+  ⚡ Time Master API
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   🚀 Server running on: http://localhost:${port}
   📚 API Docs: http://localhost:${port}/api/docs

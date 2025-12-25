@@ -33,6 +33,14 @@ export class StripeController {
     return this.stripeService.getSubscriptionStatus(req.user.sub);
   }
 
+  @Get('billing-details')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get detailed billing history and invoices' })
+  async getBillingDetails(@Request() req: any) {
+    return this.stripeService.getBillingDetails(req.user.sub);
+  }
+
   @Post('webhook')
   @ApiOperation({ summary: 'Stripe webhook endpoint' })
   async handleWebhook(

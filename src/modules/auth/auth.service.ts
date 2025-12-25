@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
+import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto, SSOLoginDto } from './dto/auth.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
 
@@ -30,6 +31,7 @@ export class AuthService {
     private configService: ConfigService,
     private supabaseService: SupabaseService,
     private usersService: UsersService,
+    private emailService: EmailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -59,6 +61,15 @@ export class AuthService {
 
     // Seed default categories for new user
     await this.seedDefaultCategories(user.id);
+
+    // Seed default labels for new user
+    await this.seedDefaultLabels(user.id);
+
+    // Send welcome email (don't await - fire and forget)
+    this.emailService.sendWelcomeEmail({
+      toEmail: user.email,
+      userName: user.name,
+    });
 
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -92,7 +103,7 @@ export class AuthService {
   }
 
   async ssoLogin(dto: SSOLoginDto) {
-    // Verify SSO token from DevWeekends platform
+    // Verify SSO token from platform
     const ssoResult = await this.supabaseService.verifySSOToken(dto.token);
 
     if (!ssoResult.valid) {
@@ -104,7 +115,7 @@ export class AuthService {
       where: {
         OR: [
           { email: dto.email },
-          { ssoId: ssoResult.user?.id, ssoProvider: 'devweekends' },
+          { ssoId: ssoResult.user?.id, ssoProvider: 'sso' },
         ],
       },
     });
@@ -115,22 +126,25 @@ export class AuthService {
         data: {
           email: dto.email,
           name: dto.name || dto.email.split('@')[0],
-          ssoProvider: 'devweekends',
+          ssoProvider: 'sso',
           ssoId: ssoResult.user?.id,
-          userType: UserType.INTERNAL, // DW users are internal
-          plan: PlanType.PRO, // DW users get Pro for free
+          userType: UserType.INTERNAL,
+          plan: PlanType.PRO,
           unlimitedAccess: true,
         },
       });
 
       // Seed default categories for new user
       await this.seedDefaultCategories(user.id);
+
+      // Seed default labels for new user
+      await this.seedDefaultLabels(user.id);
     } else if (!user.ssoId) {
       // Link existing account to SSO
       user = await this.prisma.user.update({
         where: { id: user.id },
         data: {
-          ssoProvider: 'devweekends',
+          ssoProvider: 'sso',
           ssoId: ssoResult.user?.id,
           userType: UserType.INTERNAL,
           plan: PlanType.PRO,
@@ -254,6 +268,43 @@ export class AuthService {
         this.prisma.category.create({
           data: {
             ...cat,
+            userId,
+            isDefault: true,
+          },
+        }),
+      ),
+    );
+  }
+
+  private async seedDefaultLabels(userId: string) {
+    const currentYear = new Date().getFullYear();
+    
+    const defaultLabels = [
+      { name: 'Q1', value: 'Q1', color: '#3B82F6', order: 1 },      // blue
+      { name: 'Q2', value: 'Q2', color: '#22C55E', order: 2 },      // green
+      { name: 'Q3', value: 'Q3', color: '#F97316', order: 3 },      // orange
+      { name: 'Q4', value: 'Q4', color: '#EC4899', order: 4 },      // pink
+      { name: `${currentYear}`, value: `${currentYear}`, color: '#8B5CF6', order: 5 }, // purple
+      { name: 'High Priority', value: 'HIGH_PRIORITY', color: '#EF4444', order: 6 },  // red
+      { name: 'Personal', value: 'PERSONAL', color: '#06B6D4', order: 7 },   // cyan
+      { name: 'Professional', value: 'PROFESSIONAL', color: '#6366F1', order: 8 }, // indigo
+    ];
+
+    // Check if user already has labels
+    const existingCount = await this.prisma.label.count({
+      where: { userId },
+    });
+
+    if (existingCount > 0) {
+      return; // Already seeded
+    }
+
+    // Create default labels
+    await Promise.all(
+      defaultLabels.map((label) =>
+        this.prisma.label.create({
+          data: {
+            ...label,
             userId,
             isDefault: true,
           },

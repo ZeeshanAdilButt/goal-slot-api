@@ -1,13 +1,27 @@
 import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
 import { InviteUserDto } from './dto/sharing.dto';
 
 @Injectable()
 export class SharingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   async inviteUser(ownerId: string, dto: InviteUserDto) {
+    // Get owner info for the email
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { id: true, email: true, name: true },
+    });
+
+    if (!owner) {
+      throw new NotFoundException('Owner not found');
+    }
+
     // Check if already shared
     const existingShare = await this.prisma.sharedAccess.findFirst({
       where: {
@@ -48,12 +62,20 @@ export class SharingService {
       },
     });
 
-    // In production, send email invitation here
-    // await this.emailService.sendShareInvitation(dto.email, inviteToken, owner);
+    // Send email invitation
+    const emailResult = await this.emailService.sendShareInvitation({
+      toEmail: dto.email,
+      inviterName: owner.name,
+      inviterEmail: owner.email,
+      inviteToken: invitedUser ? sharedAccess.id : inviteToken, // Use share ID for existing users
+      isExistingUser: !!invitedUser,
+    });
 
     return {
       ...sharedAccess,
       inviteLink: invitedUser ? null : `/share/accept?token=${inviteToken}`,
+      emailSent: emailResult.success,
+      emailError: emailResult.success ? null : emailResult.error,
     };
   }
 
@@ -184,12 +206,17 @@ export class SharingService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) return [];
 
-    // Find shares where inviteEmail matches user's email and not yet accepted
+    // Find pending invites FOR this user (not BY this user)
+    // Must NOT be the owner, and either:
+    // 1. inviteEmail matches their email, OR
+    // 2. sharedWithId is their ID and not yet accepted
     return this.prisma.sharedAccess.findMany({
       where: {
+        ownerId: { not: userId }, // Exclude invites created BY this user
+        isAccepted: false,
         OR: [
           { inviteEmail: user.email },
-          { sharedWithId: userId, isAccepted: false },
+          { sharedWithId: userId },
         ],
       },
       include: {
@@ -214,7 +241,13 @@ export class SharingService {
       throw new NotFoundException('Invite not found');
     }
 
-    return this.prisma.sharedAccess.update({
+    // Get user info for notification
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true },
+    });
+
+    const updatedShare = await this.prisma.sharedAccess.update({
       where: { id: inviteId },
       data: {
         sharedWithId: userId,
@@ -227,15 +260,37 @@ export class SharingService {
         owner: { select: { id: true, email: true, name: true } },
       },
     });
+
+    // Notify the owner that their invite was accepted
+    if (user && updatedShare.owner) {
+      await this.emailService.sendShareAcceptedNotification({
+        toEmail: updatedShare.owner.email,
+        accepterName: user.name,
+        accepterEmail: user.email,
+      });
+    }
+
+    return updatedShare;
   }
 
   async declineInvite(userId: string, inviteId: string) {
+    // Get the current user's email
+    const user = await this.prisma.user.findUnique({ 
+      where: { id: userId },
+      select: { email: true } 
+    });
+    
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Find the invite - must belong to this user
     const invite = await this.prisma.sharedAccess.findFirst({
       where: {
         id: inviteId,
         OR: [
           { sharedWithId: userId },
-          { inviteEmail: { not: null } },
+          { inviteEmail: user.email },
         ],
       },
     });
@@ -245,6 +300,148 @@ export class SharingService {
     }
 
     await this.prisma.sharedAccess.delete({ where: { id: inviteId } });
-    return { message: 'Invite declined' };
+    return { success: true, message: 'Invite declined' };
+  }
+
+  async getSharedWithMe(userId: string) {
+    return this.prisma.sharedAccess.findMany({
+      where: { 
+        sharedWithId: userId, 
+        isAccepted: true 
+      },
+      include: {
+        owner: { 
+          select: { 
+            id: true, 
+            email: true, 
+            name: true, 
+            avatar: true 
+          } 
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getSharedUserTimeEntries(
+    accessorId: string, 
+    ownerId: string, 
+    startDate: string, 
+    endDate: string
+  ) {
+    // Verify access
+    const hasAccess = await this.prisma.sharedAccess.findFirst({
+      where: {
+        ownerId,
+        sharedWithId: accessorId,
+        isAccepted: true,
+      },
+    });
+
+    if (!hasAccess) {
+      throw new ForbiddenException('You do not have access to this user\'s data');
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId: ownerId,
+        date: { gte: start, lte: end },
+      },
+      include: {
+        goal: { select: { id: true, title: true, color: true, category: true } },
+        task: { select: { id: true, title: true } },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    return entries;
+  }
+
+  async getSharedUserGoals(accessorId: string, ownerId: string) {
+    // Verify access
+    const hasAccess = await this.prisma.sharedAccess.findFirst({
+      where: {
+        ownerId,
+        sharedWithId: accessorId,
+        isAccepted: true,
+      },
+    });
+
+    if (!hasAccess) {
+      throw new ForbiddenException('You do not have access to this user\'s data');
+    }
+
+    return this.prisma.goal.findMany({
+      where: { userId: ownerId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ============ PUBLIC ACCESS METHODS (No auth required) ============
+
+  private async verifyPublicToken(token: string) {
+    const share = await this.prisma.sharedAccess.findUnique({
+      where: { inviteToken: token },
+      include: {
+        owner: { select: { id: true, email: true, name: true, avatar: true } },
+      },
+    });
+
+    if (!share) {
+      throw new NotFoundException('Invalid or expired share link');
+    }
+
+    if (share.inviteExpires && share.inviteExpires < new Date()) {
+      throw new ForbiddenException('This share link has expired');
+    }
+
+    return share;
+  }
+
+  async getPublicSharedData(token: string) {
+    const share = await this.verifyPublicToken(token);
+    
+    return {
+      owner: share.owner,
+      shareId: share.id,
+      createdAt: share.createdAt,
+      expiresAt: share.inviteExpires,
+      accessType: 'VIEW_ONLY',
+    };
+  }
+
+  async getPublicSharedTimeEntries(token: string, startDate: string, endDate: string) {
+    const share = await this.verifyPublicToken(token);
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId: share.ownerId,
+        date: { gte: start, lte: end },
+      },
+      include: {
+        goal: { select: { id: true, title: true, color: true, category: true } },
+        task: { select: { id: true, title: true } },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    return entries;
+  }
+
+  async getPublicSharedGoals(token: string) {
+    const share = await this.verifyPublicToken(token);
+    
+    return this.prisma.goal.findMany({
+      where: { userId: share.ownerId },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 }

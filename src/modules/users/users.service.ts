@@ -60,7 +60,7 @@ export class UsersService {
     });
   }
 
-  // Admin: Create internal user (DevWeekends member)
+  // Admin: Create internal user
   async createInternalUser(adminId: string, dto: CreateInternalUserDto) {
     const admin = await this.prisma.user.findUnique({ where: { id: adminId } });
     if (!admin || (admin.role !== UserRole.SUPER_ADMIN && admin.role !== UserRole.ADMIN)) {

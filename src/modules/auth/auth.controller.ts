@@ -28,7 +28,7 @@ export class AuthController {
 
   @Post('sso')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login via DevWeekends SSO' })
+  @ApiOperation({ summary: 'Login via SSO' })
   @ApiResponse({ status: 200, description: 'SSO login successful' })
   @ApiResponse({ status: 401, description: 'Invalid SSO token' })
   async ssoLogin(@Body() dto: SSOLoginDto) {

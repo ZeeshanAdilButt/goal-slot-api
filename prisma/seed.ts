@@ -14,7 +14,7 @@ async function main() {
     where: { email: 'admin@devweekends.com' },
     update: {
       password: hashedPassword,
-      name: 'DevWeekends Admin',
+      name: 'Admin',
       role: UserRole.SUPER_ADMIN,
       userType: UserType.INTERNAL,
       plan: PlanType.PRO,
@@ -23,7 +23,7 @@ async function main() {
     create: {
       email: 'admin@devweekends.com',
       password: hashedPassword,
-      name: 'DevWeekends Admin',
+      name: 'Admin',
       role: UserRole.SUPER_ADMIN,
       userType: UserType.INTERNAL,
       plan: PlanType.PRO,
@@ -33,14 +33,14 @@ async function main() {
 
   console.log('✅ Super Admin created:', superAdmin.email);
 
-  // Create sample internal user (DevWeekends member)
+  // Create sample internal user
   const internalUser = await prisma.user.upsert({
     where: { email: 'mentor@devweekends.com' },
     update: {},
     create: {
       email: 'mentor@devweekends.com',
       password: await bcrypt.hash('Mentor2025!', 10),
-      name: 'DevWeekends Mentor',
+      name: 'Mentor',
       role: UserRole.USER,
       userType: UserType.INTERNAL,
       plan: PlanType.PRO,

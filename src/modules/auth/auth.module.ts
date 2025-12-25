@@ -6,6 +6,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { SubscriptionGuard } from './guards/subscription.guard';
+import { PrismaModule } from '../../prisma/prisma.module';
 
 @Module({
   imports: [
@@ -21,9 +23,10 @@ import { UsersModule } from '../users/users.module';
       inject: [ConfigService],
     }),
     UsersModule,
+    PrismaModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, JwtStrategy, SubscriptionGuard],
+  exports: [AuthService, JwtModule, SubscriptionGuard],
 })
 export class AuthModule {}
