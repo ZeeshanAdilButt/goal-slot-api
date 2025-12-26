@@ -21,6 +21,13 @@ model User {
   userType      UserType  @default(EXTERNAL)
   plan          PlanType  @default(FREE)
   
+  // Account status
+  isDisabled        Boolean   @default(false)  // Admin can disable accounts
+  disabledAt        DateTime?                  // When account was disabled
+  disabledReason    String?                    // Why account was disabled
+  emailVerified     Boolean   @default(false)  // Email verification status
+  emailVerifiedAt   DateTime?                  // When email was verified
+  
   // SSO fields
   ssoProvider   String?   // 'sso', 'google', etc.
   ssoId         String?   // External SSO ID
@@ -40,6 +47,12 @@ model User {
   // Plan limits override (for internal users or special cases)
   unlimitedAccess Boolean @default(false)
   
+  // Admin-assigned plan override (supersedes Stripe subscription)
+  adminAssignedPlan     PlanType?   // Plan assigned by admin
+  adminAssignedPlanAt   DateTime?   // When admin assigned the plan
+  adminAssignedPlanBy   String?     // Admin who assigned the plan
+  adminAssignedPlanNote String?     // Note about why plan was assigned
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
@@ -50,6 +63,7 @@ model User {
   tasks          Task[]
   categories     Category[]
   labels         Label[]
+  notes          Note[]
   sharedWithMe   SharedAccess[] @relation("SharedWith")
   sharedByMe     SharedAccess[] @relation("SharedBy")
   
@@ -274,6 +288,34 @@ model GoalLabel {
   @@index([labelId])
 }
 
+// Notes with hierarchical structure (OneNote-like)
+model Note {
+  id          String   @id @default(uuid())
+  title       String   @default("Untitled")
+  content     String   @default("[]") // JSON string of blocks
+  icon        String?  // Emoji icon
+  color       String?  // Color theme
+  
+  // Hierarchical structure
+  parentId    String?
+  parent      Note?    @relation("NoteHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Note[]   @relation("NoteHierarchy")
+  
+  order       Int      @default(0)    // For ordering within parent
+  isExpanded  Boolean  @default(true) // Tree expansion state
+  isFavorite  Boolean  @default(false)
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([parentId])
+  @@index([isFavorite])
+}
+
 // User roles and types
 enum UserRole {
   SUPER_ADMIN
@@ -288,7 +330,8 @@ enum UserType {
 
 enum PlanType {
   FREE
-  PRO
+  BASIC     // $7/month - Basic features
+  PRO       // $5/month promotional price - All features
 }
 
 enum GoalStatus {

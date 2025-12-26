@@ -1,7 +1,13 @@
 import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { UpdateUserDto, CreateInternalUserDto } from './dto/users.dto';
+import { 
+  UpdateUserDto, 
+  CreateInternalUserDto,
+  AdminToggleUserStatusDto,
+  AdminAssignPlanDto,
+  AdminSetEmailVerifiedDto,
+} from './dto/users.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -30,13 +36,33 @@ export class UsersController {
   @Get('admin/list')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @ApiOperation({ summary: 'List all users (Admin only)' })
+  @ApiOperation({ summary: 'List all users with extended info (Admin only)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
   async listUsers(
     @Request() req: any,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('search') search?: string,
   ) {
-    return this.usersService.listUsers(req.user.sub, page, limit);
+    return this.usersService.listUsers(req.user.sub, page, limit, search);
+  }
+
+  @Get('admin/stats')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get user statistics (Admin only)' })
+  async getUserStats(@Request() req: any) {
+    return this.usersService.getUserStats(req.user.sub);
+  }
+
+  @Get('admin/user/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get single user details (Admin only)' })
+  async getUserDetails(@Request() req: any, @Param('userId') userId: string) {
+    return this.usersService.getUserDetails(req.user.sub, userId);
   }
 
   @Post('admin/internal')
@@ -63,6 +89,42 @@ export class UsersController {
     return this.usersService.revokeFreeAccess(req.user.sub, userId);
   }
 
+  @Post('admin/toggle-status/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Enable or disable a user account (Admin only)' })
+  async toggleUserStatus(
+    @Request() req: any, 
+    @Param('userId') userId: string,
+    @Body() dto: AdminToggleUserStatusDto,
+  ) {
+    return this.usersService.toggleUserStatus(req.user.sub, userId, dto);
+  }
+
+  @Post('admin/assign-plan/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Assign a subscription plan to user (Admin only)' })
+  async assignPlan(
+    @Request() req: any, 
+    @Param('userId') userId: string,
+    @Body() dto: AdminAssignPlanDto,
+  ) {
+    return this.usersService.assignPlan(req.user.sub, userId, dto);
+  }
+
+  @Post('admin/set-email-verified/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Set email verification status (Admin only)' })
+  async setEmailVerified(
+    @Request() req: any, 
+    @Param('userId') userId: string,
+    @Body() dto: AdminSetEmailVerifiedDto,
+  ) {
+    return this.usersService.setEmailVerified(req.user.sub, userId, dto);
+  }
+
   @Post('admin/promote/:userId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
@@ -70,4 +132,13 @@ export class UsersController {
   async promoteToAdmin(@Request() req: any, @Param('userId') userId: string) {
     return this.usersService.promoteToAdmin(req.user.sub, userId);
   }
+
+  @Post('admin/demote/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Demote admin to user (Super Admin only)' })
+  async demoteFromAdmin(@Request() req: any, @Param('userId') userId: string) {
+    return this.usersService.demoteFromAdmin(req.user.sub, userId);
+  }
 }
+

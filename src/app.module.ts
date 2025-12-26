@@ -14,6 +14,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { HealthModule } from './modules/health/health.module';
 import { LabelsModule } from './modules/labels/labels.module';
+import { NotesModule } from './modules/notes/notes.module';
 import { EmailModule } from './modules/email/email.module';
 
 @Module({
@@ -37,6 +38,7 @@ import { EmailModule } from './modules/email/email.module';
     TasksModule,
     CategoriesModule,
     LabelsModule,
+    NotesModule,
   ],
 })
 export class AppModule {}
