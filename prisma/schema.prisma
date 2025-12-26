@@ -1,4 +1,4 @@
-// DevWeekends Time Master - Database Schema
+// Time Master - Database Schema
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,57 +7,6 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-}
-
-// User roles and types
-enum UserRole {
-  SUPER_ADMIN
-  ADMIN
-  USER
-}
-
-enum UserType {
-  INTERNAL    // DevWeekends members - always free
-  EXTERNAL    // External users - need subscription
-}
-
-enum PlanType {
-  FREE
-  PRO
-}
-
-enum GoalStatus {
-  ACTIVE
-  COMPLETED
-  PAUSED
-}
-
-enum TaskStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-}
-
-enum TimeEntrySource {
-  COMPLETION
-  TRACKER
-}
-
-model Category {
-  id            String       @id @default(uuid())
-  userId        String
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name          String       // Display name (e.g., "Learning")
-  value         String       // Value used in code (e.g., "LEARNING")
-  color         String       // Color class or hex (e.g., "bg-accent-blue")
-  isDefault     Boolean      @default(false) // System default categories
-  order         Int          @default(0) // For sorting
-  
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  
-  @@unique([userId, value])
-  @@index([userId])
 }
 
 // Main User model
@@ -73,14 +22,20 @@ model User {
   plan          PlanType  @default(FREE)
   
   // SSO fields
-  ssoProvider   String?   // 'devweekends', 'google', etc.
+  ssoProvider   String?   // 'sso', 'google', etc.
   ssoId         String?   // External SSO ID
   
   // Stripe fields
-  stripeCustomerId    String?
+  stripeCustomerId     String?
   stripeSubscriptionId String?
-  subscriptionStatus  String?   // 'active', 'canceled', 'past_due'
-  subscriptionEndDate DateTime?
+  subscriptionStatus   String?   // 'active', 'canceled', 'past_due', 'paused'
+  subscriptionEndDate  DateTime?
+  
+  // Billing tracking
+  firstPaymentDate     DateTime? // When user first paid
+  lastPaymentDate      DateTime? // Most recent successful payment
+  invoicePending       Boolean   @default(false) // True when invoice awaits payment
+  lastInvoiceId        String?   // Stripe invoice ID for reference
   
   // Plan limits override (for internal users or special cases)
   unlimitedAccess Boolean @default(false)
@@ -89,13 +44,14 @@ model User {
   updatedAt     DateTime  @updatedAt
   
   // Relations
-  goals         Goal[]
-  timeEntries   TimeEntry[]
+  goals          Goal[]
+  timeEntries    TimeEntry[]
   scheduleBlocks ScheduleBlock[]
-  tasks         Task[]
-  categories    Category[]
-  sharedWithMe  SharedAccess[] @relation("SharedWith")
-  sharedByMe    SharedAccess[] @relation("SharedBy")
+  tasks          Task[]
+  categories     Category[]
+  labels         Label[]
+  sharedWithMe   SharedAccess[] @relation("SharedWith")
+  sharedByMe     SharedAccess[] @relation("SharedBy")
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -106,7 +62,7 @@ model Goal {
   id            String       @id @default(uuid())
   title         String
   description   String?
-  category      String?      // Dynamic category from Category model (nullable if category deleted)
+  category      String?      // Category value reference
   targetHours   Float
   loggedHours   Float        @default(0)
   deadline      DateTime?
@@ -116,15 +72,17 @@ model Goal {
   userId        String
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  timeEntries   TimeEntry[]
+  timeEntries    TimeEntry[]
   scheduleBlocks ScheduleBlock[]
-  tasks         Task[]
+  tasks          Task[]
+  labels         GoalLabel[]
   
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   
   @@index([userId])
   @@index([status])
+  @@index([category])
 }
 
 // Time entries for logging work
@@ -157,6 +115,7 @@ model TimeEntry {
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  
   @@index([userId])
   @@index([date])
   @@index([goalId])
@@ -169,7 +128,7 @@ model ScheduleBlock {
   startTime     String           // "09:00" format
   endTime       String           // "12:00" format
   dayOfWeek     Int              // 0-6 (Sunday-Saturday)
-  category      String?          // Dynamic category from Category model (nullable if category deleted)
+  category      String?          // Category value reference
   color         String           @default("#FFD700")
   isRecurring   Boolean          @default(true)
   
@@ -195,7 +154,7 @@ model Task {
   title           String
   description     String?
   status          TaskStatus   @default(PENDING)
-  category        String?      // Task category (e.g., DEEP_WORK, LEARNING)
+  category        String?      // Category value reference
   estimatedMinutes Int?
   actualMinutes   Int?
   dueDate         DateTime?
@@ -264,4 +223,87 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+// Category for goals, schedule blocks, and tasks
+model Category {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String   // Display name
+  value     String   // Unique value/slug
+  color     String
+  isDefault Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, value])
+  @@index([userId])
+}
+
+// Label for filtering goals (e.g., Q1, Q2, Q3, Q4, 2025, Priority)
+model Label {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String      // Display name
+  value     String      // Unique value/slug
+  color     String      @default("#6B7280")
+  isDefault Boolean     @default(false)
+  order     Int         @default(0)
+  goals     GoalLabel[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([userId, value])
+  @@index([userId])
+}
+
+// Many-to-many relationship between Goals and Labels
+model GoalLabel {
+  id        String   @id @default(uuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  labelId   String
+  label     Label    @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([goalId, labelId])
+  @@index([goalId])
+  @@index([labelId])
+}
+
+// User roles and types
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum UserType {
+  INTERNAL    // Internal members - always free
+  EXTERNAL    // External users - need subscription
+}
+
+enum PlanType {
+  FREE
+  PRO
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TimeEntrySource {
+  COMPLETION
+  TRACKER
 }

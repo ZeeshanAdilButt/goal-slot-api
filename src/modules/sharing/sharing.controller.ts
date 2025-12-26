@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SharingService } from './sharing.service';
 import { InviteUserDto } from './dto/sharing.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -53,6 +53,12 @@ export class SharingController {
     return this.sharingService.declineInvite(req.user.sub, inviteId);
   }
 
+  @Get('shared-with-me')
+  @ApiOperation({ summary: 'Get all users who have shared their data with me' })
+  async getSharedWithMe(@Request() req: any) {
+    return this.sharingService.getSharedWithMe(req.user.sub);
+  }
+
   @Get('user/:ownerId')
   @ApiOperation({ summary: 'Get shared user data' })
   async getSharedUserData(@Request() req: any, @Param('ownerId') ownerId: string) {
@@ -69,5 +75,27 @@ export class SharingController {
   @ApiOperation({ summary: 'Remove access granted to you' })
   async removeMyAccess(@Request() req: any, @Param('shareId') shareId: string) {
     return this.sharingService.removeMyAccess(req.user.sub, shareId);
+  }
+
+  @Get('user/:ownerId/time-entries')
+  @ApiOperation({ summary: 'Get time entries for a shared user' })
+  @ApiQuery({ name: 'startDate', required: true, example: '2025-12-01' })
+  @ApiQuery({ name: 'endDate', required: true, example: '2025-12-31' })
+  async getSharedUserTimeEntries(
+    @Request() req: any,
+    @Param('ownerId') ownerId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.sharingService.getSharedUserTimeEntries(req.user.sub, ownerId, startDate, endDate);
+  }
+
+  @Get('user/:ownerId/goals')
+  @ApiOperation({ summary: 'Get goals for a shared user' })
+  async getSharedUserGoals(
+    @Request() req: any,
+    @Param('ownerId') ownerId: string,
+  ) {
+    return this.sharingService.getSharedUserGoals(req.user.sub, ownerId);
   }
 }

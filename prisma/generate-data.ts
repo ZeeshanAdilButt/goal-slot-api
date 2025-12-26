@@ -155,17 +155,18 @@ async function main() {
       { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 12 },
     ];
 
-    categories = await Promise.all(
-      defaultCategories.map((cat) =>
-        prisma.category.create({
-          data: {
-            ...cat,
-            userId: user.id,
-            isDefault: true,
-          },
-        }),
-      ),
-    );
+    await prisma.category.createMany({
+      data: defaultCategories.map((cat) => ({
+        ...cat,
+        userId: user.id,
+        isDefault: true,
+      })),
+    });
+
+    categories = await prisma.category.findMany({
+      where: { userId: user.id },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
     console.log(`✅ Created ${categories.length} default categories`);
   } else {
     console.log(`✅ Found ${categories.length} existing categories`);

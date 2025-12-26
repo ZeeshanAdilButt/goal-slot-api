@@ -17,7 +17,7 @@ export class SupabaseService {
     return this.supabase;
   }
 
-  // Verify SSO token from DevWeekends platform
+  // Verify SSO token from platform
   async verifySSOToken(token: string): Promise<{ valid: boolean; user?: any }> {
     try {
       // In production, this would validate against the DW platform

@@ -15,7 +15,7 @@ export class UpdateUserDto {
 }
 
 export class CreateInternalUserDto {
-  @ApiProperty({ example: 'mentor@devweekends.com' })
+  @ApiProperty({ example: 'mentor@example.com' })
   @IsEmail()
   email: string;
 

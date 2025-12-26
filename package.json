@@ -1,7 +1,7 @@
 {
   "name": "@dw-time-master/api",
   "version": "1.0.0",
-  "description": "DevWeekends Time Master API",
+  "description": "Time Master API",
   "private": true,
   "scripts": {
     "build": "nest build",
@@ -41,6 +41,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.1",
+    "resend": "^6.6.0",
     "rxjs": "^7.8.1",
     "stripe": "^14.11.0",
     "uuid": "^9.0.0"
@@ -71,13 +72,19 @@
     "typescript": "^5.3.3"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
-    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   }

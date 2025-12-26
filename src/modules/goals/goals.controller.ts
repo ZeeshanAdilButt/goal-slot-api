@@ -21,8 +21,19 @@ export class GoalsController {
   @Get()
   @ApiOperation({ summary: 'Get all goals' })
   @ApiQuery({ name: 'status', enum: GoalStatus, required: false })
-  async findAll(@Request() req: any, @Query('status') status?: GoalStatus) {
-    return this.goalsService.findAll(req.user.sub, status);
+  @ApiQuery({ name: 'category', required: false, description: 'Filter by single category value' })
+  @ApiQuery({ name: 'categories', required: false, description: 'Comma-separated category values to filter by' })
+  @ApiQuery({ name: 'labelIds', required: false, description: 'Comma-separated label IDs to filter by' })
+  async findAll(
+    @Request() req: any,
+    @Query('status') status?: GoalStatus,
+    @Query('category') category?: string,
+    @Query('categories') categories?: string,
+    @Query('labelIds') labelIds?: string,
+  ) {
+    const parsedLabelIds = labelIds ? labelIds.split(',').filter(Boolean) : undefined;
+    const parsedCategories = categories ? categories.split(',').filter(Boolean) : undefined;
+    return this.goalsService.findAll(req.user.sub, { status, category, categories: parsedCategories, labelIds: parsedLabelIds });
   }
 
   @Get('stats')

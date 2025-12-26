@@ -13,6 +13,8 @@ import { SupabaseModule } from './supabase/supabase.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { HealthModule } from './modules/health/health.module';
+import { LabelsModule } from './modules/labels/labels.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -23,6 +25,7 @@ import { HealthModule } from './modules/health/health.module';
     PrismaModule,
     SupabaseModule,
     HealthModule,
+    EmailModule,
     AuthModule,
     UsersModule,
     GoalsModule,
@@ -33,6 +36,7 @@ import { HealthModule } from './modules/health/health.module';
     StripeModule,
     TasksModule,
     CategoriesModule,
+    LabelsModule,
   ],
 })
 export class AppModule {}
