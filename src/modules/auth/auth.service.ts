@@ -263,17 +263,13 @@ export class AuthService {
     }
 
     // Create default categories
-    await Promise.all(
-      defaultCategories.map((cat) =>
-        this.prisma.category.create({
-          data: {
-            ...cat,
-            userId,
-            isDefault: true,
-          },
-        }),
-      ),
-    );
+    await this.prisma.category.createMany({
+      data: defaultCategories.map((cat) => ({
+        ...cat,
+        userId,
+        isDefault: true,
+      })),
+    });
   }
 
   private async seedDefaultLabels(userId: string) {
@@ -300,16 +296,12 @@ export class AuthService {
     }
 
     // Create default labels
-    await Promise.all(
-      defaultLabels.map((label) =>
-        this.prisma.label.create({
-          data: {
-            ...label,
-            userId,
-            isDefault: true,
-          },
-        }),
-      ),
-    );
+    await this.prisma.label.createMany({
+      data: defaultLabels.map((label) => ({
+        ...label,
+        userId,
+        isDefault: true,
+      })),
+    });
   }
 }

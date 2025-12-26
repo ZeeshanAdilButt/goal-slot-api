@@ -149,8 +149,8 @@ export class LabelsService {
       throw new NotFoundException('One or more labels not found');
     }
 
-    // Update order for each label
-    await Promise.all(
+    // Update order for each label using transaction
+    await this.prisma.$transaction(
       labelIds.map((id, index) =>
         this.prisma.label.update({
           where: { id },
@@ -189,17 +189,13 @@ export class LabelsService {
     }
 
     // Create default labels
-    await Promise.all(
-      defaultLabels.map((label) =>
-        this.prisma.label.create({
-          data: {
-            ...label,
-            userId,
-            isDefault: true,
-          },
-        }),
-      ),
-    );
+    await this.prisma.label.createMany({
+      data: defaultLabels.map((label) => ({
+        ...label,
+        userId,
+        isDefault: true,
+      })),
+    });
   }
 
   /**

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { CreateGoalDto, UpdateGoalDto, LabelInput } from './dto/goals.dto';
-import { GoalStatus } from '@prisma/client';
+import { GoalStatus, Prisma } from '@prisma/client';
 
 // Notion-style label colors (soft pastels)
 const LABEL_COLORS = [
@@ -35,18 +35,23 @@ export class GoalsService {
   /**
    * Get or create a label by name for a user
    */
-  private async getOrCreateLabel(userId: string, labelInput: LabelInput): Promise<string> {
+  private async getOrCreateLabel(
+    userId: string,
+    labelInput: LabelInput,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string> {
+    const prisma = tx || this.prisma;
     const { name: labelName, color: providedColor } = labelInput;
     const value = labelName.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
     
     // Check if label exists
-    let label = await this.prisma.label.findFirst({
+    let label = await prisma.label.findFirst({
       where: { userId, value },
     });
     
     if (!label) {
       // Auto-create the label with provided color or random Notion color
-      const maxOrder = await this.prisma.label.findFirst({
+      const maxOrder = await prisma.label.findFirst({
         where: { userId },
         orderBy: { order: 'desc' },
         select: { order: true },
@@ -54,7 +59,7 @@ export class GoalsService {
       
       const color = providedColor || LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
       
-      label = await this.prisma.label.create({
+      label = await prisma.label.create({
         data: {
           name: labelName.trim(),
           value,
@@ -66,7 +71,7 @@ export class GoalsService {
       });
     } else if (providedColor && label.color !== providedColor) {
       // Update color if provided and different
-      label = await this.prisma.label.update({
+      label = await prisma.label.update({
         where: { id: label.id },
         data: { color: providedColor },
       });
@@ -94,17 +99,21 @@ export class GoalsService {
 
     // Assign labels if provided (auto-create if needed)
     if (labels && labels.length > 0) {
-      const labelIds = await Promise.all(
-        labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput))
-      );
-      
-      await Promise.all(
-        labelIds.map((labelId) =>
-          this.prisma.goalLabel.create({
-            data: { goalId: goal.id, labelId },
-          }),
-        ),
-      );
+      // Use transaction to ensure data integrity when creating labels and associations
+      await this.prisma.$transaction(async (tx) => {
+        const labelIds = await Promise.all(
+          labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput, tx))
+        );
+        
+        if (labelIds.length > 0) {
+          await tx.goalLabel.createMany({
+            data: labelIds.map((labelId) => ({
+              goalId: goal.id,
+              labelId,
+            })),
+          });
+        }
+      });
     }
 
     return this.findOne(userId, goal.id);
@@ -197,17 +206,21 @@ export class GoalsService {
       
       // Add new labels (auto-create if needed)
       if (labels.length > 0) {
-        const labelIds = await Promise.all(
-          labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput))
-        );
-        
-        await Promise.all(
-          labelIds.map((labelId) =>
-            this.prisma.goalLabel.create({
-              data: { goalId, labelId },
-            }),
-          ),
-        );
+        // Use transaction to ensure data integrity when creating labels and associations
+        await this.prisma.$transaction(async (tx) => {
+          const labelIds = await Promise.all(
+            labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput, tx))
+          );
+          
+          if (labelIds.length > 0) {
+            await tx.goalLabel.createMany({
+              data: labelIds.map((labelId) => ({
+                goalId,
+                labelId,
+              })),
+            });
+          }
+        });
       }
     }
 

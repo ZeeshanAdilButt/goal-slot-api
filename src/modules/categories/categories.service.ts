@@ -196,19 +196,19 @@ export class CategoriesService {
     }
 
     // Create default categories
-    const created = await Promise.all(
-      defaultCategories.map((cat) =>
-        this.prisma.category.create({
-          data: {
-            ...cat,
-            userId,
-            isDefault: true,
-          },
-        }),
-      ),
-    );
+    await this.prisma.category.createMany({
+      data: defaultCategories.map((cat) => ({
+        ...cat,
+        userId,
+        isDefault: true,
+      })),
+    });
 
-    return created;
+    // Return the created categories
+    return this.prisma.category.findMany({
+      where: { userId, isDefault: true },
+      orderBy: { order: 'asc' },
+    });
   }
 }
 
