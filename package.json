@@ -18,10 +18,12 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "seed": "ts-node prisma/seed.ts",
     "generate-data": "ts-node prisma/generate-data.ts",
-    "update-user-id": "ts-node prisma/update-user-id.ts"
+    "update-user-id": "ts-node prisma/update-user-id.ts",
+    "vercel-build": "npm run build"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",

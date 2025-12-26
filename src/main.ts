@@ -30,6 +30,7 @@ async function bootstrap() {
     .setDescription('API for productivity tracking and goal management')
     .setVersion('1.0')
     .addBearerAuth()
+    .addTag('health', 'Health check endpoints')
     .addTag('auth', 'Authentication endpoints')
     .addTag('users', 'User management')
     .addTag('goals', 'Goals management')
