@@ -1,7 +1,7 @@
 {
-  "name": "@dw-time-master/api",
+  "name": "@goalslot/api",
   "version": "1.0.0",
-  "description": "Time Master API",
+  "description": "GoalSlot API",
   "private": true,
   "scripts": {
     "build": "nest build",

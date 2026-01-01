@@ -11,7 +11,7 @@ async function main() {
   const hashedPassword = await bcrypt.hash(superAdminPassword, 10);
 
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@devweekends.com' },
+    where: { email: 'admin@goalslot.com' },
     update: {
       password: hashedPassword,
       name: 'Admin',
@@ -21,7 +21,7 @@ async function main() {
       unlimitedAccess: true,
     },
     create: {
-      email: 'admin@devweekends.com',
+      email: 'admin@goalslot.com',
       password: hashedPassword,
       name: 'Admin',
       role: UserRole.SUPER_ADMIN,
@@ -35,10 +35,10 @@ async function main() {
 
   // Create sample internal user
   const internalUser = await prisma.user.upsert({
-    where: { email: 'mentor@devweekends.com' },
+    where: { email: 'mentor@goalslot.com' },
     update: {},
     create: {
-      email: 'mentor@devweekends.com',
+      email: 'mentor@goalslot.com',
       password: await bcrypt.hash('Mentor2025!', 10),
       name: 'Mentor',
       role: UserRole.USER,

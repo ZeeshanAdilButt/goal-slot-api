@@ -1,4 +1,4 @@
-// Time Master - Database Schema
+// GoalSlot - Database Schema
 generator client {
   provider = "prisma-client-js"
 }

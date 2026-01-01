@@ -5,7 +5,7 @@ import { Resend } from 'resend';
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private resend: Resend;
-  private fromEmail = 'DW Time Master <onboarding@resend.dev>';
+  private fromEmail = 'GoalSlot <onboarding@resend.dev>';
   private appUrl = process.env.APP_URL || 'http://localhost:3000';
 
   constructor() {
@@ -58,14 +58,14 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>📊 DW Time Master</h1>
+              <h1>📊 GoalSlot</h1>
             </div>
             <div class="content">
               <h2>You've Been Invited to View Focus Reports!</h2>
               
               <p>Hi there!</p>
               
-              <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to view their focus time reports and productivity data on DW Time Master.</p>
+              <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to view their focus time reports and productivity data on GoalSlot.</p>
               
               <p>Click the button below to access their shared reports:</p>
               
@@ -87,7 +87,7 @@ export class EmailService {
               <p>Happy focusing! 🎯</p>
             </div>
             <div class="footer">
-              <p>This email was sent by DW Time Master. If you didn't expect this invitation, you can safely ignore it.</p>
+              <p>This email was sent by GoalSlot. If you didn't expect this invitation, you can safely ignore it.</p>
             </div>
           </div>
         </body>
@@ -99,7 +99,7 @@ You've Been Invited to View Focus Reports!
 
 Hi there!
 
-${inviterName} (${inviterEmail}) has invited you to view their focus time reports and productivity data on DW Time Master.
+${inviterName} (${inviterEmail}) has invited you to view their focus time reports and productivity data on GoalSlot.
 
 Click the link below to access their shared reports:
 ${viewLink}
@@ -113,7 +113,7 @@ ${!isExistingUser ? '- Sign up for a free account to track your own focus time a
 If you didn't expect this invitation, you can safely ignore it.
 
 Happy focusing! 🎯
-- DW Time Master
+- GoalSlot
     `;
 
     try {
@@ -206,7 +206,7 @@ Happy focusing! 🎯
         <body>
           <div class="container">
             <div class="header">
-              <h1>🎯 DW Time Master</h1>
+              <h1>🎯 GoalSlot</h1>
               <p>Master Your Focus. Own Your Time.</p>
             </div>
             <div class="content">
@@ -214,7 +214,7 @@ Happy focusing! 🎯
               
               <h2 style="margin-top: 20px;">Hey ${firstName}!</h2>
               
-              <p>Welcome to <strong>DW Time Master</strong> — your new companion for deep focus and intentional time management. We're excited to have you on this journey toward mastering your productivity!</p>
+              <p>Welcome to <strong>GoalSlot</strong> — your new companion for deep focus and intentional time management. We're excited to have you on this journey toward mastering your productivity!</p>
               
               <div class="feature-grid">
                 <div class="feature">
@@ -252,10 +252,10 @@ Happy focusing! 🎯
               <p>Remember: Consistency beats intensity. Small daily focus sessions add up to massive results over time. 🚀</p>
               
               <p>Happy focusing!</p>
-              <p><strong>The DW Time Master Team</strong></p>
+              <p><strong>The GoalSlot Team</strong></p>
             </div>
             <div class="footer">
-              <p>You're receiving this because you signed up for DW Time Master.</p>
+              <p>You're receiving this because you signed up for GoalSlot.</p>
               <p>Questions? Just reply to this email — we're here to help!</p>
             </div>
           </div>
@@ -264,11 +264,11 @@ Happy focusing! 🎯
     `;
 
     const text = `
-Welcome to DW Time Master, ${firstName}! 🎯
+Welcome to GoalSlot, ${firstName}! 🎯
 
 We're excited to have you on this journey toward mastering your productivity!
 
-Here's what you can do with DW Time Master:
+Here's what you can do with GoalSlot:
 
 ⏱️ Track Focus Time - Log your focus sessions and see exactly where your time goes
 🎯 Set Goals - Create weekly goals and track your progress toward mastery
@@ -286,14 +286,14 @@ Start tracking: ${dashboardLink}
 Remember: Consistency beats intensity. Small daily focus sessions add up to massive results over time. 🚀
 
 Happy focusing!
-The DW Time Master Team
+The GoalSlot Team
     `;
 
     try {
       const result = await this.resend.emails.send({
         from: this.fromEmail,
         to: toEmail,
-        subject: `Welcome to DW Time Master, ${firstName}! 🎯`,
+        subject: `Welcome to GoalSlot, ${firstName}! 🎯`,
         html,
         text,
       });
@@ -329,7 +329,7 @@ The DW Time Master Team
         <body>
           <div class="container">
             <div class="header">
-              <h1>📊 DW Time Master</h1>
+              <h1>📊 GoalSlot</h1>
             </div>
             <div class="content">
               <span class="success-badge">✓ Invitation Accepted</span>
