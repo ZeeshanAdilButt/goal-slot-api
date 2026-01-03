@@ -3,6 +3,11 @@ FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
+# Install system deps for Prisma (OpenSSL 3) and TLS
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Update npm and clear cache
 RUN npm install -g npm@latest && npm cache clean --force
 
@@ -26,6 +31,11 @@ RUN npm run build
 FROM node:24-bookworm-slim AS production
 
 WORKDIR /app
+
+# Install system deps for Prisma (OpenSSL 3) and TLS
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 # Update npm and clear cache
 RUN npm install -g npm@latest && npm cache clean --force
