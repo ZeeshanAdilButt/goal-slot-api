@@ -16,12 +16,14 @@ import { HealthModule } from './modules/health/health.module';
 import { LabelsModule } from './modules/labels/labels.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { EmailModule } from './modules/email/email.module';
+import { envValidationSchema } from './shared/configuration/env.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      validationSchema: envValidationSchema,
     }),
     PrismaModule,
     SupabaseModule,
