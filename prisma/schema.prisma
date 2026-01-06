@@ -202,9 +202,9 @@ model SharedAccess {
   ownerId       String
   owner         User      @relation("SharedBy", fields: [ownerId], references: [id], onDelete: Cascade)
   
-  // User who received access
-  sharedWithId  String
-  sharedWith    User      @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  // User who received access (null for pending invites to non-existent users)
+  sharedWithId  String?
+  sharedWith    User?     @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
   
   // Invitation email (for pending invites)
   inviteEmail   String?
@@ -216,7 +216,10 @@ model SharedAccess {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
-  @@unique([ownerId, sharedWithId])
+  // Unique constraint: one accepted share per owner-sharedWithId pair
+  // Note: Multiple pending invites with same ownerId+inviteEmail are prevented by application logic
+  @@unique([ownerId, sharedWithId], name: "unique_owner_shared_with")
+  @@unique([ownerId, inviteEmail], name: "unique_owner_invite_email")
   @@index([ownerId])
   @@index([sharedWithId])
   @@index([inviteEmail])
