@@ -66,6 +66,7 @@ model User {
   notes          Note[]
   sharedWithMe   SharedAccess[] @relation("SharedWith")
   sharedByMe     SharedAccess[] @relation("SharedBy")
+  feedbacks      Feedback[]
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -211,6 +212,9 @@ model SharedAccess {
   inviteToken   String?   @unique
   inviteExpires DateTime?
   
+  // Access level
+  accessLevel   String     @default("VIEW") // "VIEW" or "EDIT"
+  
   isAccepted    Boolean   @default(false)
   
   createdAt     DateTime  @default(now())
@@ -317,6 +321,27 @@ model Note {
   @@index([userId])
   @@index([parentId])
   @@index([isFavorite])
+}
+
+// User feedback
+model Feedback {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emoji       Int?      // 0 = love, 1 = okay, 2 = not great, 3 = hate
+  text        String?   // Feedback text content
+  
+  isArchived  Boolean   @default(false)
+  archivedAt  DateTime?
+  archivedBy  String?   // Admin user ID who archived it
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([isArchived])
+  @@index([createdAt])
 }
 
 // User roles and types

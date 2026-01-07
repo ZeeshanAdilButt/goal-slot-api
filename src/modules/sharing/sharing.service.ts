@@ -53,6 +53,7 @@ export class SharingService {
         inviteEmail: invitedUser ? null : dto.email,
         inviteToken: invitedUser ? null : inviteToken,
         inviteExpires: invitedUser ? null : inviteExpires,
+        accessLevel: dto.accessLevel || 'VIEW',
         isAccepted: !!invitedUser, // Auto-accept if user exists
       },
       include: {
