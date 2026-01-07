@@ -4,9 +4,8 @@
   "description": "Time Master API",
   "private": true,
   "scripts": {
-    "build": "nest build",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "start": "nest start",
+    "build": "prisma generate && nest build",
+    "vercel-build": "npm run build",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main",
@@ -22,8 +21,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "seed": "ts-node prisma/seed.ts",
     "generate-data": "ts-node prisma/generate-data.ts",
-    "update-user-id": "ts-node prisma/update-user-id.ts",
-    "vercel-build": "npm run build"
+    "update-user-id": "ts-node prisma/update-user-id.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
