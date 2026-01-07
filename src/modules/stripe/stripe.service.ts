@@ -13,11 +13,11 @@ export class StripeService {
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
-    const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
-    this.isMock = !secretKey || secretKey.startsWith('sk_test_mock');
+    const secretKey = this.configService.getOrThrow<string>('STRIPE_SECRET_KEY');
+    this.isMock = secretKey.startsWith('sk_test_mock');
 
     if (!this.isMock) {
-      this.stripe = new Stripe(secretKey!, { apiVersion: '2023-10-16' });
+      this.stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' });
     }
   }
 
@@ -52,12 +52,12 @@ export class StripeService {
       payment_method_types: ['card'],
       line_items: [
         {
-          price: this.configService.get<string>('STRIPE_PRICE_ID'),
+          price: this.configService.getOrThrow<string>('STRIPE_PRICE_ID'),
           quantity: 1,
         },
       ],
-      success_url: `${this.configService.get<string>('CORS_ORIGIN')}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${this.configService.get<string>('CORS_ORIGIN')}/billing/cancel`,
+      success_url: `${this.configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000'}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${this.configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000'}/billing/cancel`,
       metadata: { userId: user.id },
     });
 
@@ -76,7 +76,7 @@ export class StripeService {
 
     const session = await this.stripe.billingPortal.sessions.create({
       customer: user.stripeCustomerId,
-      return_url: `${this.configService.get<string>('CORS_ORIGIN')}/settings`,
+      return_url: `${this.configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000'}/settings`,
     });
 
     return { url: session.url };
@@ -87,11 +87,11 @@ export class StripeService {
       return { received: true, mock: true };
     }
 
-    const webhookSecret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = this.configService.getOrThrow<string>('STRIPE_WEBHOOK_SECRET');
     let event: Stripe.Event;
 
     try {
-      event = this.stripe.webhooks.constructEvent(payload, signature, webhookSecret!);
+      event = this.stripe.webhooks.constructEvent(payload, signature, webhookSecret);
     } catch (err) {
       throw new BadRequestException(`Webhook Error: ${err.message}`);
     }

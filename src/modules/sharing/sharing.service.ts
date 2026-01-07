@@ -49,10 +49,11 @@ export class SharingService {
     const sharedAccess = await this.prisma.sharedAccess.create({
       data: {
         ownerId,
-        sharedWithId: invitedUser?.id || ownerId, // Temp: use owner if user doesn't exist yet
+        sharedWithId: invitedUser?.id || null, // Temp: use owner if user doesn't exist yet
         inviteEmail: invitedUser ? null : dto.email,
         inviteToken: invitedUser ? null : inviteToken,
         inviteExpires: invitedUser ? null : inviteExpires,
+        accessLevel: dto.accessLevel || 'VIEW',
         isAccepted: !!invitedUser, // Auto-accept if user exists
       },
       include: {
@@ -62,20 +63,23 @@ export class SharingService {
       },
     });
 
-    // Send email invitation
-    const emailResult = await this.emailService.sendShareInvitation({
-      toEmail: dto.email,
-      inviterName: owner.name,
-      inviterEmail: owner.email,
-      inviteToken: invitedUser ? sharedAccess.id : inviteToken, // Use share ID for existing users
-      isExistingUser: !!invitedUser,
-    });
+    // Send email invitation (don't fail the share if email fails)
+    let emailSent = false;
+    try {
+      await this.emailService.sendShareInvitation({
+        toEmail: dto.email,
+        inviterName: owner.name,
+        inviterEmail: owner.email,
+        inviteToken: invitedUser ? sharedAccess.id : inviteToken, // Use share ID for existing users
+        isExistingUser: !!invitedUser,
+      });
+      emailSent = true;
+    } catch (error) {}
 
     return {
       ...sharedAccess,
       inviteLink: invitedUser ? null : `/share/accept?token=${inviteToken}`,
-      emailSent: emailResult.success,
-      emailError: emailResult.success ? null : emailResult.error,
+      emailSent,
     };
   }
 

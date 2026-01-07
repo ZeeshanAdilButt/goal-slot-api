@@ -1,15 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private resend: Resend;
-  private fromEmail = 'DW Time Master <onboarding@resend.dev>';
-  private appUrl = process.env.APP_URL || 'http://localhost:3000';
+  private onboardingEmail = 'Goal Slot <no-reply@mail.goalslot.io>';
+  private notificationEmail = 'Goal Slot <notification@mail.goalslot.io>';
+  private appUrl = '';
 
-  constructor() {
-    this.resend = new Resend(process.env.RESEND_API_KEY || 're_d9RuCzwu_4pwg4XzPY4hz3qCcgDgR8swx');
+  constructor(private readonly configService: ConfigService) {
+    this.resend = new Resend(this.configService.getOrThrow<string>('RESEND_API_KEY'));
+    this.appUrl = this.configService.getOrThrow<string>('APP_URL');
   }
 
   async sendShareInvitation(params: {
@@ -58,14 +61,14 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>📊 DW Time Master</h1>
+              <h1>Goal Slot</h1>
             </div>
             <div class="content">
               <h2>You've Been Invited to View Focus Reports!</h2>
               
               <p>Hi there!</p>
               
-              <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to view their focus time reports and productivity data on DW Time Master.</p>
+              <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to view their focus time reports and productivity data on Goal Slot.</p>
               
               <p>Click the button below to access their shared reports:</p>
               
@@ -87,7 +90,7 @@ export class EmailService {
               <p>Happy focusing! 🎯</p>
             </div>
             <div class="footer">
-              <p>This email was sent by DW Time Master. If you didn't expect this invitation, you can safely ignore it.</p>
+              <p>This email was sent by Goal Slot. If you didn't expect this invitation, you can safely ignore it.</p>
             </div>
           </div>
         </body>
@@ -99,7 +102,7 @@ You've Been Invited to View Focus Reports!
 
 Hi there!
 
-${inviterName} (${inviterEmail}) has invited you to view their focus time reports and productivity data on DW Time Master.
+${inviterName} (${inviterEmail}) has invited you to view their focus time reports and productivity data on Goal Slot.
 
 Click the link below to access their shared reports:
 ${viewLink}
@@ -113,31 +116,28 @@ ${!isExistingUser ? '- Sign up for a free account to track your own focus time a
 If you didn't expect this invitation, you can safely ignore it.
 
 Happy focusing! 🎯
-- DW Time Master
+- Goal Slot
     `;
 
-    try {
-      this.logger.log(`Attempting to send share invitation email to ${toEmail} from ${this.fromEmail}`);
-      const result = await this.resend.emails.send({
-        from: this.fromEmail,
-        to: toEmail,
-        subject: `${inviterName} shared their focus reports with you`,
-        html,
-        text,
-      });
-      
-      if (result.error) {
-        this.logger.error(`Resend API error for ${toEmail}:`, result.error);
-        return { success: false, error: result.error.message };
-      }
-      
-      this.logger.log(`Share invitation email sent to ${toEmail}, id: ${result.data?.id}`);
-      return { success: true, id: result.data?.id };
-    } catch (error) {
-      this.logger.error(`Failed to send share invitation email to ${toEmail}:`, error);
-      // Don't throw - we don't want to fail the share if email fails
-      return { success: false, error: error.message };
+    this.logger.log(`Attempting to send share invitation email to ${toEmail} from ${this.notificationEmail}`);
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: `${inviterName} shared their focus reports with you`,
+      html,
+      text,
+    });
+    
+    if (result.error) {
+      this.logger.error(`Resend API error for ${toEmail}:`, result.error);
+      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
+      throw new InternalServerErrorException(
+        `Failed to send share invitation email: ${result.error.message}`,
+      );
     }
+    
+    this.logger.log(`Share invitation email sent to ${toEmail}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };
   }
 
   async sendWelcomeEmail(params: {
@@ -206,7 +206,7 @@ Happy focusing! 🎯
         <body>
           <div class="container">
             <div class="header">
-              <h1>🎯 DW Time Master</h1>
+              <h1>🎯 Goal Slot</h1>
               <p>Master Your Focus. Own Your Time.</p>
             </div>
             <div class="content">
@@ -214,7 +214,7 @@ Happy focusing! 🎯
               
               <h2 style="margin-top: 20px;">Hey ${firstName}!</h2>
               
-              <p>Welcome to <strong>DW Time Master</strong> — your new companion for deep focus and intentional time management. We're excited to have you on this journey toward mastering your productivity!</p>
+              <p>Welcome to <strong>Goal Slot</strong> — your new companion for deep focus and intentional time management. We're excited to have you on this journey toward mastering your productivity!</p>
               
               <div class="feature-grid">
                 <div class="feature">
@@ -252,11 +252,10 @@ Happy focusing! 🎯
               <p>Remember: Consistency beats intensity. Small daily focus sessions add up to massive results over time. 🚀</p>
               
               <p>Happy focusing!</p>
-              <p><strong>The DW Time Master Team</strong></p>
+              <p><strong>The Goal Slot Team</strong></p>
             </div>
             <div class="footer">
-              <p>You're receiving this because you signed up for DW Time Master.</p>
-              <p>Questions? Just reply to this email — we're here to help!</p>
+              <p>You're receiving this because you signed up for Goal Slot.</p>
             </div>
           </div>
         </body>
@@ -264,11 +263,11 @@ Happy focusing! 🎯
     `;
 
     const text = `
-Welcome to DW Time Master, ${firstName}! 🎯
+Welcome to Goal Slot, ${firstName}! 🎯
 
 We're excited to have you on this journey toward mastering your productivity!
 
-Here's what you can do with DW Time Master:
+Here's what you can do with Goal Slot:
 
 ⏱️ Track Focus Time - Log your focus sessions and see exactly where your time goes
 🎯 Set Goals - Create weekly goals and track your progress toward mastery
@@ -286,24 +285,28 @@ Start tracking: ${dashboardLink}
 Remember: Consistency beats intensity. Small daily focus sessions add up to massive results over time. 🚀
 
 Happy focusing!
-The DW Time Master Team
+The Goal Slot Team
     `;
 
-    try {
-      const result = await this.resend.emails.send({
-        from: this.fromEmail,
-        to: toEmail,
-        subject: `Welcome to DW Time Master, ${firstName}! 🎯`,
-        html,
-        text,
-      });
-      
-      this.logger.log(`Welcome email sent to ${toEmail}, id: ${result.data?.id}`);
-      return { success: true, id: result.data?.id };
-    } catch (error) {
-      this.logger.error(`Failed to send welcome email to ${toEmail}:`, error);
-      return { success: false, error: error.message };
+    this.logger.log(`Attempting to send welcome email to ${toEmail} from ${this.onboardingEmail}`);
+    const result = await this.resend.emails.send({
+      from: this.onboardingEmail,
+      to: toEmail,
+      subject: `Welcome to Goal Slot, ${firstName}! 🎯`,
+      html,
+      text,
+    });
+    
+    if (result.error) {
+      this.logger.error(`Resend API error for welcome email to ${toEmail}:`, result.error);
+      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
+      throw new InternalServerErrorException(
+        `Failed to send welcome email: ${result.error.message}`,
+      );
     }
+    
+    this.logger.log(`Welcome email sent to ${toEmail}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };  
   }
 
   async sendShareAcceptedNotification(params: {
@@ -329,7 +332,7 @@ The DW Time Master Team
         <body>
           <div class="container">
             <div class="header">
-              <h1>📊 DW Time Master</h1>
+              <h1>Goal Slot</h1>
             </div>
             <div class="content">
               <span class="success-badge">✓ Invitation Accepted</span>
@@ -352,17 +355,22 @@ The DW Time Master Team
       </html>
     `;
 
-    try {
-      await this.resend.emails.send({
-        from: this.fromEmail,
-        to: toEmail,
-        subject: `${accepterName} accepted your share invitation`,
-        html,
-      });
-      
-      this.logger.log(`Share accepted notification sent to ${toEmail}`);
-    } catch (error) {
-      this.logger.error(`Failed to send share accepted notification to ${toEmail}:`, error);
+    this.logger.log(`Attempting to send share accepted notification to ${toEmail} from ${this.notificationEmail}`);
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: `${accepterName} accepted your share invitation`,
+      html,
+    });
+    
+    if (result.error) {
+      this.logger.error(`Resend API error for share accepted notification to ${toEmail}:`, result.error);
+      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
+      throw new InternalServerErrorException(
+        `Failed to send share accepted notification: ${result.error.message}`,
+      );
     }
+    
+    this.logger.log(`Share accepted notification sent to ${toEmail}, id: ${result.data?.id}`);
   }
 }

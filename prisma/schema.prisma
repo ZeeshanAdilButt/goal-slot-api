@@ -66,6 +66,7 @@ model User {
   notes          Note[]
   sharedWithMe   SharedAccess[] @relation("SharedWith")
   sharedByMe     SharedAccess[] @relation("SharedBy")
+  feedbacks      Feedback[]
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -202,21 +203,27 @@ model SharedAccess {
   ownerId       String
   owner         User      @relation("SharedBy", fields: [ownerId], references: [id], onDelete: Cascade)
   
-  // User who received access
-  sharedWithId  String
-  sharedWith    User      @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  // User who received access (null for pending invites to non-existent users)
+  sharedWithId  String?
+  sharedWith    User?     @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
   
   // Invitation email (for pending invites)
   inviteEmail   String?
   inviteToken   String?   @unique
   inviteExpires DateTime?
   
+  // Access level
+  accessLevel   String     @default("VIEW") // "VIEW" or "EDIT"
+  
   isAccepted    Boolean   @default(false)
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
-  @@unique([ownerId, sharedWithId])
+  // Unique constraint: one accepted share per owner-sharedWithId pair
+  // Note: Multiple pending invites with same ownerId+inviteEmail are prevented by application logic
+  @@unique([ownerId, sharedWithId], name: "unique_owner_shared_with")
+  @@unique([ownerId, inviteEmail], name: "unique_owner_invite_email")
   @@index([ownerId])
   @@index([sharedWithId])
   @@index([inviteEmail])
@@ -314,6 +321,27 @@ model Note {
   @@index([userId])
   @@index([parentId])
   @@index([isFavorite])
+}
+
+// User feedback
+model Feedback {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emoji       Int?      // 0 = love, 1 = okay, 2 = not great, 3 = hate
+  text        String?   // Feedback text content
+  
+  isArchived  Boolean   @default(false)
+  archivedAt  DateTime?
+  archivedBy  String?   // Admin user ID who archived it
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([isArchived])
+  @@index([createdAt])
 }
 
 // User roles and types
