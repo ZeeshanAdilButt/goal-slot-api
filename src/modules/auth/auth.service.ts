@@ -18,6 +18,11 @@ export const PLAN_LIMITS = {
     maxSchedules: 5,
     maxTasksPerDay: 3,
   },
+  BASIC: {
+    maxGoals: 10,
+    maxSchedules: Infinity,
+    maxTasksPerDay: Infinity,
+  },
   PRO: {
     maxGoals: Infinity,
     maxSchedules: Infinity,
@@ -516,8 +521,16 @@ export class AuthService {
     }
 
     // Check subscription status for external users
-    if (user.plan === PlanType.PRO && user.subscriptionStatus === 'active') {
+    // Note: Admin assigned plans (adminAssignedPlan) are synced to user.plan, 
+    // so we just check user.plan. For active Stripe subs, user.plan is also updated via webhook.
+    
+    // Allow access if active subscription OR if admin assigned (which implies active/valid)
+    if (user.plan === PlanType.PRO && (user.subscriptionStatus === 'active' || user.adminAssignedPlan)) {
       return PLAN_LIMITS.PRO;
+    }
+
+    if (user.plan === PlanType.BASIC && (user.subscriptionStatus === 'active' || user.adminAssignedPlan)) {
+      return PLAN_LIMITS.BASIC;
     }
 
     return PLAN_LIMITS.FREE;

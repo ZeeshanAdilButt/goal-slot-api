@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, MinLength, IsEnum, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEmail, MinLength, IsEnum, IsBoolean, IsArray, ArrayMinSize } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, PlanType } from '@prisma/client';
 
@@ -54,6 +54,24 @@ export class AdminAssignPlanDto {
   plan: PlanType;
 
   @ApiPropertyOptional({ example: 'Early adopter reward', description: 'Note about why the plan was assigned' })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+// Admin: Bulk Assign Plan to Users
+export class AdminBulkAssignPlanDto {
+  @ApiProperty({ type: [String], description: 'List of user IDs to update' })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  userIds: string[];
+
+  @ApiProperty({ enum: PlanType, example: PlanType.PRO, description: 'The plan to assign to the users' })
+  @IsEnum(PlanType)
+  plan: PlanType;
+
+  @ApiPropertyOptional({ example: 'Bulk update', description: 'Note about why the plan was assigned' })
   @IsOptional()
   @IsString()
   note?: string;
