@@ -36,7 +36,7 @@ export class ScheduleService {
       orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
       include: {
         goal: {
-          select: { id: true, title: true, color: true },
+          select: { id: true, title: true, color: true, category: true },
         },
         tasks: {
           select: { id: true, title: true, status: true },

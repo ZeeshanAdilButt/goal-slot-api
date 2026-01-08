@@ -19,7 +19,7 @@ export const PLAN_LIMITS = {
     maxTasksPerDay: 3,
   },
   BASIC: {
-    maxGoals: 10,
+    maxGoals: Infinity,
     maxSchedules: Infinity,
     maxTasksPerDay: Infinity,
   },
@@ -351,7 +351,11 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     try {
-      // Create user
+      // Calculate 60 days from now
+      const sixtyDaysFromNow = new Date();
+      sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60);
+
+      // Create user with default 60-day Basic trial
       const user = await this.prisma.user.create({
         data: {
           email: dto.email,
@@ -359,7 +363,9 @@ export class AuthService {
           name: dto.name,
           role: UserRole.USER,
           userType: UserType.EXTERNAL,
-          plan: PlanType.FREE,
+          plan: PlanType.BASIC,
+          subscriptionStatus: 'active',
+          subscriptionEndDate: sixtyDaysFromNow,
         },
       });
 
@@ -524,12 +530,20 @@ export class AuthService {
     // Note: Admin assigned plans (adminAssignedPlan) are synced to user.plan, 
     // so we just check user.plan. For active Stripe subs, user.plan is also updated via webhook.
     
+    // Check if subscription is valid (Stripe managed or manual duration)
+    const isStripeActive = user.stripeSubscriptionId && user.subscriptionStatus === 'active';
+    // For manual subscriptions (no stripe ID), check date validity
+    const isManualActive = !user.stripeSubscriptionId && user.subscriptionStatus === 'active' && 
+      (!user.subscriptionEndDate || new Date(user.subscriptionEndDate) > new Date());
+      
+    const isValidSubscription = isStripeActive || isManualActive || user.adminAssignedPlan;
+    
     // Allow access if active subscription OR if admin assigned (which implies active/valid)
-    if (user.plan === PlanType.PRO && (user.subscriptionStatus === 'active' || user.adminAssignedPlan)) {
+    if (user.plan === PlanType.PRO && isValidSubscription) {
       return PLAN_LIMITS.PRO;
     }
 
-    if (user.plan === PlanType.BASIC && (user.subscriptionStatus === 'active' || user.adminAssignedPlan)) {
+    if (user.plan === PlanType.BASIC && isValidSubscription) {
       return PLAN_LIMITS.BASIC;
     }
 
