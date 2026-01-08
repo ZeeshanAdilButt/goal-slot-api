@@ -19,7 +19,11 @@ export class SharingController {
 
   @Post('accept')
   @ApiOperation({ summary: 'Accept a share invitation' })
+  @ApiQuery({ name: 'token', required: true, description: 'Invitation token' })
   async acceptInvitation(@Request() req: any, @Query('token') token: string) {
+    if (!token) {
+      throw new Error('Token is required');
+    }
     return this.sharingService.acceptInvitation(req.user.sub, token);
   }
 
