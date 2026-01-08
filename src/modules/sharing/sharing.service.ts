@@ -49,12 +49,12 @@ export class SharingService {
     const sharedAccess = await this.prisma.sharedAccess.create({
       data: {
         ownerId,
-        sharedWithId: invitedUser?.id || null, // Temp: use owner if user doesn't exist yet
-        inviteEmail: invitedUser ? null : dto.email,
-        inviteToken: invitedUser ? null : inviteToken,
-        inviteExpires: invitedUser ? null : inviteExpires,
+        sharedWithId: invitedUser?.id || null, // Set if user exists, so we know who the invite is for
+        inviteEmail: dto.email, // Always set invite email for both existing and non-existing users
+        inviteToken: inviteToken, // Always set invite token for both existing and non-existing users
+        inviteExpires: inviteExpires, // Always set expiry for both existing and non-existing users
         accessLevel: dto.accessLevel || 'VIEW',
-        isAccepted: !!invitedUser, // Auto-accept if user exists
+        isAccepted: false, // Always require explicit acceptance, even for existing users
       },
       include: {
         sharedWith: {
@@ -70,7 +70,7 @@ export class SharingService {
         toEmail: dto.email,
         inviterName: owner.name,
         inviterEmail: owner.email,
-        inviteToken: invitedUser ? sharedAccess.id : inviteToken, // Use share ID for existing users
+        inviteToken: inviteToken, // Always use invite token for both existing and non-existing users
         isExistingUser: !!invitedUser,
       });
       emailSent = true;
@@ -78,7 +78,7 @@ export class SharingService {
 
     return {
       ...sharedAccess,
-      inviteLink: invitedUser ? null : `/share/accept?token=${inviteToken}`,
+      inviteLink: `/share/accept?token=${inviteToken}`, // Always return invite link for both existing and non-existing users
       emailSent,
     };
   }
@@ -96,8 +96,23 @@ export class SharingService {
       throw new ForbiddenException('Invitation has expired');
     }
 
+    if (invitation.isAccepted) {
+      throw new ConflictException('This invitation has already been accepted');
+    }
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.email !== invitation.inviteEmail) {
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Check if the invitation is for this user:
+    // 1. If sharedWithId is set, it must match the userId
+    // 2. If inviteEmail is set, it must match the user's email
+    const isForThisUser =
+      (invitation.sharedWithId && invitation.sharedWithId === userId) ||
+      (invitation.inviteEmail && invitation.inviteEmail.toLowerCase() === user.email.toLowerCase());
+
+    if (!isForThisUser) {
       throw new ForbiddenException('This invitation is not for you');
     }
 
@@ -231,25 +246,30 @@ export class SharingService {
   }
 
   async acceptInvite(userId: string, inviteId: string) {
+    // Get user info first to verify email
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
     const invite = await this.prisma.sharedAccess.findFirst({
       where: {
         id: inviteId,
+        isAccepted: false, // Must not be already accepted
         OR: [
           { sharedWithId: userId },
-          { inviteEmail: { not: null } },
+          { inviteEmail: user.email }, // Verify invite email matches user's email
         ],
       },
     });
 
     if (!invite) {
-      throw new NotFoundException('Invite not found');
+      throw new NotFoundException('Invite not found or already accepted');
     }
-
-    // Get user info for notification
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true },
-    });
 
     const updatedShare = await this.prisma.sharedAccess.update({
       where: { id: inviteId },
@@ -415,6 +435,8 @@ export class SharingService {
       createdAt: share.createdAt,
       expiresAt: share.inviteExpires,
       accessType: 'VIEW_ONLY',
+      isAccepted: share.isAccepted,
+      inviteEmail: share.inviteEmail,
     };
   }
 

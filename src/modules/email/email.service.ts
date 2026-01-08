@@ -140,6 +140,123 @@ Happy focusing! 🎯
     return { success: true, id: result.data?.id };
   }
 
+  async sendOTPEmail(params: {
+    toEmail: string;
+    otp: string;
+    purpose: 'signup' | 'forgot-password';
+  }) {
+    const { toEmail, otp, purpose } = params;
+
+    const purposeText = purpose === 'signup' ? 'Email Verification' : 'Password Reset';
+    const purposeDescription = purpose === 'signup' 
+      ? 'to complete your registration' 
+      : 'to reset your password';
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 0; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #FFD700; padding: 20px; border: 3px solid #1a1a1a; margin-bottom: 20px; text-align: center; }
+            .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+            .content { background: #fff; padding: 30px; border: 3px solid #1a1a1a; }
+            .otp-box { 
+              background: #FFD700; 
+              border: 3px solid #1a1a1a; 
+              padding: 25px; 
+              text-align: center; 
+              margin: 25px 0;
+            }
+            .otp-code { 
+              font-size: 36px; 
+              font-weight: bold; 
+              letter-spacing: 8px; 
+              color: #1a1a1a;
+              font-family: monospace;
+            }
+            .security-note { 
+              background: #f0f0f0; 
+              padding: 15px; 
+              border: 2px solid #1a1a1a; 
+              margin: 20px 0;
+              font-size: 14px;
+            }
+            .footer { margin-top: 20px; font-size: 12px; color: #666; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎯 Goal Slot</h1>
+            </div>
+            <div class="content">
+              <h2>${purposeText}</h2>
+              
+              <p>Your verification code ${purposeDescription} is:</p>
+              
+              <div class="otp-box">
+                <div class="otp-code">${otp}</div>
+              </div>
+              
+              <div class="security-note">
+                <strong>🔒 Security Information:</strong>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                  <li>This code expires in <strong>5 minutes</strong></li>
+                  <li>Do not share this code with anyone</li>
+                  <li>If you didn't request this code, you can safely ignore this email</li>
+                  <li>This code can only be used once</li>
+                </ul>
+              </div>
+              
+              <p>Having trouble? Contact us at Goal Slot for support.</p>
+            </div>
+            <div class="footer">
+              <p>This email was sent by Goal Slot. If you didn't request this verification code, please ignore this email.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const text = `
+Goal Slot - ${purposeText}
+
+Your verification code ${purposeDescription} is:
+
+${otp}
+
+🔒 Security Information:
+- This code expires in 5 minutes
+- Do not share this code with anyone
+- If you didn't request this code, you can safely ignore this email
+- This code can only be used once
+
+Having trouble? Contact us at Goal Slot for support.
+    `;
+
+    this.logger.log(`Attempting to send OTP email (${purpose}) to ${toEmail} from ${this.onboardingEmail}`);
+    const result = await this.resend.emails.send({
+      from: this.onboardingEmail,
+      to: toEmail,
+      subject: `Your Goal Slot verification code: ${otp}`,
+      html,
+      text,
+    });
+    
+    if (result.error) {
+      this.logger.error(`Resend API error for OTP email to ${toEmail}:`, result.error);
+      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
+      throw new InternalServerErrorException(
+        `Failed to send OTP email: ${result.error.message}`,
+      );
+    }
+    
+    this.logger.log(`OTP email sent to ${toEmail}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };
+  }
+
   async sendWelcomeEmail(params: {
     toEmail: string;
     userName: string;

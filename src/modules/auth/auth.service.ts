@@ -1,12 +1,14 @@
-import { Injectable, UnauthorizedException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { EmailService } from '../email/email.service';
-import { RegisterDto, LoginDto, SSOLoginDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, OTPPurpose, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
 
 // Plan limits
@@ -23,6 +25,13 @@ export const PLAN_LIMITS = {
   },
 };
 
+// OTP constants
+const OTP_EXPIRY = 300; // 5 minutes in seconds
+const OTP_RESEND_COOLDOWN = 60; // 60 seconds
+const MAX_OTP_REQUESTS_PER_HOUR = 5;
+const MAX_OTP_VERIFICATION_ATTEMPTS = 5; // Max failed attempts before lockout
+const OTP_VERIFICATION_LOCKOUT_DURATION = 900000; // 15 minutes in milliseconds
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -32,14 +41,303 @@ export class AuthService {
     private supabaseService: SupabaseService,
     private usersService: UsersService,
     private emailService: EmailService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
+  // OTP Helper Methods
+  private generateOTP(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private getRateLimitKey(email: string, purpose: OTPPurpose): string {
+    return `otp:rate:${email}:${purpose}`;
+  }
+
+  private getOTPKey(email: string, purpose: OTPPurpose): string {
+    return `otp:${email}:${purpose}`;
+  }
+
+  private getResendCooldownKey(email: string, purpose: OTPPurpose): string {
+    return `otp:cooldown:${email}:${purpose}`;
+  }
+
+  private async checkRateLimit(email: string, purpose: OTPPurpose): Promise<void> {
+    const key = this.getRateLimitKey(email, purpose);
+    const count = await this.cacheManager.get<number>(key) || 0;
+    
+    if (count >= MAX_OTP_REQUESTS_PER_HOUR) {
+      throw new BadRequestException('Too many OTP requests. Please wait before requesting another code.');
+    }
+    
+    // Increment counter with 1 hour TTL
+    await this.cacheManager.set(key, count + 1, 3600000); // 3600000ms = 1 hour
+  }
+
+  private async checkResendCooldown(email: string, purpose: OTPPurpose): Promise<void> {
+    const key = this.getResendCooldownKey(email, purpose);
+    const cooldown = await this.cacheManager.get<boolean>(key);
+    
+    if (cooldown) {
+      throw new BadRequestException('Please wait 60 seconds before requesting a new code.');
+    }
+  }
+
+  private getVerificationAttemptsKey(email: string, purpose: OTPPurpose): string {
+    return `otp:attempts:${email}:${purpose}`;
+  }
+
+  private getVerificationLockoutKey(email: string, purpose: OTPPurpose): string {
+    return `otp:lockout:${email}:${purpose}`;
+  }
+
+  private async checkVerificationLockout(email: string, purpose: OTPPurpose): Promise<void> {
+    const key = this.getVerificationLockoutKey(email, purpose);
+    const isLockedOut = await this.cacheManager.get<boolean>(key);
+    
+    if (isLockedOut) {
+      throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
+    }
+  }
+
+  private async incrementVerificationAttempts(email: string, purpose: OTPPurpose): Promise<void> {
+    const attemptsKey = this.getVerificationAttemptsKey(email, purpose);
+    const attempts = await this.cacheManager.get<number>(attemptsKey) || 0;
+    const newAttempts = attempts + 1;
+
+    if (newAttempts >= MAX_OTP_VERIFICATION_ATTEMPTS) {
+      // Lock out the user
+      const lockoutKey = this.getVerificationLockoutKey(email, purpose);
+      await this.cacheManager.set(lockoutKey, true, OTP_VERIFICATION_LOCKOUT_DURATION);
+      // Clear attempts counter
+      await this.cacheManager.del(attemptsKey);
+      throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
+    }
+
+    // Increment attempts with 15 minute TTL
+    await this.cacheManager.set(attemptsKey, newAttempts, OTP_VERIFICATION_LOCKOUT_DURATION);
+  }
+
+  private async resetVerificationAttempts(email: string, purpose: OTPPurpose): Promise<void> {
+    const attemptsKey = this.getVerificationAttemptsKey(email, purpose);
+    await this.cacheManager.del(attemptsKey);
+  }
+
+  // Public OTP Methods
+  async sendOTP(dto: SendOTPDto) {
+    const { email, purpose } = dto;
+
+    await this.checkRateLimit(email, purpose);
+    await this.checkResendCooldown(email, purpose);
+
+    
+    if (purpose === OTPPurpose.SIGNUP) {
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email },
+      });
+      
+      if (existingUser) {
+        throw new ConflictException('Email already registered');
+      }
+    }
+
+    // For forgot password: validate user exists (silent fail for security)
+    if (purpose === OTPPurpose.FORGOT_PASSWORD) {
+      const user = await this.prisma.user.findUnique({
+        where: { email },
+      });
+      
+      // Silent fail - don't reveal if email exists or not
+      if (!user) {
+        return { success: true, message: 'If this email is registered, you will receive a verification code.' };
+      }
+    }
+
+    
+    const otp = this.generateOTP();
+    const otpKey = this.getOTPKey(email, purpose);
+    await this.cacheManager.set(otpKey, otp, OTP_EXPIRY * 1000); // Convert to milliseconds
+    const cooldownKey = this.getResendCooldownKey(email, purpose);
+    await this.cacheManager.set(cooldownKey, true, OTP_RESEND_COOLDOWN * 1000);
+
+    // Send email
+    await this.emailService.sendOTPEmail({
+      toEmail: email,
+      otp,
+      purpose: purpose === OTPPurpose.SIGNUP ? 'signup' : 'forgot-password',
+    });
+
+    return { success: true, message: 'Verification code sent to your email.' };
+  }
+
+  async verifyOTP(dto: VerifyOTPDto): Promise<boolean> {
+    const { email, otp, purpose } = dto;
+    
+    // Check if user is locked out due to too many failed attempts
+    await this.checkVerificationLockout(email, purpose);
+    
+    const otpKey = this.getOTPKey(email, purpose);
+    const storedOTP = await this.cacheManager.get<string>(otpKey);
+    
+    if (!storedOTP) {
+      throw new BadRequestException('OTP not found or expired. Please request a new code.');
+    }
+    
+    if (storedOTP !== otp) {
+      // Increment failed attempts
+      await this.incrementVerificationAttempts(email, purpose);
+      throw new UnauthorizedException('Invalid OTP code. Please try again.');
+    }
+    
+    // OTP is valid - reset attempts counter
+    await this.resetVerificationAttempts(email, purpose);
+    return true;
+  }
+
+  async checkEmailExists(email: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    return !!user;
+  }
+
+  async sendForgotPasswordOTP(dto: ForgotPasswordDto) {
+    return this.sendOTP({
+      email: dto.email,
+      purpose: OTPPurpose.FORGOT_PASSWORD,
+    });
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const { email, otp, newPassword } = dto;
+
+    // Verify user exists
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    await this.verifyOTP({
+      email,
+      otp,
+      purpose: OTPPurpose.FORGOT_PASSWORD,
+    });
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    const otpKey = this.getOTPKey(email, OTPPurpose.FORGOT_PASSWORD);
+    await this.cacheManager.del(otpKey);
+
+    return { success: true, message: 'Password reset successfully.' };
+  }
+
+  async sendChangePasswordOTP(userId: string, currentPassword: string) {
+    // Get user
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Check if user has a password (not SSO user)
+    if (!user.password) {
+      throw new BadRequestException('Password change is not available for SSO users');
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Send OTP
+    await this.checkRateLimit(user.email, OTPPurpose.CHANGE_PASSWORD);
+    await this.checkResendCooldown(user.email, OTPPurpose.CHANGE_PASSWORD);
+
+    const otp = this.generateOTP();
+    const otpKey = this.getOTPKey(user.email, OTPPurpose.CHANGE_PASSWORD);
+    await this.cacheManager.set(otpKey, otp, OTP_EXPIRY * 1000);
+
+    const cooldownKey = this.getResendCooldownKey(user.email, OTPPurpose.CHANGE_PASSWORD);
+    await this.cacheManager.set(cooldownKey, true, OTP_RESEND_COOLDOWN * 1000);
+
+    // Send email
+    await this.emailService.sendOTPEmail({
+      toEmail: user.email,
+      otp,
+      purpose: 'forgot-password', // Reuse forgot-password template
+    });
+
+    return { success: true, message: 'Verification code sent to your email.' };
+  }
+
+  async changePassword(userId: string, currentPassword: string, otp: string, newPassword: string) {
+    // Get user
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Check if user has a password (not SSO user)
+    if (!user.password) {
+      throw new BadRequestException('Password change is not available for SSO users');
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Verify OTP
+    await this.verifyOTP({
+      email: user.email,
+      otp,
+      purpose: OTPPurpose.CHANGE_PASSWORD,
+    });
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    try {
+      // Update password
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword },
+      });
+
+      // Delete OTP after successful password change
+      const otpKey = this.getOTPKey(user.email, OTPPurpose.CHANGE_PASSWORD);
+      await this.cacheManager.del(otpKey);
+
+      return { success: true, message: 'Password changed successfully.' };
+    } catch (error) {
+      throw new BadRequestException('Failed to change password. Please try again.');
+    }
+  }
+
   async register(dto: RegisterDto) {
-    // Check if user exists
+    // Verify OTP first (does not delete it yet)
+    await this.verifyOTP({
+      email: dto.email,
+      otp: dto.otp,
+      purpose: OTPPurpose.SIGNUP,
+    });
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-
     if (existingUser) {
       throw new ConflictException('Email already registered');
     }
@@ -47,37 +345,46 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    // Create user
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        password: hashedPassword,
-        name: dto.name,
-        role: UserRole.USER,
-        userType: UserType.EXTERNAL,
-        plan: PlanType.FREE,
-      },
-    });
+    try {
+      // Create user
+      const user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          password: hashedPassword,
+          name: dto.name,
+          role: UserRole.USER,
+          userType: UserType.EXTERNAL,
+          plan: PlanType.FREE,
+        },
+      });
 
-    // Seed default categories for new user
-    await this.seedDefaultCategories(user.id);
+      // Seed default categories for new user
+      await this.seedDefaultCategories(user.id);
 
-    // Seed default labels for new user
-    await this.seedDefaultLabels(user.id);
+      // Seed default labels for new user
+      await this.seedDefaultLabels(user.id);
 
-    // Send welcome email (don't await - fire and forget)
-    this.emailService.sendWelcomeEmail({
-      toEmail: user.email,
-      userName: user.name,
-    });
+      // Account created successfully - now delete the OTP
+      const otpKey = this.getOTPKey(dto.email, OTPPurpose.SIGNUP);
+      await this.cacheManager.del(otpKey);
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+      // Send welcome email (don't await - fire and forget)
+      this.emailService.sendWelcomeEmail({
+        toEmail: user.email,
+        userName: user.name,
+      });
 
-    return {
-      user: this.sanitizeUser(user),
-      ...tokens,
-    };
+      // Generate tokens
+      const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+      return {
+        user: this.sanitizeUser(user),
+        ...tokens,
+      };
+    } catch (error) {
+      // If account creation fails, OTP remains in cache (user can retry)
+      throw new BadRequestException('Failed to create account. Please try again.');
+    }
   }
 
   async login(dto: LoginDto) {
