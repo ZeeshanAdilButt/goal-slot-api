@@ -6,6 +6,7 @@ import {
   CreateInternalUserDto,
   AdminToggleUserStatusDto,
   AdminAssignPlanDto,
+  AdminBulkAssignPlanDto,
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -99,6 +100,17 @@ export class UsersController {
     @Body() dto: AdminToggleUserStatusDto,
   ) {
     return this.usersService.toggleUserStatus(req.user.sub, userId, dto);
+  }
+
+  @Post('admin/bulk-assign-plan')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Bulk assign a subscription plan to users (Admin only)' })
+  async bulkAssignPlan(
+    @Request() req: any, 
+    @Body() dto: AdminBulkAssignPlanDto,
+  ) {
+    return this.usersService.bulkAssignPlan(req.user.sub, dto);
   }
 
   @Post('admin/assign-plan/:userId')

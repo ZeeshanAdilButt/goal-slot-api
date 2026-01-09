@@ -5,6 +5,7 @@ import {
   CreateInternalUserDto,
   AdminToggleUserStatusDto,
   AdminAssignPlanDto,
+  AdminBulkAssignPlanDto,
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
@@ -410,6 +411,45 @@ export class UsersService {
         unlimitedAccess: true,
       },
     });
+  }
+
+  // Admin: Bulk assign plan to users
+  async bulkAssignPlan(adminId: string, dto: AdminBulkAssignPlanDto) {
+    const admin = await this.verifyAdmin(adminId);
+
+    // Validate no internal users are being downgraded
+    if (dto.plan !== PlanType.PRO) {
+      const internalUsers = await this.prisma.user.findMany({
+        where: { 
+          id: { in: dto.userIds },
+          userType: UserType.INTERNAL 
+        }
+      });
+      
+      if (internalUsers.length > 0) {
+        throw new ForbiddenException(`Cannot downgrade internal users: ${internalUsers.map(u => u.email).join(', ')}`);
+      }
+    }
+
+    const updateData: any = {
+      plan: dto.plan,
+      adminAssignedPlan: dto.plan,
+      adminAssignedPlanAt: new Date(),
+      adminAssignedPlanBy: adminId,
+      adminAssignedPlanNote: dto.note || null,
+    };
+
+    // If assigning PRO, also grant unlimited access
+    if (dto.plan === PlanType.PRO) {
+      updateData.unlimitedAccess = true;
+    }
+
+    const result = await this.prisma.user.updateMany({
+      where: { id: { in: dto.userIds } },
+      data: updateData,
+    });
+
+    return { updatedCount: result.count };
   }
 
   // Admin: Set email verification status
