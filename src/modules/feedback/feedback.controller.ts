@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { FeedbackService } from './feedback.service';
-import { CreateFeedbackDto, ArchiveFeedbackDto } from './dto/feedback.dto';
+import { CreateFeedbackDto, ArchiveFeedbackDto, ReplyFeedbackDto } from './dto/feedback.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -60,6 +60,18 @@ export class FeedbackController {
   @ApiOperation({ summary: 'Get a single feedback (Admin only)' })
   async findOne(@Param('id') id: string) {
     return this.feedbackService.findOne(id);
+  }
+
+  @Get(':id/thread')
+  @ApiOperation({ summary: 'Get feedback thread (feedback owner or admin)' })
+  async getThread(@Request() req: any, @Param('id') id: string) {
+    return this.feedbackService.getThread(id, req.user.sub, req.user.role);
+  }
+
+  @Post(':id/responses')
+  @ApiOperation({ summary: 'Reply to feedback (feedback owner or admin)' })
+  async addResponse(@Request() req: any, @Param('id') id: string, @Body() dto: ReplyFeedbackDto) {
+    return this.feedbackService.addResponse(id, req.user.sub, req.user.role, dto);
   }
 
   @Put(':id/archive')

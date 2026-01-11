@@ -17,6 +17,8 @@ import { LabelsModule } from './modules/labels/labels.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { EmailModule } from './modules/email/email.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ReleaseNotesModule } from './modules/release-notes/release-notes.module';
 import { envValidationSchema } from './shared/configuration/env.validation';
 
 @Module({
@@ -43,6 +45,8 @@ import { envValidationSchema } from './shared/configuration/env.validation';
     LabelsModule,
     NotesModule,
     FeedbackModule,
+    NotificationsModule,
+    ReleaseNotesModule,
   ],
 })
 export class AppModule {}

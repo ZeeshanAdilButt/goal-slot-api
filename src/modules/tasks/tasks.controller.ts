@@ -35,6 +35,12 @@ export class TasksController {
     return this.tasksService.findOne(req.user.sub, id);
   }
 
+  @Put('reorder')
+  @ApiOperation({ summary: 'Reorder tasks' })
+  async reorder(@Request() req: any, @Body() body: { ids: string[] }) {
+    return this.tasksService.reorder(req.user.sub, body.ids);
+  }
+
   @Put(':id')
   @ApiOperation({ summary: 'Update a task' })
   async update(@Request() req: any, @Param('id') id: string, @Body() dto: UpdateTaskDto) {

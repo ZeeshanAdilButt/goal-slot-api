@@ -13,8 +13,9 @@ export class StripeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a Stripe checkout session for Pro subscription' })
-  async createCheckoutSession(@Request() req: any) {
-    return this.stripeService.createCheckoutSession(req.user.sub);
+  async createCheckoutSession(@Request() req: any, @Body('plan') plan?: 'BASIC' | 'PRO') {
+    const normalizedPlan = plan === 'PRO' ? 'PRO' : 'BASIC';
+    return this.stripeService.createCheckoutSession(req.user.sub, normalizedPlan as any);
   }
 
   @Post('create-portal-session')

@@ -48,8 +48,21 @@ export class TimeEntriesController {
 
   @Get('recent')
   @ApiOperation({ summary: 'Get recent time entries' })
-  async getRecent(@Request() req: any, @Query('limit') limit?: number) {
-    return this.timeEntriesService.getRecentEntries(req.user.sub, limit);
+  async getRecent(
+    @Request() req: any,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : undefined;
+    const pageSizeNum = pageSize ? parseInt(pageSize, 10) : undefined;
+    return this.timeEntriesService.getRecentEntries(req.user.sub, {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      startDate,
+      endDate,
+    });
   }
 
   @Put(':id')

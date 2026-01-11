@@ -67,6 +67,9 @@ model User {
   sharedWithMe   SharedAccess[] @relation("SharedWith")
   sharedByMe     SharedAccess[] @relation("SharedBy")
   feedbacks      Feedback[]
+  feedbackResponses FeedbackResponse[]
+  notifications Notification[]
+  releaseNotesSeen ReleaseNoteSeen[]
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -83,6 +86,7 @@ model Goal {
   deadline      DateTime?
   status        GoalStatus   @default(ACTIVE)
   color         String       @default("#FFD700")
+  order         Int          @default(0)
   
   userId        String
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -146,6 +150,7 @@ model ScheduleBlock {
   category      String?          // Category value reference
   color         String           @default("#FFD700")
   isRecurring   Boolean          @default(true)
+  seriesId      String           @default(uuid())
   
   userId        String
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -161,6 +166,7 @@ model ScheduleBlock {
   
   @@index([userId])
   @@index([dayOfWeek])
+  @@index([seriesId])
 }
 
 // Tasks linked to schedule blocks and goals
@@ -168,10 +174,11 @@ model Task {
   id              String       @id @default(uuid())
   title           String
   description     String?
-  status          TaskStatus   @default(PENDING)
+  status          TaskStatus   @default(BACKLOG)
   category        String?      // Category value reference
   estimatedMinutes Int?
   actualMinutes   Int?
+  order           Int          @default(0)
   dueDate         DateTime?
   completedAt     DateTime?
 
@@ -211,6 +218,9 @@ model SharedAccess {
   inviteEmail   String?
   inviteToken   String?   @unique
   inviteExpires DateTime?
+  
+  // Public link flag (public links don't require email and can be shared openly)
+  isPublicLink  Boolean   @default(false)
   
   // Access level
   accessLevel   String     @default("VIEW") // "VIEW" or "EDIT"
@@ -338,10 +348,65 @@ model Feedback {
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  responses   FeedbackResponse[]
   
   @@index([userId])
   @@index([isArchived])
   @@index([createdAt])
+}
+
+model FeedbackResponse {
+  id         String   @id @default(uuid())
+  feedbackId String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  message    String
+  createdAt  DateTime @default(now())
+
+  @@index([feedbackId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String            @id @default(uuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model ReleaseNote {
+  id          String   @id @default(uuid())
+  version     String   @unique
+  title       String
+  content     String
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  seenBy      ReleaseNoteSeen[]
+}
+
+model ReleaseNoteSeen {
+  id        String   @id @default(uuid())
+  noteId    String
+  note      ReleaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt    DateTime @default(now())
+
+  @@unique([noteId, userId])
+  @@index([userId])
 }
 
 // User roles and types
@@ -369,9 +434,14 @@ enum GoalStatus {
 }
 
 enum TaskStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
+  BACKLOG
+  TODO
+  DOING
+  DONE
+}
+
+enum NotificationType {
+  FEEDBACK_REPLY
 }
 
 enum TimeEntrySource {

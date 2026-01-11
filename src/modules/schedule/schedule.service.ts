@@ -56,19 +56,61 @@ export class ScheduleService {
   async update(userId: string, blockId: string, dto: UpdateScheduleBlockDto) {
     const block = await this.prisma.scheduleBlock.findFirst({
       where: { id: blockId, userId },
+      include: { goal: true },
     });
 
     if (!block) {
       throw new NotFoundException('Schedule block not found');
     }
 
-    // Check for time conflicts if time is being updated
-    if (dto.startTime || dto.endTime || dto.dayOfWeek !== undefined) {
+    const { updateScope = 'single', seriesId: _ignoredSeriesId, ...changes } = dto;
+    const updateData = this.removeUndefined(changes);
+
+    if (updateScope === 'series' && block.seriesId) {
+      const sanitizedSeriesData = { ...updateData } as Partial<CreateScheduleBlockDto>;
+      if ('dayOfWeek' in sanitizedSeriesData) {
+        delete sanitizedSeriesData.dayOfWeek;
+      }
+
+      const hasTimeUpdate = Boolean(sanitizedSeriesData.startTime || sanitizedSeriesData.endTime);
+
+      if (Object.keys(sanitizedSeriesData).length === 0) {
+        return block;
+      }
+
+      if (hasTimeUpdate) {
+        const seriesBlocks = await this.prisma.scheduleBlock.findMany({
+          where: { userId, seriesId: block.seriesId },
+        });
+
+        for (const seriesBlock of seriesBlocks) {
+          const targetDay = seriesBlock.dayOfWeek;
+          const nextStart = sanitizedSeriesData.startTime ?? seriesBlock.startTime;
+          const nextEnd = sanitizedSeriesData.endTime ?? seriesBlock.endTime;
+          const conflict = await this.checkTimeConflict(userId, targetDay, nextStart, nextEnd, seriesBlock.id);
+          if (conflict) {
+            throw new BadRequestException('Time slot conflicts with an existing schedule block in this series');
+          }
+        }
+      }
+
+      await this.prisma.scheduleBlock.updateMany({
+        where: { userId, seriesId: block.seriesId },
+        data: sanitizedSeriesData,
+      });
+
+      return this.prisma.scheduleBlock.findFirst({
+        where: { id: blockId },
+        include: { goal: true },
+      });
+    }
+
+    if (updateData.startTime || updateData.endTime || updateData.dayOfWeek !== undefined) {
       const hasConflict = await this.checkTimeConflict(
         userId,
-        dto.dayOfWeek ?? block.dayOfWeek,
-        dto.startTime ?? block.startTime,
-        dto.endTime ?? block.endTime,
+        updateData.dayOfWeek ?? block.dayOfWeek,
+        updateData.startTime ?? block.startTime,
+        updateData.endTime ?? block.endTime,
         blockId,
       );
       if (hasConflict) {
@@ -78,7 +120,7 @@ export class ScheduleService {
 
     return this.prisma.scheduleBlock.update({
       where: { id: blockId },
-      data: dto,
+      data: updateData,
       include: { goal: true },
     });
   }
@@ -130,6 +172,15 @@ export class ScheduleService {
   private timeToMinutes(time: string): number {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
+  }
+
+  private removeUndefined<T extends Record<string, any>>(data: T): T {
+    return Object.entries(data).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key as keyof T] = value;
+      }
+      return acc;
+    }, {} as T);
   }
 
   async getWeeklySchedule(userId: string) {

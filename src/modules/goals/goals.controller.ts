@@ -42,6 +42,12 @@ export class GoalsController {
     return this.goalsService.getStats(req.user.sub);
   }
 
+  @Put('reorder')
+  @ApiOperation({ summary: 'Reorder goals' })
+  async reorder(@Request() req: any, @Body() body: { ids: string[] }) {
+    return this.goalsService.reorder(req.user.sub, body.ids);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific goal' })
   async findOne(@Request() req: any, @Param('id') id: string) {
