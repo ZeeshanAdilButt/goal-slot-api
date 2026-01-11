@@ -67,6 +67,8 @@ model User {
   sharedWithMe   SharedAccess[] @relation("SharedWith")
   sharedByMe     SharedAccess[] @relation("SharedBy")
   feedbacks      Feedback[]
+  feedbackResponses FeedbackResponse[]
+  notifications Notification[]
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -345,10 +347,41 @@ model Feedback {
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  responses   FeedbackResponse[]
   
   @@index([userId])
   @@index([isArchived])
   @@index([createdAt])
+}
+
+model FeedbackResponse {
+  id         String   @id @default(uuid())
+  feedbackId String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  message    String
+  createdAt  DateTime @default(now())
+
+  @@index([feedbackId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String            @id @default(uuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
 
 // User roles and types
@@ -380,6 +413,10 @@ enum TaskStatus {
   TODO
   DOING
   DONE
+}
+
+enum NotificationType {
+  FEEDBACK_REPLY
 }
 
 enum TimeEntrySource {
