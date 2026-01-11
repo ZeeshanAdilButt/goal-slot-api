@@ -221,19 +221,53 @@ export class TimeEntriesService {
     };
   }
 
-  async getRecentEntries(userId: string, limit = 5) {
-    return this.prisma.timeEntry.findMany({
-      where: { userId },
-      orderBy: [
-        { startedAt: 'desc' },
-        { createdAt: 'desc' },
-      ],
-      take: limit,
-      include: {
-        goal: {
-          select: { id: true, title: true, color: true },
+  async getRecentEntries(
+    userId: string,
+    params?: { page?: number; pageSize?: number; startDate?: string; endDate?: string },
+  ) {
+    const page = params?.page && params.page > 0 ? params.page : 1;
+    const pageSize = params?.pageSize && params.pageSize > 0 ? Math.min(params.pageSize, 100) : 10;
+
+    const where: any = { userId };
+
+    if (params?.startDate || params?.endDate) {
+      const start = params.startDate ? new Date(params.startDate) : undefined;
+      const end = params.endDate ? new Date(params.endDate) : undefined;
+
+      if (end) {
+        end.setHours(23, 59, 59, 999);
+      }
+
+      where.date = {
+        ...(start ? { gte: start } : {}),
+        ...(end ? { lte: end } : {}),
+      };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.timeEntry.findMany({
+        where,
+        orderBy: [
+          { startedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          goal: {
+            select: { id: true, title: true, color: true },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.timeEntry.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      hasNextPage: page * pageSize < total,
+    };
   }
 }

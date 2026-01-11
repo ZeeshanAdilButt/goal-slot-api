@@ -143,7 +143,8 @@ export class GoalsService {
 
     return this.prisma.goal.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      // @ts-ignore
+      orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
       include: {
         _count: {
           select: { timeEntries: true },
@@ -264,5 +265,17 @@ export class GoalsService {
     ]);
 
     return { active, completed, paused, total: active + completed + paused };
+  }
+
+  async reorder(userId: string, ids: string[]) {
+    return this.prisma.$transaction(
+      ids.map((id, index) =>
+        // @ts-ignore
+        this.prisma.goal.updateMany({
+          where: { id, userId },
+          data: { order: index },
+        }),
+      ),
+    );
   }
 }

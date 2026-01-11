@@ -10,10 +10,19 @@ import {
 } from './dto/users.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { resolvePlanLimits } from '../auth/plan-limits';
 
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
+
+  private sanitizeUser(user: any) {
+    const { password, ...rest } = user;
+    return {
+      ...rest,
+      limits: resolvePlanLimits(user),
+    };
+  }
 
   // Helper to check if user is admin
   private async verifyAdmin(adminId: string, requireSuperAdmin = false) {
@@ -31,29 +40,13 @@ export class UsersService {
   }
 
   async findById(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        avatar: true,
-        role: true,
-        userType: true,
-        plan: true,
-        unlimitedAccess: true,
-        subscriptionStatus: true,
-        emailVerified: true,
-        isDisabled: true,
-        createdAt: true,
-      },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    return this.sanitizeUser(user);
   }
 
   async findByEmail(email: string) {
@@ -66,22 +59,15 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    return this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: {
         name: dto.name,
         avatar: dto.avatar,
       },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        avatar: true,
-        role: true,
-        userType: true,
-        plan: true,
-      },
     });
+
+    return this.sanitizeUser(updatedUser);
   }
 
   // Admin: Create internal user

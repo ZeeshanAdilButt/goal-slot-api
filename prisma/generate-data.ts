@@ -269,11 +269,11 @@ async function main() {
         let status: TaskStatus;
         const daysSinceCreation = Math.floor((Date.now() - taskDate.getTime()) / (1000 * 60 * 60 * 24));
         if (daysSinceCreation > 30) {
-          status = Math.random() > 0.3 ? TaskStatus.COMPLETED : TaskStatus.PENDING;
+          status = Math.random() > 0.3 ? TaskStatus.DONE : TaskStatus.BACKLOG;
         } else if (daysSinceCreation > 7) {
-          status = randomElement([TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS, TaskStatus.PENDING]);
+          status = randomElement([TaskStatus.DONE, TaskStatus.DOING, TaskStatus.TODO]);
         } else {
-          status = randomElement([TaskStatus.IN_PROGRESS, TaskStatus.PENDING]);
+          status = randomElement([TaskStatus.DOING, TaskStatus.TODO]);
         }
         
         const estimatedMinutes = template.estimatedMinutes + randomInt(-30, 60);
@@ -286,8 +286,8 @@ async function main() {
             status,
             category: template.category,
             estimatedMinutes,
-            actualMinutes: status === TaskStatus.COMPLETED ? estimatedMinutes + randomInt(-20, 40) : null,
-            completedAt: status === TaskStatus.COMPLETED ? addDays(taskDate, randomInt(0, 7)) : null,
+            actualMinutes: status === TaskStatus.DONE ? estimatedMinutes + randomInt(-20, 40) : null,
+            completedAt: status === TaskStatus.DONE ? addDays(taskDate, randomInt(0, 7)) : null,
             dueDate: Math.random() > 0.3 ? dueDate : null,
             userId: user.id,
             goalId: goal?.id,

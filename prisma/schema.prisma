@@ -83,6 +83,7 @@ model Goal {
   deadline      DateTime?
   status        GoalStatus   @default(ACTIVE)
   color         String       @default("#FFD700")
+  order         Int          @default(0)
   
   userId        String
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -168,10 +169,11 @@ model Task {
   id              String       @id @default(uuid())
   title           String
   description     String?
-  status          TaskStatus   @default(PENDING)
+  status          TaskStatus   @default(BACKLOG)
   category        String?      // Category value reference
   estimatedMinutes Int?
   actualMinutes   Int?
+  order           Int          @default(0)
   dueDate         DateTime?
   completedAt     DateTime?
 
@@ -369,9 +371,10 @@ enum GoalStatus {
 }
 
 enum TaskStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
+  BACKLOG
+  TODO
+  DOING
+  DONE
 }
 
 enum TimeEntrySource {

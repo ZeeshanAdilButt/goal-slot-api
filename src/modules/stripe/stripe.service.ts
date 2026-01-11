@@ -21,14 +21,36 @@ export class StripeService {
     }
   }
 
-  async createCheckoutSession(userId: string) {
+  private getPriceId(plan: PlanType) {
+    if (plan === PlanType.PRO) {
+      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_PRO') || this.configService.get<string>('STRIPE_PRICE_ID');
+      if (!priceId) {
+        throw new BadRequestException('Stripe price for Max plan is not configured');
+      }
+      return priceId;
+    }
+
+    if (plan === PlanType.BASIC) {
+      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_BASIC') || this.configService.get<string>('STRIPE_PRICE_ID');
+      if (!priceId) {
+        throw new BadRequestException('Stripe price for Pro plan is not configured');
+      }
+      return priceId;
+    }
+
+    throw new BadRequestException('Invalid plan selected');
+  }
+
+  async createCheckoutSession(userId: string, plan: PlanType = PlanType.BASIC) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new BadRequestException('User not found');
 
     // Mock mode for development
     if (this.isMock) {
-      return this.createMockCheckoutSession(userId, user.email);
+      return this.createMockCheckoutSession(userId, user.email, plan);
     }
+
+    const priceId = this.getPriceId(plan);
 
     // Real Stripe implementation
     let customerId = user.stripeCustomerId;
@@ -52,13 +74,16 @@ export class StripeService {
       payment_method_types: ['card'],
       line_items: [
         {
-          price: this.configService.getOrThrow<string>('STRIPE_PRICE_ID'),
+          price: priceId,
           quantity: 1,
         },
       ],
+      subscription_data: {
+        metadata: { userId: user.id, plan },
+      },
       success_url: `${this.configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000'}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${this.configService.get<string>('CORS_ORIGIN') || 'http://localhost:3000'}/billing/cancel`,
-      metadata: { userId: user.id },
+      metadata: { userId: user.id, plan },
     });
 
     return { url: session.url, sessionId: session.id };
@@ -122,12 +147,14 @@ export class StripeService {
     const userId = session.metadata?.userId;
     if (!userId) return;
 
+    const plan = (session.metadata?.plan as PlanType) || PlanType.PRO;
+
     await this.prisma.user.update({
       where: { id: userId },
       data: {
         stripeSubscriptionId: session.subscription as string,
         subscriptionStatus: 'active',
-        plan: PlanType.PRO,
+        plan,
         subscriptionEndDate: null,
       },
     });
@@ -140,12 +167,13 @@ export class StripeService {
     if (!user) return;
 
     const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+    const plan = (subscription.metadata?.plan as PlanType) || PlanType.PRO;
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
         subscriptionStatus: subscription.status,
-        plan: isActive ? PlanType.PRO : PlanType.FREE,
+        plan: isActive ? plan : PlanType.FREE,
         subscriptionEndDate: subscription.cancel_at
           ? new Date(subscription.cancel_at * 1000)
           : null,
@@ -251,10 +279,11 @@ export class StripeService {
       lastInvoiceId: user.lastInvoiceId,
       // Flags for UI
       requiresPaymentAction: user.invoicePending || user.subscriptionStatus === 'past_due',
-      price: '$10/month',
+      price: user.plan === PlanType.PRO ? '$12/month' : '$7/month',
       features: {
         free: ['3 goals', '5 schedules', '3 tasks/day', 'Basic analytics'],
-        pro: ['Unlimited goals', 'Unlimited schedules', 'Unlimited tasks', 'Advanced analytics', 'Priority support'],
+        pro: ['10 goals', 'Unlimited schedules', 'Unlimited tasks', 'Advanced analytics'],
+        max: ['Unlimited goals', 'Unlimited schedules', 'Unlimited tasks', 'Priority support', 'Advanced analytics'],
       },
     };
   }
@@ -346,10 +375,10 @@ export class StripeService {
   }
 
   // Mock implementation for development
-  private createMockCheckoutSession(userId: string, email: string) {
+  private createMockCheckoutSession(userId: string, email: string, plan: PlanType) {
     const mockSessionId = `mock_session_${Date.now()}`;
     return {
-      url: `/billing/mock-checkout?session=${mockSessionId}&userId=${userId}`,
+      url: `/billing/mock-checkout?session=${mockSessionId}&userId=${userId}&plan=${plan}`,
       sessionId: mockSessionId,
       mock: true,
       message: 'This is a mock checkout. In production, this will redirect to Stripe.',

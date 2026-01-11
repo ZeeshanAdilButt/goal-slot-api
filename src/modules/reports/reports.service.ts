@@ -1,6 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GoalStatus } from '@prisma/client';
+import { 
+  ReportFiltersDto, 
+  ReportViewType, 
+  ReportGroupBy, 
+  ReportSortBy, 
+  ExportReportDto, 
+  ExportFormat,
+  DetailedTimeEntry,
+  DailyBreakdown,
+  SummaryItem,
+  DetailedReportResponse,
+  SummaryReportResponse,
+  DayByTaskReportResponse,
+  DayByTaskBreakdown,
+  DayByTaskEntry,
+  DayTotalReportResponse,
+  DayTotalBreakdown,
+} from './dto';
 
 @Injectable()
 export class ReportsService {
@@ -261,6 +279,683 @@ export class ReportsService {
       dailyAverage: daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
       tasksLogged: entries.length,
     };
+  }
+
+  /**
+   * Get detailed report - shows every time entry with timestamps
+   * Perfect for freelancers/contractors sending invoices, mentees reporting to mentors,
+   * and students submitting detailed progress reports
+   */
+  async getDetailedReport(userId: string, filters: ReportFiltersDto): Promise<DetailedReportResponse> {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
+    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId,
+        date: { gte: start, lte: end },
+        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
+        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(filters.category ? { goal: { category: filters.category } } : {}),
+      },
+      include: {
+        goal: { select: { id: true, title: true, color: true, category: true } },
+        task: { select: { id: true, title: true, category: true } },
+      },
+      orderBy: this.getSortOrder(filters.sortBy),
+    });
+
+    // Build daily breakdown (like a spreadsheet)
+    const dailyMap = new Map<string, DailyBreakdown>();
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    let totalMinutes = 0;
+
+    for (const entry of entries) {
+      const dateKey = entry.date.toISOString().split('T')[0];
+      const dayOfWeek = dayNames[entry.dayOfWeek];
+      
+      if (!dailyMap.has(dateKey)) {
+        dailyMap.set(dateKey, {
+          date: dateKey,
+          dayOfWeek,
+          entries: [],
+          totalMinutes: 0,
+          totalFormatted: '',
+        });
+      }
+
+      const endedAt = entry.startedAt && entry.duration 
+        ? new Date(new Date(entry.startedAt).getTime() + entry.duration * 60000).toISOString()
+        : null;
+
+      const detailedEntry: DetailedTimeEntry = {
+        id: entry.id,
+        date: dateKey,
+        dayOfWeek,
+        startedAt: entry.startedAt?.toISOString() || null,
+        endedAt,
+        taskName: entry.taskName,
+        duration: entry.duration,
+        durationFormatted: this.formatDuration(entry.duration),
+        notes: entry.notes,
+        goal: entry.goal ? { id: entry.goal.id, title: entry.goal.title, color: entry.goal.color } : null,
+        task: entry.task ? { id: entry.task.id, title: entry.task.title } : null,
+        category: entry.goal?.category || entry.task?.category || null,
+      };
+
+      const day = dailyMap.get(dateKey)!;
+      day.entries.push(detailedEntry);
+      day.totalMinutes += entry.duration;
+      totalMinutes += entry.duration;
+    }
+
+    // Calculate daily totals
+    dailyMap.forEach(day => {
+      day.totalFormatted = this.formatDuration(day.totalMinutes);
+    });
+
+    const dailyBreakdown = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const totalHours = totalMinutes / 60;
+
+    // Calculate billable info if requested
+    let billableInfo = null;
+    if (filters.includeBillable && filters.hourlyRate) {
+      billableInfo = {
+        hourlyRate: filters.hourlyRate,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalAmount: parseFloat((totalHours * filters.hourlyRate).toFixed(2)),
+        currency: 'USD', // Could be made configurable
+      };
+    }
+
+    return {
+      reportType: 'detailed',
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      generatedAt: new Date().toISOString(),
+      filters: {
+        goalIds: goalIdArray,
+        taskIds: taskIdArray,
+        category: filters.category,
+      },
+      summary: {
+        totalMinutes,
+        totalFormatted: this.formatDuration(totalMinutes),
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalEntries: entries.length,
+        daysWithEntries: dailyBreakdown.length,
+        avgMinutesPerDay: dailyBreakdown.length > 0 ? Math.round(totalMinutes / dailyBreakdown.length) : 0,
+      },
+      billable: billableInfo,
+      dailyBreakdown,
+    };
+  }
+
+  /**
+   * Get summary report - compact aggregated view by goal/task
+   * Shows total accumulated hours without specific timestamps
+   * Perfect for quick overviews and high-level progress reports
+   */
+  async getSummaryReport(userId: string, filters: ReportFiltersDto): Promise<SummaryReportResponse> {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
+    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId,
+        date: { gte: start, lte: end },
+        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
+        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(filters.category ? { goal: { category: filters.category } } : {}),
+      },
+      include: {
+        goal: { select: { id: true, title: true, color: true, category: true } },
+        task: { select: { id: true, title: true, category: true } },
+      },
+    });
+
+    let totalMinutes = 0;
+    entries.forEach(e => totalMinutes += e.duration);
+
+    const groupBy = filters.groupBy || ReportGroupBy.GOAL;
+    const summaryItems = this.aggregateByGroup(entries, groupBy, totalMinutes, filters.hourlyRate);
+
+    // Calculate billable info if requested
+    let billableInfo = null;
+    const totalHours = totalMinutes / 60;
+    if (filters.includeBillable && filters.hourlyRate) {
+      billableInfo = {
+        hourlyRate: filters.hourlyRate,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalAmount: parseFloat((totalHours * filters.hourlyRate).toFixed(2)),
+        currency: 'USD',
+      };
+    }
+
+    // Date range breakdown for charts
+    const dateBreakdown = this.buildDateBreakdown(entries, start, end);
+
+    return {
+      reportType: 'summary',
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      generatedAt: new Date().toISOString(),
+      groupBy,
+      filters: {
+        goalIds: goalIdArray,
+        taskIds: taskIdArray,
+        category: filters.category,
+      },
+      summary: {
+        totalMinutes,
+        totalFormatted: this.formatDuration(totalMinutes),
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalEntries: entries.length,
+        uniqueDays: new Set(entries.map(e => e.date.toISOString().split('T')[0])).size,
+      },
+      billable: billableInfo,
+      items: summaryItems,
+      dateBreakdown,
+    };
+  }
+
+  /**
+   * Get Day by Task report - shows aggregated hours per task per day
+   * No individual timestamps, just totals per task per day
+   */
+  async getDayByTaskReport(userId: string, filters: ReportFiltersDto): Promise<DayByTaskReportResponse> {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
+    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId,
+        date: { gte: start, lte: end },
+        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
+        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(filters.category ? { goal: { category: filters.category } } : {}),
+      },
+      include: {
+        goal: { select: { id: true, title: true, color: true } },
+        task: { select: { id: true, title: true } },
+      },
+      orderBy: [{ date: 'asc' }],
+    });
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    // Group entries by date, then by task
+    const dailyMap = new Map<string, Map<string, DayByTaskEntry & { dayOfWeek: string }>>();
+    let totalMinutes = 0;
+    let totalEntries = 0;
+
+    for (const entry of entries) {
+      const dateKey = entry.date.toISOString().split('T')[0];
+      const dayOfWeek = dayNames[entry.dayOfWeek];
+      
+      if (!dailyMap.has(dateKey)) {
+        dailyMap.set(dateKey, new Map());
+      }
+      
+      const taskMap = dailyMap.get(dateKey)!;
+      // Use taskId or normalized task name as key to aggregate
+      const taskKey = entry.taskId || entry.taskName.trim().toLowerCase();
+      
+      if (!taskMap.has(taskKey)) {
+        taskMap.set(taskKey, {
+          taskName: entry.task?.title || entry.taskName,
+          taskId: entry.taskId,
+          goalTitle: entry.goal?.title || null,
+          goalColor: entry.goal?.color || null,
+          totalMinutes: 0,
+          totalFormatted: '',
+          dayOfWeek,
+        });
+      }
+
+      const task = taskMap.get(taskKey)!;
+      task.totalMinutes += entry.duration;
+      totalMinutes += entry.duration;
+      totalEntries++;
+    }
+
+    // Convert to array structure
+    const dailyBreakdown: DayByTaskBreakdown[] = [];
+    for (const [dateKey, taskMap] of dailyMap) {
+      const tasks = Array.from(taskMap.values())
+        .map(({ dayOfWeek, ...task }) => ({
+          ...task,
+          totalFormatted: this.formatDuration(task.totalMinutes),
+        }))
+        .sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+      const dayTotal = tasks.reduce((sum, t) => sum + t.totalMinutes, 0);
+      const firstTask = taskMap.values().next().value;
+
+      dailyBreakdown.push({
+        date: dateKey,
+        dayOfWeek: firstTask?.dayOfWeek || dayNames[new Date(dateKey).getDay()],
+        tasks,
+        totalMinutes: dayTotal,
+        totalFormatted: this.formatDuration(dayTotal),
+      });
+    }
+
+    // Sort by date
+    dailyBreakdown.sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalHours = totalMinutes / 60;
+    let billableInfo = null;
+    if (filters.includeBillable && filters.hourlyRate) {
+      billableInfo = {
+        hourlyRate: filters.hourlyRate,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalAmount: parseFloat((totalHours * filters.hourlyRate).toFixed(2)),
+        currency: 'USD',
+      };
+    }
+
+    return {
+      reportType: 'day_by_task',
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      generatedAt: new Date().toISOString(),
+      filters: {
+        goalIds: goalIdArray,
+        taskIds: taskIdArray,
+        category: filters.category,
+      },
+      summary: {
+        totalMinutes,
+        totalFormatted: this.formatDuration(totalMinutes),
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalEntries,
+        uniqueDays: dailyBreakdown.length,
+      },
+      billable: billableInfo,
+      dailyBreakdown,
+    };
+  }
+
+  /**
+   * Get Day Total report - shows total hours per day with merged task names
+   * Just daily totals with comma-separated task names
+   */
+  async getDayTotalReport(userId: string, filters: ReportFiltersDto): Promise<DayTotalReportResponse> {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
+    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId,
+        date: { gte: start, lte: end },
+        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
+        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(filters.category ? { goal: { category: filters.category } } : {}),
+      },
+      include: {
+        task: { select: { id: true, title: true } },
+      },
+      orderBy: [{ date: 'asc' }],
+    });
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+    // Group entries by date, aggregate tasks names
+    const dailyMap = new Map<string, { dayOfWeek: string; taskNames: Set<string>; totalMinutes: number }>();
+    let totalMinutes = 0;
+    let totalEntries = 0;
+
+    for (const entry of entries) {
+      const dateKey = entry.date.toISOString().split('T')[0];
+      const dayOfWeek = dayNames[entry.dayOfWeek];
+      
+      if (!dailyMap.has(dateKey)) {
+        dailyMap.set(dateKey, {
+          dayOfWeek,
+          taskNames: new Set(),
+          totalMinutes: 0,
+        });
+      }
+      
+      const day = dailyMap.get(dateKey)!;
+      const taskName = entry.task?.title || entry.taskName;
+      day.taskNames.add(taskName);
+      day.totalMinutes += entry.duration;
+      totalMinutes += entry.duration;
+      totalEntries++;
+    }
+
+    // Convert to array structure
+    const dailyBreakdown: DayTotalBreakdown[] = Array.from(dailyMap.entries())
+      .map(([dateKey, data]) => ({
+        date: dateKey,
+        dayOfWeek: data.dayOfWeek,
+        taskNames: Array.from(data.taskNames).join(', '),
+        totalMinutes: data.totalMinutes,
+        totalFormatted: this.formatDuration(data.totalMinutes),
+        totalHours: parseFloat((data.totalMinutes / 60).toFixed(2)),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalHours = totalMinutes / 60;
+    let billableInfo = null;
+    if (filters.includeBillable && filters.hourlyRate) {
+      billableInfo = {
+        hourlyRate: filters.hourlyRate,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalAmount: parseFloat((totalHours * filters.hourlyRate).toFixed(2)),
+        currency: 'USD',
+      };
+    }
+
+    return {
+      reportType: 'day_total',
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      generatedAt: new Date().toISOString(),
+      filters: {
+        goalIds: goalIdArray,
+        taskIds: taskIdArray,
+        category: filters.category,
+      },
+      summary: {
+        totalMinutes,
+        totalFormatted: this.formatDuration(totalMinutes),
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalEntries,
+        uniqueDays: dailyBreakdown.length,
+      },
+      billable: billableInfo,
+      dailyBreakdown,
+    };
+  }
+
+  /**
+   * Generate exportable report (for invoicing, mentor reports, assignment updates)
+   */
+  async generateExport(userId: string, filters: ExportReportDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true },
+    });
+
+    const viewType = filters.viewType || ReportViewType.DETAILED;
+    let reportData: any;
+    
+    switch (viewType) {
+      case ReportViewType.DETAILED:
+        reportData = await this.getDetailedReport(userId, filters);
+        break;
+      case ReportViewType.SUMMARY:
+        reportData = await this.getSummaryReport(userId, filters);
+        break;
+      case ReportViewType.DAY_BY_TASK:
+        reportData = await this.getDayByTaskReport(userId, filters);
+        break;
+      case ReportViewType.DAY_TOTAL:
+        reportData = await this.getDayTotalReport(userId, filters);
+        break;
+      default:
+        reportData = await this.getDetailedReport(userId, filters);
+    }
+
+    const exportMeta = {
+      title: filters.title || 'Time Report',
+      generatedBy: user?.name || 'Unknown',
+      generatedAt: new Date().toISOString(),
+      clientName: filters.clientName,
+      projectName: filters.projectName,
+      notes: filters.notes,
+      format: filters.format,
+    };
+
+    if (filters.format === ExportFormat.CSV) {
+      return this.generateCSV(reportData, viewType, exportMeta);
+    } else if (filters.format === ExportFormat.JSON) {
+      return {
+        ...exportMeta,
+        data: reportData,
+      };
+    } else {
+      // PDF would require a PDF library - return structured data for frontend rendering
+      return {
+        ...exportMeta,
+        data: reportData,
+        pdfReady: true,
+      };
+    }
+  }
+
+  /**
+   * Get list of available goals for filtering
+   */
+  async getFilterableGoals(userId: string) {
+    const goals = await this.prisma.goal.findMany({
+      where: { userId },
+      select: { id: true, title: true, color: true, category: true, status: true },
+      orderBy: [{ status: 'asc' }, { title: 'asc' }],
+    });
+
+    return goals.map(g => ({
+      id: g.id,
+      title: g.title,
+      color: g.color,
+      category: g.category,
+      isActive: g.status === GoalStatus.ACTIVE,
+    }));
+  }
+
+  /**
+   * Get list of available tasks for filtering
+   */
+  async getFilterableTasks(userId: string, goalId?: string) {
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        userId,
+        ...(goalId ? { goalId } : {}),
+      },
+      select: { id: true, title: true, category: true, status: true, goalId: true },
+      orderBy: { title: 'asc' },
+    });
+
+    return tasks;
+  }
+
+  // Helper methods for report generation
+
+  private aggregateByGroup(
+    entries: any[],
+    groupBy: ReportGroupBy,
+    totalMinutes: number,
+    hourlyRate?: number,
+  ): SummaryItem[] {
+    const groups = new Map<string, { name: string; color?: string; minutes: number; count: number }>();
+
+    for (const entry of entries) {
+      let key: string;
+      let name: string;
+      let color: string | undefined;
+
+      switch (groupBy) {
+        case ReportGroupBy.GOAL:
+          key = entry.goalId || 'no-goal';
+          name = entry.goal?.title || 'No Goal';
+          color = entry.goal?.color || '#94A3B8';
+          break;
+        case ReportGroupBy.TASK:
+          key = entry.taskId || entry.taskName;
+          name = entry.task?.title || entry.taskName;
+          break;
+        case ReportGroupBy.CATEGORY:
+          key = entry.goal?.category || entry.task?.category || 'other';
+          name = this.formatCategoryName(key);
+          break;
+        case ReportGroupBy.DATE:
+          key = entry.date.toISOString().split('T')[0];
+          name = key;
+          break;
+        default:
+          key = 'other';
+          name = 'Other';
+      }
+
+      if (!groups.has(key)) {
+        groups.set(key, { name, color, minutes: 0, count: 0 });
+      }
+      const group = groups.get(key)!;
+      group.minutes += entry.duration;
+      group.count++;
+    }
+
+    return Array.from(groups.entries())
+      .map(([id, data]) => ({
+        id,
+        name: data.name,
+        color: data.color,
+        totalMinutes: data.minutes,
+        totalFormatted: this.formatDuration(data.minutes),
+        totalHours: parseFloat((data.minutes / 60).toFixed(2)),
+        percentage: totalMinutes > 0 ? Math.round((data.minutes / totalMinutes) * 100) : 0,
+        entriesCount: data.count,
+        billableAmount: hourlyRate ? parseFloat(((data.minutes / 60) * hourlyRate).toFixed(2)) : undefined,
+      }))
+      .sort((a, b) => b.totalMinutes - a.totalMinutes);
+  }
+
+  private buildDateBreakdown(entries: any[], start: Date, end: Date) {
+    const breakdown: Array<{ date: string; minutes: number; formatted: string }> = [];
+    const dateMap = new Map<string, number>();
+
+    entries.forEach(e => {
+      const dateKey = e.date.toISOString().split('T')[0];
+      dateMap.set(dateKey, (dateMap.get(dateKey) || 0) + e.duration);
+    });
+
+    // Fill in all dates in range
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const dateKey = cursor.toISOString().split('T')[0];
+      const minutes = dateMap.get(dateKey) || 0;
+      breakdown.push({
+        date: dateKey,
+        minutes,
+        formatted: this.formatDuration(minutes),
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return breakdown;
+  }
+
+  private generateCSV(reportData: any, viewType: ReportViewType, meta: any): string {
+    const lines: string[] = [];
+    
+    // Header
+    lines.push(`"${meta.title}"`);
+    lines.push(`"Generated by: ${meta.generatedBy}"`);
+    lines.push(`"Generated at: ${meta.generatedAt}"`);
+    if (meta.clientName) lines.push(`"Client: ${meta.clientName}"`);
+    if (meta.projectName) lines.push(`"Project: ${meta.projectName}"`);
+    lines.push(`"Period: ${reportData.startDate} to ${reportData.endDate}"`);
+    lines.push('');
+
+    if (viewType === ReportViewType.DETAILED) {
+      // Detailed view - each entry as a row
+      lines.push('"Date","Day","Start Time","End Time","Task","Goal","Duration (min)","Duration","Notes"');
+      
+      for (const day of reportData.dailyBreakdown) {
+        for (const entry of day.entries) {
+          const startTime = entry.startedAt ? new Date(entry.startedAt).toLocaleTimeString() : '';
+          const endTime = entry.endedAt ? new Date(entry.endedAt).toLocaleTimeString() : '';
+          lines.push(`"${entry.date}","${entry.dayOfWeek}","${startTime}","${endTime}","${entry.taskName}","${entry.goal?.title || ''}","${entry.duration}","${entry.durationFormatted}","${entry.notes || ''}"`);
+        }
+        // Daily subtotal
+        lines.push(`"${day.date}","${day.dayOfWeek}","","","DAILY TOTAL","","${day.totalMinutes}","${day.totalFormatted}",""`);
+        lines.push('');
+      }
+    } else if (viewType === ReportViewType.DAY_BY_TASK) {
+      // Day by Task view - aggregated hours per task per day (no timestamps)
+      lines.push('"Date","Day","Task","Goal","Total Hours","Total Minutes","Duration"');
+      
+      for (const day of reportData.dailyBreakdown) {
+        for (const task of day.tasks) {
+          const hours = (task.totalMinutes / 60).toFixed(2);
+          lines.push(`"${day.date}","${day.dayOfWeek}","${task.taskName}","${task.goalTitle || ''}","${hours}","${task.totalMinutes}","${task.totalFormatted}"`);
+        }
+        // Daily subtotal
+        const dayHours = (day.totalMinutes / 60).toFixed(2);
+        lines.push(`"${day.date}","${day.dayOfWeek}","DAILY TOTAL","","${dayHours}","${day.totalMinutes}","${day.totalFormatted}"`);
+        lines.push('');
+      }
+    } else if (viewType === ReportViewType.DAY_TOTAL) {
+      // Day Total view - just daily totals with merged task names
+      lines.push('"Date","Day","Tasks Worked On","Total Hours","Total Minutes","Duration"');
+      
+      for (const day of reportData.dailyBreakdown) {
+        lines.push(`"${day.date}","${day.dayOfWeek}","${day.taskNames}","${day.totalHours}","${day.totalMinutes}","${day.totalFormatted}"`);
+      }
+    } else {
+      // Summary view - grouped totals
+      lines.push(`"${reportData.groupBy.toUpperCase()}","Total Hours","Total Minutes","Entries","Percentage"${reportData.billable ? ',"Billable Amount"' : ''}`);
+      
+      for (const item of reportData.items) {
+        const billableCol = reportData.billable ? `,"$${item.billableAmount}"` : '';
+        lines.push(`"${item.name}","${item.totalHours}","${item.totalMinutes}","${item.entriesCount}","${item.percentage}%"${billableCol}`);
+      }
+    }
+
+    // Grand total
+    lines.push('');
+    lines.push(`"GRAND TOTAL","${reportData.summary.totalHours} hours","${reportData.summary.totalMinutes} minutes","${reportData.summary.totalEntries} entries","100%"${reportData.billable ? `,"$${reportData.billable.totalAmount}"` : ''}`);
+
+    if (meta.notes) {
+      lines.push('');
+      lines.push(`"Notes: ${meta.notes}"`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private getSortOrder(sortBy?: ReportSortBy) {
+    switch (sortBy) {
+      case ReportSortBy.DATE_ASC:
+        return [{ date: 'asc' as const }, { startedAt: 'asc' as const }];
+      case ReportSortBy.DATE_DESC:
+        return [{ date: 'desc' as const }, { startedAt: 'desc' as const }];
+      case ReportSortBy.DURATION_ASC:
+        return { duration: 'asc' as const };
+      case ReportSortBy.DURATION_DESC:
+        return { duration: 'desc' as const };
+      default:
+        return [{ date: 'asc' as const }, { startedAt: 'asc' as const }];
+    }
+  }
+
+  private formatCategoryName(category: string): string {
+    if (!category) return 'Other';
+    return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase().replace(/_/g, ' ');
   }
 
   private getWeekStart(date: Date): Date {

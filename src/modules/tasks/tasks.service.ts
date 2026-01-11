@@ -21,7 +21,7 @@ export class TasksService {
         title: dto.title,
         description: dto.description,
         category: dto.category,
-        status: dto.status || TaskStatus.PENDING,
+        status: dto.status || TaskStatus.BACKLOG,
         estimatedMinutes: dto.estimatedMinutes,
         userId,
         goalId: dto.goalId,
@@ -49,7 +49,8 @@ export class TasksService {
 
     const tasks = await this.prisma.task.findMany({
       where,
-      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      // @ts-ignore
+      orderBy: [{ status: 'asc' }, { order: 'asc' }, { createdAt: 'desc' }],
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
@@ -104,6 +105,18 @@ export class TasksService {
         scheduleBlock: true,
       },
     });
+  }
+
+  async reorder(userId: string, ids: string[]) {
+    return this.prisma.$transaction(
+      ids.map((id, index) =>
+        // @ts-ignore
+        this.prisma.task.updateMany({
+          where: { id, userId },
+          data: { order: index },
+        }),
+      ),
+    );
   }
 
   async complete(userId: string, taskId: string, dto: CompleteTaskDto) {
@@ -168,7 +181,7 @@ export class TasksService {
     const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
       data: {
-        status: TaskStatus.COMPLETED,
+        status: TaskStatus.DONE,
         actualMinutes: dto.actualMinutes,
         completedAt: logDate,
       },
@@ -218,7 +231,7 @@ export class TasksService {
       await tx.task.update({
         where: { id: taskId },
         data: {
-          status: TaskStatus.PENDING,
+          status: TaskStatus.TODO,
           actualMinutes: null,
           completedAt: null,
         },

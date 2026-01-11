@@ -10,25 +10,7 @@ import { UsersService } from '../users/users.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, OTPPurpose, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
-
-// Plan limits
-export const PLAN_LIMITS = {
-  FREE: {
-    maxGoals: 3,
-    maxSchedules: 5,
-    maxTasksPerDay: 3,
-  },
-  BASIC: {
-    maxGoals: Infinity,
-    maxSchedules: Infinity,
-    maxTasksPerDay: Infinity,
-  },
-  PRO: {
-    maxGoals: Infinity,
-    maxSchedules: Infinity,
-    maxTasksPerDay: Infinity,
-  },
-};
+import { PLAN_LIMITS, resolvePlanLimits } from './plan-limits';
 
 // OTP constants
 const OTP_EXPIRY = 300; // 5 minutes in seconds
@@ -516,55 +498,26 @@ export class AuthService {
     const { password, ...sanitized } = user;
     return {
       ...sanitized,
-      limits: this.getUserLimits(user),
+      limits: resolvePlanLimits(user),
     };
   }
 
-  getUserLimits(user: any) {
-    // Internal users or users with unlimitedAccess get Pro limits
-    if (user.userType === UserType.INTERNAL || user.unlimitedAccess) {
-      return PLAN_LIMITS.PRO;
-    }
-
-    // Check subscription status for external users
-    // Note: Admin assigned plans (adminAssignedPlan) are synced to user.plan, 
-    // so we just check user.plan. For active Stripe subs, user.plan is also updated via webhook.
-    
-    // Check if subscription is valid (Stripe managed or manual duration)
-    const isStripeActive = user.stripeSubscriptionId && user.subscriptionStatus === 'active';
-    // For manual subscriptions (no stripe ID), check date validity
-    const isManualActive = !user.stripeSubscriptionId && user.subscriptionStatus === 'active' && 
-      (!user.subscriptionEndDate || new Date(user.subscriptionEndDate) > new Date());
-      
-    const isValidSubscription = isStripeActive || isManualActive || user.adminAssignedPlan;
-    
-    // Allow access if active subscription OR if admin assigned (which implies active/valid)
-    if (user.plan === PlanType.PRO && isValidSubscription) {
-      return PLAN_LIMITS.PRO;
-    }
-
-    if (user.plan === PlanType.BASIC && isValidSubscription) {
-      return PLAN_LIMITS.BASIC;
-    }
-
-    return PLAN_LIMITS.FREE;
-  }
 
   async checkPlanLimit(userId: string, limitType: 'goals' | 'schedules' | 'tasksPerDay', currentCount: number) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new ForbiddenException('User not found');
 
-    const limits = this.getUserLimits(user);
-    
+    const limits = resolvePlanLimits(user);
+
     const limitMap = {
       goals: limits.maxGoals,
       schedules: limits.maxSchedules,
       tasksPerDay: limits.maxTasksPerDay,
-    };
+    } as const;
 
     if (currentCount >= limitMap[limitType]) {
       throw new ForbiddenException(
-        `You've reached your ${user.plan} plan limit for ${limitType}. Upgrade to Pro for unlimited access.`
+        `You've reached your ${user.plan} plan limit for ${limitType}. Upgrade to Max for unlimited access.`
       );
     }
 
