@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SharingService } from './sharing.service';
-import { InviteUserDto } from './dto/sharing.dto';
+import { InviteUserDto, CreatePublicLinkDto } from './dto/sharing.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('sharing')
@@ -101,5 +101,23 @@ export class SharingController {
     @Param('ownerId') ownerId: string,
   ) {
     return this.sharingService.getSharedUserGoals(req.user.sub, ownerId);
+  }
+
+  @Post('public-link')
+  @ApiOperation({ summary: 'Create a public shareable link (no email required)' })
+  async createPublicLink(@Request() req: any, @Body() dto: CreatePublicLinkDto) {
+    return this.sharingService.createPublicLink(req.user.sub, dto);
+  }
+
+  @Get('my-public-links')
+  @ApiOperation({ summary: 'Get all public links I created' })
+  async getMyPublicLinks(@Request() req: any) {
+    return this.sharingService.getMyPublicLinks(req.user.sub);
+  }
+
+  @Delete('public-link/:shareId')
+  @ApiOperation({ summary: 'Delete a public link' })
+  async deletePublicLink(@Request() req: any, @Param('shareId') shareId: string) {
+    return this.sharingService.deletePublicLink(req.user.sub, shareId);
   }
 }

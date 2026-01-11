@@ -11,6 +11,7 @@ import {
   SummaryReportResponse,
   DayByTaskReportResponse,
   DayTotalReportResponse,
+  ScheduleReportResponse,
 } from './dto';
 
 @ApiTags('reports')
@@ -121,6 +122,18 @@ export class ReportsController {
     @Query() filters: ReportFiltersDto,
   ): Promise<DayTotalReportResponse> {
     return this.reportsService.getDayTotalReport(req.user.sub, filters);
+  }
+
+  @Get('schedule')
+  @ApiOperation({ 
+    summary: 'Get schedule-based report',
+    description: 'Returns report showing hours logged per schedule block, with day-by-day breakdown. Shows how well you stuck to your schedule.'
+  })
+  async getScheduleReport(
+    @Request() req: any,
+    @Query() filters: ReportFiltersDto,
+  ): Promise<ScheduleReportResponse> {
+    return this.reportsService.getScheduleReport(req.user.sub, filters);
   }
 
   @Get('filterable-goals')

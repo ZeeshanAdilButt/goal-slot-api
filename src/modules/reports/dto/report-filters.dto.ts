@@ -79,6 +79,11 @@ export class ReportFiltersDto {
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   hourlyRate?: number;
+
+  @ApiPropertyOptional({ description: 'Show schedule block context for entries' })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  showScheduleContext?: boolean;
 }
 
 export class ExportReportDto extends ReportFiltersDto {
@@ -126,6 +131,13 @@ export interface DetailedTimeEntry {
   goal: { id: string; title: string; color: string } | null;
   task: { id: string; title: string } | null;
   category: string | null;
+  scheduleBlock?: {
+    id: string;
+    title: string;
+    startTime: string;
+    endTime: string;
+    color?: string;
+  } | null;
 }
 
 export interface DailyBreakdown {
@@ -236,11 +248,21 @@ export interface DayByTaskReportResponse {
   dailyBreakdown: DayByTaskBreakdown[];
 }
 
-// Report by Day - shows total hours per day with merged task names
+// Report by Day - shows total hours per day with tasks grouped by goal
+export interface DayTotalGoalGroup {
+  goalId: string | null;
+  goalTitle: string;
+  goalColor: string | null;
+  taskNames: string; // Comma-separated unique task names for this goal
+  totalMinutes: number;
+  totalFormatted: string;
+}
+
 export interface DayTotalBreakdown {
   date: string;
   dayOfWeek: string;
-  taskNames: string; // Comma-separated unique task names
+  taskNames: string; // Comma-separated unique task names (all goals combined for backward compat)
+  goalGroups: DayTotalGoalGroup[]; // Tasks grouped by goal
   totalMinutes: number;
   totalFormatted: string;
   totalHours: number;
@@ -259,5 +281,75 @@ export interface DayTotalReportResponse {
   summary: ReportSummary;
   billable: BillableInfo | null;
   dailyBreakdown: DayTotalBreakdown[];
+}
+
+// ==========================================
+// Schedule-Based Report Types
+// ==========================================
+
+export interface SchedulePattern {
+  patternKey: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  category?: string;
+  color?: string;
+  goalTitle?: string;
+  goalColor?: string;
+  daysOfWeek: number[];
+  timeRangeFormatted: string;
+}
+
+export interface ScheduleTaskItem {
+  taskName: string;
+  minutes: number;
+  formatted: string;
+}
+
+export interface ScheduleDayData {
+  date: string;
+  dayOfWeek: string;
+  dayNumber: number;
+  loggedMinutes: number;
+  loggedFormatted: string;
+  expectedMinutes: number;
+  percentage: number;
+  tasks: ScheduleTaskItem[];
+}
+
+export interface ScheduleReportRow {
+  pattern: SchedulePattern;
+  days: ScheduleDayData[];
+  totalLogged: number;
+  totalLoggedFormatted: string;
+  totalExpected: number;
+  overallPercentage: number;
+}
+
+export interface ScheduleReportResponse {
+  reportType: 'schedule';
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  filters: {
+    goalIds?: string[];
+    taskIds?: string[];
+    category?: string;
+  };
+  summary: {
+    totalMinutes: number;
+    totalFormatted: string;
+    totalExpectedMinutes: number;
+    totalExpectedFormatted: string;
+    overallPercentage: number;
+    totalEntries: number;
+    schedulesTracked: number;
+  };
+  days: Array<{
+    date: string;
+    dayOfWeek: string;
+    dayNumber: number;
+  }>;
+  rows: ScheduleReportRow[];
 }
 

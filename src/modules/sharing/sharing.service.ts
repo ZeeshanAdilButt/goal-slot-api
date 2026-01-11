@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException } 
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
-import { InviteUserDto } from './dto/sharing.dto';
+import { InviteUserDto, CreatePublicLinkDto, PublicLinkResponse, AccessLevel } from './dto/sharing.dto';
 
 @Injectable()
 export class SharingService {
@@ -333,7 +333,11 @@ export class SharingService {
         sharedWithId: userId, 
         isAccepted: true 
       },
-      include: {
+      select: {
+        id: true,
+        ownerId: true,
+        createdAt: true,
+        accessLevel: true,
         owner: { 
           select: { 
             id: true, 
@@ -437,6 +441,7 @@ export class SharingService {
       accessType: 'VIEW_ONLY',
       isAccepted: share.isAccepted,
       inviteEmail: share.inviteEmail,
+      isPublicLink: share.isPublicLink || false,
     };
   }
 
@@ -469,5 +474,71 @@ export class SharingService {
       where: { userId: share.ownerId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  // ============ PUBLIC LINK MANAGEMENT ============
+
+  async createPublicLink(ownerId: string, dto: CreatePublicLinkDto): Promise<PublicLinkResponse> {
+    const token = uuidv4();
+    const expiresInDays = dto.expiresInDays || 30;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + expiresInDays);
+
+    const sharedAccess = await this.prisma.sharedAccess.create({
+      data: {
+        ownerId,
+        inviteToken: token,
+        inviteExpires: expiresAt,
+        accessLevel: dto.accessLevel || 'VIEW',
+        isPublicLink: true,
+        isAccepted: false, // Public links don't need acceptance
+      },
+    });
+
+    return {
+      id: sharedAccess.id,
+      publicLink: `/share/accept?token=${token}`,
+      token,
+      expiresAt,
+      accessLevel: dto.accessLevel || AccessLevel.VIEW,
+      createdAt: sharedAccess.createdAt,
+    };
+  }
+
+  async getMyPublicLinks(ownerId: string) {
+    const links = await this.prisma.sharedAccess.findMany({
+      where: {
+        ownerId,
+        isPublicLink: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return links.map(link => ({
+      id: link.id,
+      publicLink: `/share/accept?token=${link.inviteToken}`,
+      token: link.inviteToken,
+      expiresAt: link.inviteExpires,
+      accessLevel: link.accessLevel,
+      createdAt: link.createdAt,
+      isExpired: link.inviteExpires ? link.inviteExpires < new Date() : false,
+    }));
+  }
+
+  async deletePublicLink(ownerId: string, shareId: string) {
+    const link = await this.prisma.sharedAccess.findFirst({
+      where: {
+        id: shareId,
+        ownerId,
+        isPublicLink: true,
+      },
+    });
+
+    if (!link) {
+      throw new NotFoundException('Public link not found');
+    }
+
+    await this.prisma.sharedAccess.delete({ where: { id: shareId } });
+    return { message: 'Public link deleted successfully' };
   }
 }

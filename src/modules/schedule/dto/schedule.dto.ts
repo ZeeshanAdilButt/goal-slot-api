@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsBoolean, IsUUID, Min, Max, Matches } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsUUID, Min, Max, Matches, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateScheduleBlockDto {
@@ -40,6 +40,20 @@ export class CreateScheduleBlockDto {
   @IsOptional()
   @IsUUID()
   goalId?: string;
+
+  @ApiPropertyOptional({ description: 'Series identifier used to link related schedule blocks' })
+  @IsOptional()
+  @IsUUID()
+  seriesId?: string;
 }
 
-export class UpdateScheduleBlockDto extends PartialType(CreateScheduleBlockDto) {}
+export class UpdateScheduleBlockDto extends PartialType(CreateScheduleBlockDto) {
+  @ApiPropertyOptional({
+    description: 'Apply the update to only this block or all blocks in the linked series',
+    enum: ['single', 'series'],
+    default: 'single',
+  })
+  @IsOptional()
+  @IsIn(['single', 'series'])
+  updateScope?: 'single' | 'series';
+}

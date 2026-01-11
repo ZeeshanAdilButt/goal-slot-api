@@ -18,6 +18,10 @@ import {
   DayByTaskEntry,
   DayTotalReportResponse,
   DayTotalBreakdown,
+  ScheduleReportResponse,
+  ScheduleReportRow,
+  SchedulePattern,
+  ScheduleDayData,
 } from './dto';
 
 @Injectable()
@@ -306,6 +310,9 @@ export class ReportsService {
       include: {
         goal: { select: { id: true, title: true, color: true, category: true } },
         task: { select: { id: true, title: true, category: true } },
+        ...(filters.showScheduleContext ? {
+          scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true, color: true } },
+        } : {}),
       },
       orderBy: this.getSortOrder(filters.sortBy),
     });
@@ -347,6 +354,13 @@ export class ReportsService {
         goal: entry.goal ? { id: entry.goal.id, title: entry.goal.title, color: entry.goal.color } : null,
         task: entry.task ? { id: entry.task.id, title: entry.task.title } : null,
         category: entry.goal?.category || entry.task?.category || null,
+        scheduleBlock: (entry as any).scheduleBlock ? {
+          id: (entry as any).scheduleBlock.id,
+          title: (entry as any).scheduleBlock.title,
+          startTime: (entry as any).scheduleBlock.startTime,
+          endTime: (entry as any).scheduleBlock.endTime,
+          color: (entry as any).scheduleBlock.color,
+        } : null,
       };
 
       const day = dailyMap.get(dateKey)!;
@@ -616,14 +630,31 @@ export class ReportsService {
       },
       include: {
         task: { select: { id: true, title: true } },
+        goal: { select: { id: true, title: true, color: true } },
+        scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true } },
       },
       orderBy: [{ date: 'asc' }],
     });
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     
-    // Group entries by date, aggregate tasks names
-    const dailyMap = new Map<string, { dayOfWeek: string; taskNames: Set<string>; totalMinutes: number }>();
+    // Group entries by date, then by goal
+    interface GoalData {
+      goalId: string | null;
+      goalTitle: string;
+      goalColor: string | null;
+      taskNames: Set<string>;
+      totalMinutes: number;
+    }
+    
+    interface DayData {
+      dayOfWeek: string;
+      goalMap: Map<string, GoalData>; // goalId or 'no-goal' -> GoalData
+      allTaskNames: Set<string>;
+      totalMinutes: number;
+    }
+    
+    const dailyMap = new Map<string, DayData>();
     let totalMinutes = 0;
     let totalEntries = 0;
 
@@ -634,25 +665,52 @@ export class ReportsService {
       if (!dailyMap.has(dateKey)) {
         dailyMap.set(dateKey, {
           dayOfWeek,
-          taskNames: new Set(),
+          goalMap: new Map(),
+          allTaskNames: new Set(),
           totalMinutes: 0,
         });
       }
       
       const day = dailyMap.get(dateKey)!;
       const taskName = entry.task?.title || entry.taskName;
-      day.taskNames.add(taskName);
+      const goalKey = entry.goalId || 'no-goal';
+      
+      if (!day.goalMap.has(goalKey)) {
+        day.goalMap.set(goalKey, {
+          goalId: entry.goalId,
+          goalTitle: entry.goal?.title || 'No Goal',
+          goalColor: entry.goal?.color || null,
+          taskNames: new Set(),
+          totalMinutes: 0,
+        });
+      }
+      
+      const goalData = day.goalMap.get(goalKey)!;
+      goalData.taskNames.add(taskName);
+      goalData.totalMinutes += entry.duration;
+      
+      day.allTaskNames.add(taskName);
       day.totalMinutes += entry.duration;
       totalMinutes += entry.duration;
       totalEntries++;
     }
 
-    // Convert to array structure
+    // Convert to array structure with goal groups
     const dailyBreakdown: DayTotalBreakdown[] = Array.from(dailyMap.entries())
       .map(([dateKey, data]) => ({
         date: dateKey,
         dayOfWeek: data.dayOfWeek,
-        taskNames: Array.from(data.taskNames).join(', '),
+        taskNames: Array.from(data.allTaskNames).join(', '),
+        goalGroups: Array.from(data.goalMap.values())
+          .map(g => ({
+            goalId: g.goalId,
+            goalTitle: g.goalTitle,
+            goalColor: g.goalColor,
+            taskNames: Array.from(g.taskNames).join(', '),
+            totalMinutes: g.totalMinutes,
+            totalFormatted: this.formatDuration(g.totalMinutes),
+          }))
+          .sort((a, b) => b.totalMinutes - a.totalMinutes), // Sort by time descending
         totalMinutes: data.totalMinutes,
         totalFormatted: this.formatDuration(data.totalMinutes),
         totalHours: parseFloat((data.totalMinutes / 60).toFixed(2)),
@@ -690,6 +748,222 @@ export class ReportsService {
       billable: billableInfo,
       dailyBreakdown,
     };
+  }
+
+  /**
+   * Get schedule-based report showing hours logged per schedule block
+   */
+  async getScheduleReport(userId: string, filters: ReportFiltersDto): Promise<ScheduleReportResponse> {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
+    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+
+    // Get user's schedule blocks
+    const scheduleBlocks = await this.prisma.scheduleBlock.findMany({
+      where: { userId },
+      include: {
+        goal: { select: { id: true, title: true, color: true } },
+      },
+    });
+
+    // Get time entries in range with schedule block info
+    const entries = await this.prisma.timeEntry.findMany({
+      where: {
+        userId,
+        date: { gte: start, lte: end },
+        scheduleBlockId: { not: null },
+        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
+        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(filters.category ? { goal: { category: filters.category } } : {}),
+      },
+      include: {
+        task: { select: { id: true, title: true } },
+        scheduleBlock: {
+          select: { id: true, title: true, startTime: true, endTime: true, category: true, color: true, goalId: true },
+        },
+      },
+      orderBy: [{ date: 'asc' }],
+    });
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    // Build list of days in range
+    const days: Array<{ date: string; dayOfWeek: string; dayNumber: number }> = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      days.push({
+        date: cursor.toISOString().split('T')[0],
+        dayOfWeek: dayNames[cursor.getDay()],
+        dayNumber: cursor.getDay(),
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // Group schedule blocks by pattern (same title + time range)
+    const patternMap = new Map<string, {
+      pattern: SchedulePattern;
+      blockIds: string[];
+      dayDataMap: Map<string, { minutes: number; tasks: Map<string, number> }>;
+    }>();
+
+    for (const block of scheduleBlocks) {
+      const patternKey = `${block.title}|${block.startTime}-${block.endTime}`;
+      
+      if (!patternMap.has(patternKey)) {
+        // Calculate expected minutes from schedule time range
+        const [startH, startM] = block.startTime.split(':').map(Number);
+        const [endH, endM] = block.endTime.split(':').map(Number);
+        const expectedMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+
+        const goal = block.goal;
+        
+        patternMap.set(patternKey, {
+          pattern: {
+            patternKey,
+            title: block.title,
+            startTime: block.startTime,
+            endTime: block.endTime,
+            category: block.category ?? undefined,
+            color: block.color,
+            goalTitle: goal?.title,
+            goalColor: goal?.color,
+            daysOfWeek: [],
+            timeRangeFormatted: this.formatTimeRange(block.startTime, block.endTime),
+          },
+          blockIds: [],
+          dayDataMap: new Map(),
+        });
+      }
+
+      const patternData = patternMap.get(patternKey)!;
+      patternData.blockIds.push(block.id);
+      if (!patternData.pattern.daysOfWeek.includes(block.dayOfWeek)) {
+        patternData.pattern.daysOfWeek.push(block.dayOfWeek);
+      }
+    }
+
+    // Aggregate time entries by schedule pattern and day
+    let totalEntries = 0;
+    for (const entry of entries) {
+      if (!entry.scheduleBlock) continue;
+
+      const patternKey = `${entry.scheduleBlock.title}|${entry.scheduleBlock.startTime}-${entry.scheduleBlock.endTime}`;
+      const patternData = patternMap.get(patternKey);
+      if (!patternData) continue;
+
+      const dateKey = entry.date.toISOString().split('T')[0];
+      const taskName = entry.task?.title || entry.taskName;
+
+      if (!patternData.dayDataMap.has(dateKey)) {
+        patternData.dayDataMap.set(dateKey, { minutes: 0, tasks: new Map() });
+      }
+
+      const dayData = patternData.dayDataMap.get(dateKey)!;
+      dayData.minutes += entry.duration;
+      dayData.tasks.set(taskName, (dayData.tasks.get(taskName) || 0) + entry.duration);
+      totalEntries++;
+    }
+
+    // Build report rows
+    const rows: ScheduleReportRow[] = [];
+    let totalLogged = 0;
+    let totalExpected = 0;
+
+    for (const [, patternData] of patternMap) {
+      const { pattern, dayDataMap } = patternData;
+      
+      // Calculate expected minutes for this pattern
+      const [startH, startM] = pattern.startTime.split(':').map(Number);
+      const [endH, endM] = pattern.endTime.split(':').map(Number);
+      const expectedMinutesPerDay = (endH * 60 + endM) - (startH * 60 + startM);
+
+      const rowDays: ScheduleDayData[] = [];
+      let rowTotalLogged = 0;
+      let rowTotalExpected = 0;
+
+      for (const day of days) {
+        const hasSchedule = pattern.daysOfWeek.includes(day.dayNumber);
+        const dayData = dayDataMap.get(day.date);
+        
+        const loggedMinutes = dayData?.minutes || 0;
+        const expectedMinutes = hasSchedule ? expectedMinutesPerDay : 0;
+        
+        rowDays.push({
+          date: day.date,
+          dayOfWeek: day.dayOfWeek,
+          dayNumber: day.dayNumber,
+          loggedMinutes,
+          loggedFormatted: loggedMinutes > 0 ? this.formatDuration(loggedMinutes) : '',
+          expectedMinutes,
+          percentage: expectedMinutes > 0 ? Math.round((loggedMinutes / expectedMinutes) * 100) : 0,
+          tasks: dayData ? Array.from(dayData.tasks.entries()).map(([name, mins]) => ({
+            taskName: name,
+            minutes: mins,
+            formatted: this.formatDuration(mins),
+          })) : [],
+        });
+
+        rowTotalLogged += loggedMinutes;
+        if (hasSchedule) {
+          rowTotalExpected += expectedMinutesPerDay;
+        }
+      }
+
+      // Only include patterns that have at least some data or are in the active schedule
+      if (rowTotalLogged > 0 || rowTotalExpected > 0) {
+        rows.push({
+          pattern,
+          days: rowDays,
+          totalLogged: rowTotalLogged,
+          totalLoggedFormatted: this.formatDuration(rowTotalLogged),
+          totalExpected: rowTotalExpected,
+          overallPercentage: rowTotalExpected > 0 ? Math.round((rowTotalLogged / rowTotalExpected) * 100) : 0,
+        });
+
+        totalLogged += rowTotalLogged;
+        totalExpected += rowTotalExpected;
+      }
+    }
+
+    // Sort rows by schedule start time
+    rows.sort((a, b) => a.pattern.startTime.localeCompare(b.pattern.startTime));
+
+    return {
+      reportType: 'schedule',
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      generatedAt: new Date().toISOString(),
+      filters: {
+        goalIds: goalIdArray,
+        taskIds: taskIdArray,
+        category: filters.category,
+      },
+      summary: {
+        totalMinutes: totalLogged,
+        totalFormatted: this.formatDuration(totalLogged),
+        totalExpectedMinutes: totalExpected,
+        totalExpectedFormatted: this.formatDuration(totalExpected),
+        overallPercentage: totalExpected > 0 ? Math.round((totalLogged / totalExpected) * 100) : 0,
+        totalEntries,
+        schedulesTracked: rows.length,
+      },
+      days,
+      rows,
+    };
+  }
+
+  private formatTimeRange(startTime: string, endTime: string): string {
+    const formatTime = (time: string) => {
+      const [h, m] = time.split(':').map(Number);
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      const meridiem = h >= 12 ? 'PM' : 'AM';
+      return m === 0 ? `${hour12} ${meridiem}` : `${hour12}:${m.toString().padStart(2, '0')} ${meridiem}`;
+    };
+    return `${formatTime(startTime)} - ${formatTime(endTime)}`;
   }
 
   /**

@@ -147,6 +147,7 @@ model ScheduleBlock {
   category      String?          // Category value reference
   color         String           @default("#FFD700")
   isRecurring   Boolean          @default(true)
+  seriesId      String           @default(uuid())
   
   userId        String
   user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -162,6 +163,7 @@ model ScheduleBlock {
   
   @@index([userId])
   @@index([dayOfWeek])
+  @@index([seriesId])
 }
 
 // Tasks linked to schedule blocks and goals
@@ -213,6 +215,9 @@ model SharedAccess {
   inviteEmail   String?
   inviteToken   String?   @unique
   inviteExpires DateTime?
+  
+  // Public link flag (public links don't require email and can be shared openly)
+  isPublicLink  Boolean   @default(false)
   
   // Access level
   accessLevel   String     @default("VIEW") // "VIEW" or "EDIT"
