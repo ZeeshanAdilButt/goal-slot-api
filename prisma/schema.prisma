@@ -69,6 +69,7 @@ model User {
   feedbacks      Feedback[]
   feedbackResponses FeedbackResponse[]
   notifications Notification[]
+  releaseNotesSeen ReleaseNoteSeen[]
   
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -382,6 +383,30 @@ model Notification {
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
+}
+
+model ReleaseNote {
+  id          String   @id @default(uuid())
+  version     String   @unique
+  title       String
+  content     String
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  seenBy      ReleaseNoteSeen[]
+}
+
+model ReleaseNoteSeen {
+  id        String   @id @default(uuid())
+  noteId    String
+  note      ReleaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt    DateTime @default(now())
+
+  @@unique([noteId, userId])
+  @@index([userId])
 }
 
 // User roles and types
