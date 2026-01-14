@@ -248,6 +248,7 @@ export class TimeEntriesService {
       this.prisma.timeEntry.findMany({
         where,
         orderBy: [
+          { date: 'desc' },
           { startedAt: 'desc' },
           { createdAt: 'desc' },
         ],

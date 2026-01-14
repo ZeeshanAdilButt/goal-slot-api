@@ -37,10 +37,20 @@ export class TasksService {
 
   async findAll(
     userId: string,
-    filters: { status?: TaskStatus; scheduleBlockId?: string; goalId?: string; dayOfWeek?: number },
+    filters: {
+      status?: TaskStatus;
+      statuses?: TaskStatus[];
+      scheduleBlockId?: string;
+      goalId?: string;
+      dayOfWeek?: number;
+    },
   ) {
     const where: Prisma.TaskWhereInput = { userId };
-    if (filters.status) where.status = filters.status;
+    if (filters.statuses && filters.statuses.length > 0) {
+      where.status = { in: filters.statuses };
+    } else if (filters.status) {
+      where.status = filters.status;
+    }
     if (filters.scheduleBlockId) where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
     if (filters.dayOfWeek !== undefined) {
@@ -289,6 +299,5 @@ export class TasksService {
     }
   }
 }
-
 
 

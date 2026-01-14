@@ -22,6 +22,7 @@ export class TasksController {
   @Get()
   @ApiOperation({ summary: 'List tasks with optional filters' })
   @ApiQuery({ name: 'status', enum: TaskStatus, required: false })
+  @ApiQuery({ name: 'statuses', enum: TaskStatus, required: false, isArray: true })
   @ApiQuery({ name: 'scheduleBlockId', required: false })
   @ApiQuery({ name: 'goalId', required: false })
   @ApiQuery({ name: 'dayOfWeek', required: false, description: '0 (Sun) - 6 (Sat)' })
@@ -65,6 +66,5 @@ export class TasksController {
     return this.tasksService.delete(req.user.sub, id);
   }
 }
-
 
 

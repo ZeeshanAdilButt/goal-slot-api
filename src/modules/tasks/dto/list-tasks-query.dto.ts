@@ -9,6 +9,19 @@ export class ListTasksQueryDto {
   @IsEnum(TaskStatus)
   status?: TaskStatus;
 
+  @ApiPropertyOptional({ enum: TaskStatus, isArray: true })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === '' || value === undefined) return undefined;
+    if (Array.isArray(value)) return value;
+    return String(value)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  })
+  @IsEnum(TaskStatus, { each: true })
+  statuses?: TaskStatus[];
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
