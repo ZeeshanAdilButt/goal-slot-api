@@ -20,6 +20,7 @@ import { FeedbackModule } from './modules/feedback/feedback.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReleaseNotesModule } from './modules/release-notes/release-notes.module';
 import { envValidationSchema } from './shared/configuration/env.validation';
+import { PostHogModule } from './shared/modules/posthog.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { envValidationSchema } from './shared/configuration/env.validation';
       envFilePath: '.env',
       validationSchema: envValidationSchema,
     }),
+    PostHogModule, // Add PostHog module early so it's available globally
     PrismaModule,
     SupabaseModule,
     HealthModule,

@@ -4,20 +4,26 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { PostHogExceptionFilter } from './shared/filters/posthog-exception.filter';
+import { PostHogService } from './shared/services/posthog.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
+  // Get PostHog service instance
+  const posthogService = app.get(PostHogService);
+
+  // Register global exception filter
+  app.useGlobalFilters(new PostHogExceptionFilter(posthogService));
+
   // Increase body size limit for large images
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
-  const corsOrigin = configService.get<string | string[]>('CORS_ORIGIN') ||
-    ['http://localhost:3000', 'http://localhost:3001'];
-  const corsOrigins = Array.isArray(corsOrigin)
-    ? corsOrigin
-    : [corsOrigin];
+  const corsOrigin = configService.get<string>('CORS_ORIGIN') ||
+    'http://localhost:3000,http://localhost:3001';
+  const corsOrigins = corsOrigin.split(',').map(url => url.trim());
 
   // Enable CORS
   app.enableCors({
