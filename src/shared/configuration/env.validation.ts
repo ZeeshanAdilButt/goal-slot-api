@@ -27,11 +27,24 @@ export const envValidationSchema = Joi.object({
   STRIPE_PRICE_ID: Joi.string().required(),
   STRIPE_WEBHOOK_SECRET: Joi.string().required(),
 
-  // CORS
-  CORS_ORIGIN: Joi.alternatives()
-  .try(
-    Joi.string().uri(),
-    Joi.array().items(Joi.string().uri())
-  )
-  .optional(),
+  // CORS - accepts comma-separated list of URIs
+  CORS_ORIGIN: Joi.string()
+    .custom((value, helpers) => {
+      // Split by comma and validate each URL
+      const urls = value.split(',').map((url: string) => url.trim());
+      const uriSchema = Joi.string().uri();
+      
+      for (const url of urls) {
+        const { error } = uriSchema.validate(url);
+        if (error) {
+          return helpers.error('any.invalid', { message: `Invalid URI in CORS_ORIGIN: ${url}` });
+        }
+      }
+      return value; // Return the original string, we'll parse it in main.ts
+    }, 'CORS origin validation')
+    .optional(),
+
+  // PostHog
+  POSTHOG_API_KEY: Joi.string().optional(),
+  POSTHOG_HOST: Joi.string().uri().optional(),
 });
