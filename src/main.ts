@@ -21,8 +21,7 @@ async function bootstrap() {
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
-  const corsOrigin = configService.get<string>('CORS_ORIGIN') ||
-    'http://localhost:3000,http://localhost:3001';
+  const corsOrigin = configService.getOrThrow<string>('CORS_ORIGIN')
   const corsOrigins = corsOrigin.split(',').map(url => url.trim());
 
   // Enable CORS
