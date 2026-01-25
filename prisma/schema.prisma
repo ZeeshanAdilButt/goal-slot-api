@@ -181,6 +181,7 @@ model Task {
   order           Int          @default(0)
   dueDate         DateTime?
   completedAt     DateTime?
+  notes           String?      // Task-specific notes
 
   userId          String
   user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)

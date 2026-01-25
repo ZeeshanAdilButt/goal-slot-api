@@ -309,7 +309,7 @@ export class ReportsService {
       },
       include: {
         goal: { select: { id: true, title: true, color: true, category: true } },
-        task: { select: { id: true, title: true, category: true } },
+        task: { select: { id: true, title: true, category: true, notes: true } },
         ...(filters.showScheduleContext ? {
           scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true, color: true } },
         } : {}),
@@ -351,6 +351,7 @@ export class ReportsService {
         duration: entry.duration,
         durationFormatted: this.formatDuration(entry.duration),
         notes: entry.notes,
+        taskNotes: filters.includeTaskNotes && entry.task ? entry.task.notes : null,
         goal: entry.goal ? { id: entry.goal.id, title: entry.goal.title, color: entry.goal.color } : null,
         task: entry.task ? { id: entry.task.id, title: entry.task.title } : null,
         category: entry.goal?.category || entry.task?.category || null,
@@ -435,7 +436,7 @@ export class ReportsService {
       },
       include: {
         goal: { select: { id: true, title: true, color: true, category: true } },
-        task: { select: { id: true, title: true, category: true } },
+        task: { select: { id: true, title: true, category: true, notes: true } },
       },
     });
 
@@ -507,7 +508,7 @@ export class ReportsService {
       },
       include: {
         goal: { select: { id: true, title: true, color: true } },
-        task: { select: { id: true, title: true } },
+        task: { select: { id: true, title: true, notes: true } },
       },
       orderBy: [{ date: 'asc' }],
     });
@@ -629,7 +630,7 @@ export class ReportsService {
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
-        task: { select: { id: true, title: true } },
+        task: { select: { id: true, title: true, notes: true } },
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true } },
       },
@@ -1157,16 +1158,16 @@ export class ReportsService {
 
     if (viewType === ReportViewType.DETAILED) {
       // Detailed view - each entry as a row
-      lines.push('"Date","Day","Start Time","End Time","Task","Goal","Duration (min)","Duration","Notes"');
+      lines.push('"Date","Day","Start Time","End Time","Task","Goal","Duration (min)","Duration","Time Entry Notes","Task Notes"');
       
       for (const day of reportData.dailyBreakdown) {
         for (const entry of day.entries) {
           const startTime = entry.startedAt ? new Date(entry.startedAt).toLocaleTimeString() : '';
           const endTime = entry.endedAt ? new Date(entry.endedAt).toLocaleTimeString() : '';
-          lines.push(`"${entry.date}","${entry.dayOfWeek}","${startTime}","${endTime}","${entry.taskName}","${entry.goal?.title || ''}","${entry.duration}","${entry.durationFormatted}","${entry.notes || ''}"`);
+          lines.push(`"${entry.date}","${entry.dayOfWeek}","${startTime}","${endTime}","${entry.taskName}","${entry.goal?.title || ''}","${entry.duration}","${entry.durationFormatted}","${entry.notes || ''}","${entry.taskNotes || ''}"`);
         }
         // Daily subtotal
-        lines.push(`"${day.date}","${day.dayOfWeek}","","","DAILY TOTAL","","${day.totalMinutes}","${day.totalFormatted}",""`);
+        lines.push(`"${day.date}","${day.dayOfWeek}","","","DAILY TOTAL","","","${day.totalMinutes}","${day.totalFormatted}","",""`);
         lines.push('');
       }
     } else if (viewType === ReportViewType.DAY_BY_TASK) {
