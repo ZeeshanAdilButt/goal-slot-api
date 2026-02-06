@@ -84,6 +84,11 @@ export class ReportFiltersDto {
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   showScheduleContext?: boolean;
+
+  @ApiPropertyOptional({ description: 'Include task notes in report output' })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  includeTaskNotes?: boolean;
 }
 
 export class ExportReportDto extends ReportFiltersDto {
