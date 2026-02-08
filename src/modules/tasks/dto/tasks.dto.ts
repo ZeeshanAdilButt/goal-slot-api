@@ -42,6 +42,11 @@ export class CreateTaskDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string;
+
+  @ApiPropertyOptional({ description: 'Task-specific notes' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class UpdateTaskDto extends PartialType(CreateTaskDto) {}

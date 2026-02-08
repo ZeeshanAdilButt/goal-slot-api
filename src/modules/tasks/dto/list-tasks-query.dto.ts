@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TaskStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class ListTasksQueryDto {
   @ApiPropertyOptional({ enum: TaskStatus })
@@ -9,16 +9,15 @@ export class ListTasksQueryDto {
   @IsEnum(TaskStatus)
   status?: TaskStatus;
 
-  @ApiPropertyOptional({ enum: TaskStatus, isArray: true })
+  @ApiPropertyOptional({ enum: TaskStatus, isArray: true, description: 'Multiple statuses to filter by' })
   @IsOptional()
   @Transform(({ value }) => {
     if (value === '' || value === undefined) return undefined;
     if (Array.isArray(value)) return value;
-    return String(value)
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    if (typeof value === 'string') return [value];
+    return value;
   })
+  @IsArray()
   @IsEnum(TaskStatus, { each: true })
   statuses?: TaskStatus[];
 

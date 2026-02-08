@@ -27,6 +27,7 @@ export class TasksService {
         goalId: dto.goalId,
         scheduleBlockId: dto.scheduleBlockId,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        notes: dto.notes,
       },
       include: {
         goal: { select: { id: true, title: true, color: true } },
@@ -46,11 +47,14 @@ export class TasksService {
     },
   ) {
     const where: Prisma.TaskWhereInput = { userId };
+    
+    // Handle multiple statuses or single status
     if (filters.statuses && filters.statuses.length > 0) {
       where.status = { in: filters.statuses };
     } else if (filters.status) {
       where.status = filters.status;
     }
+    
     if (filters.scheduleBlockId) where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
     if (filters.dayOfWeek !== undefined) {
