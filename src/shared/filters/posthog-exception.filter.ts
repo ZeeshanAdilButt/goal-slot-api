@@ -14,12 +14,21 @@ export class PostHogExceptionFilter implements ExceptionFilter {
 
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR
 
-    const message =
-      exception instanceof HttpException
-        ? exception.message
-        : exception instanceof Error
-          ? exception.message
-          : 'Internal server error'
+    // For HttpExceptions (especially ValidationPipe errors), extract the full response
+    // which contains the actual validation error details, not just the generic message
+    let message: string | string[]
+    if (exception instanceof HttpException) {
+      const exceptionResponse = exception.getResponse()
+      if (typeof exceptionResponse === 'object' && exceptionResponse !== null && 'message' in exceptionResponse) {
+        message = (exceptionResponse as any).message
+      } else {
+        message = exception.message
+      }
+    } else if (exception instanceof Error) {
+      message = exception.message
+    } else {
+      message = 'Internal server error'
+    }
 
     const error = exception instanceof Error ? exception : new Error(String(exception))
 

@@ -77,7 +77,7 @@ export class ReportFiltersDto {
 
   @ApiPropertyOptional({ description: 'Hourly rate for invoice calculations' })
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => (value !== undefined && value !== null && value !== '') ? parseFloat(value) : undefined)
   hourlyRate?: number;
 
   @ApiPropertyOptional({ description: 'Show schedule block context for entries' })
