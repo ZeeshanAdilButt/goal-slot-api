@@ -56,7 +56,13 @@ export class UpdateNoteDto {
 }
 
 export class ReorderNotesDto {
+  @IsString()
   noteId: string;
+
+  @IsString()
+  @IsOptional()
   parentId: string | null;
+
+  @IsNumber()
   order: number;
 }

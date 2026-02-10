@@ -35,7 +35,7 @@ export class PostHogExceptionFilter implements ExceptionFilter {
     // Extract user ID from JWT payload (JwtStrategy returns user as req.user with 'sub' property)
     const userId = (request as any).user?.sub || undefined
 
-    // Capture exception in PostHog
+    // Capture exception in PostHog with full validation details
     this.posthogService.captureException(error, userId, {
       path: request.url,
       method: request.method,
@@ -45,6 +45,12 @@ export class PostHogExceptionFilter implements ExceptionFilter {
       // Add additional context from JWT payload if available
       userEmail: (request as any).user?.email,
       userRole: (request as any).user?.role,
+      // Include validation error details for debugging
+      validationErrors: Array.isArray(message) ? message : undefined,
+      errorMessage: typeof message === 'string' ? message : JSON.stringify(message),
+      // Include request data for full debugging context
+      queryParams: request.query,
+      bodyParams: request.method !== 'GET' ? request.body : undefined,
     })
 
     // Continue with default error handling

@@ -7,6 +7,7 @@ export enum ReportViewType {
   SUMMARY = 'summary',
   DAY_BY_TASK = 'day_by_task',
   DAY_TOTAL = 'day_total',
+  SCHEDULE = 'schedule',
 }
 
 export enum ReportGroupBy {
