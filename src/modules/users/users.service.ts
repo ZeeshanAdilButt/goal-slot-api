@@ -9,7 +9,7 @@ import {
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { resolvePlanLimits } from '../auth/plan-limits';
 
 @Injectable()
