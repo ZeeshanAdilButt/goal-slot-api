@@ -1,13 +1,29 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common'
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common'
 import { Request, Response } from 'express'
 
 import { PostHogService } from '../services/posthog.service'
 
 @Catch()
 export class PostHogExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(PostHogExceptionFilter.name)
+
   constructor(private readonly posthogService: PostHogService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
+    // Log full error for debugging (Prisma, etc.)
+    if (exception instanceof Error) {
+      this.logger.error(`[Exception] ${exception.message}`)
+      if (exception.stack) this.logger.error(`[Stack] ${exception.stack}`)
+      if ('meta' in exception && (exception as any).meta != null) {
+        this.logger.error(`[Prisma meta] ${JSON.stringify((exception as any).meta, null, 2)}`)
+      }
+      if ((exception as any).cause) {
+        this.logger.error(`[Cause] ${String((exception as any).cause)}`)
+      }
+    } else {
+      this.logger.error(`[Exception] ${String(exception)}`)
+    }
+
     const ctx = host.switchToHttp()
     const response = ctx.getResponse<Response>()
     const request = ctx.getRequest<Request>()
@@ -35,7 +51,8 @@ export class PostHogExceptionFilter implements ExceptionFilter {
     // Extract user ID from JWT payload (JwtStrategy returns user as req.user with 'sub' property)
     const userId = (request as any).user?.sub || undefined
 
-    // Capture exception in PostHog with full validation details
+    // Capture exception in PostHog with full validation details and full error context
+    const isError = exception instanceof Error
     this.posthogService.captureException(error, userId, {
       path: request.url,
       method: request.method,
@@ -48,6 +65,10 @@ export class PostHogExceptionFilter implements ExceptionFilter {
       // Include validation error details for debugging
       validationErrors: Array.isArray(message) ? message : undefined,
       errorMessage: typeof message === 'string' ? message : JSON.stringify(message),
+      // Full error context for PostHog (stack, Prisma meta, cause)
+      errorStack: isError ? (exception as Error).stack : undefined,
+      prismaMeta: isError && 'meta' in exception && (exception as any).meta != null ? (exception as any).meta : undefined,
+      errorCause: isError && (exception as any).cause != null ? String((exception as any).cause) : undefined,
       // Include request data for full debugging context
       queryParams: request.query,
       bodyParams: request.method !== 'GET' ? request.body : undefined,

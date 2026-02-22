@@ -1,6 +1,8 @@
 // Time Master - Database Schema (Prisma 7: URLs in prisma.config.ts)
 generator client {
   provider = "prisma-client-js"
+  moduleFormat    = "cjs"
+
 }
 
 datasource db {
