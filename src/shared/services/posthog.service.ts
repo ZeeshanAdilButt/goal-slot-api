@@ -1,12 +1,19 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common'
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { PostHog } from 'posthog-node'
 
 @Injectable()
 export class PostHogService implements OnModuleDestroy {
-  private posthog: PostHog
+  private readonly logger = new Logger(PostHogService.name)
+  private posthog: PostHog | null = null
 
   constructor() {
-    this.posthog = new PostHog(process.env.POSTHOG_API_KEY!, {
+    const apiKey = process.env.POSTHOG_API_KEY?.trim()
+    if (!apiKey) {
+      this.logger.warn('POSTHOG_API_KEY is not set. PostHog tracking is disabled.')
+      return
+    }
+
+    this.posthog = new PostHog(apiKey, {
       host: process.env.POSTHOG_HOST || 'https://us.i.posthog.com',
       flushAt: 20, // Batch events and send when 20 are queued
       flushInterval: 10000, // Or send every 10 seconds
@@ -16,7 +23,7 @@ export class PostHogService implements OnModuleDestroy {
   /**
    * Get the PostHog instance
    */
-  getInstance(): PostHog {
+  getInstance(): PostHog | null {
     return this.posthog
   }
 
@@ -24,55 +31,76 @@ export class PostHogService implements OnModuleDestroy {
    * Capture an event
    */
   capture(distinctId: string, event: string, properties?: Record<string, any>) {
-    this.posthog.capture({
-      distinctId,
-      event,
-      properties,
-    })
+    if (!this.posthog) return
+
+    try {
+      this.posthog.capture({
+        distinctId,
+        event,
+        properties,
+      })
+    } catch (error) {
+      this.logPostHogError('capture', error)
+    }
   }
 
   /**
    * Identify a user
    */
   identify(distinctId: string, properties?: Record<string, any>) {
-    this.posthog.identify({
-      distinctId,
-      properties,
-    })
+    if (!this.posthog) return
+
+    try {
+      this.posthog.identify({
+        distinctId,
+        properties,
+      })
+    } catch (error) {
+      this.logPostHogError('identify', error)
+    }
   }
 
   /**
    * Capture an exception
    */
-  captureException(error: Error, distinctId?: string, properties?: Record<string, any>) {
-    const exceptionData: any = {
-      $exception_message: error.message,
-      $exception_type: error.constructor.name,
-      ...properties,
-    }
+  captureException(error: unknown, distinctId?: string, properties?: Record<string, any>) {
+    if (!this.posthog) return
 
-    if (distinctId) {
-      exceptionData.distinctId = distinctId
+    try {
+      // posthog-node signature: captureException(error, distinctId?, additionalProperties?)
+      this.posthog.captureException(error, distinctId, properties)
+    } catch (captureError) {
+      this.logPostHogError('captureException', captureError)
     }
-
-    this.posthog.captureException(error, exceptionData)
   }
 
   /**
    * Set user properties
    */
   setUserProperties(distinctId: string, properties: Record<string, any>) {
-    this.posthog.identify({
-      distinctId,
-      properties,
-    })
+    if (!this.posthog) return
+
+    try {
+      this.posthog.identify({
+        distinctId,
+        properties,
+      })
+    } catch (error) {
+      this.logPostHogError('setUserProperties', error)
+    }
   }
 
   /**
    * Flush pending events (useful before shutdown)
    */
   async flush() {
-    await this.posthog.shutdown()
+    if (!this.posthog) return
+
+    try {
+      await this.posthog.shutdown()
+    } catch (error) {
+      this.logPostHogError('flush', error)
+    }
   }
 
   /**
@@ -80,5 +108,17 @@ export class PostHogService implements OnModuleDestroy {
    */
   async onModuleDestroy() {
     await this.flush()
+  }
+
+  private logPostHogError(method: string, error: unknown) {
+    if (error instanceof Error) {
+      this.logger.error(`[PostHog:${method}] ${error.message}`)
+      if (error.stack) {
+        this.logger.error(error.stack)
+      }
+      return
+    }
+
+    this.logger.error(`[PostHog:${method}] ${String(error)}`)
   }
 }
