@@ -1,8 +1,9 @@
 // Temporary script to generate data for the database. Will be removed later.
 
-import { PrismaClient, GoalStatus, TaskStatus, TimeEntrySource } from '@prisma/client';
+import { GoalStatus, TaskStatus, TimeEntrySource } from '@prisma/client';
+import { createPrismaClient } from './create-prisma-client';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 // Get user email from command line arguments
 const userEmail = process.argv[2];
