@@ -1,12 +1,10 @@
-// Time Master - Database Schema
+// Time Master - Database Schema (Prisma 7: URLs in prisma.config.ts)
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
 }
 
 // Main User model

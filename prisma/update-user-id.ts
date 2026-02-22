@@ -1,8 +1,8 @@
 // Temporary script to update the user ID in the database. Will be removed later.
 
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from './create-prisma-client';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const TARGET_USER_ID = 'c01ee0ef-569c-41ab-bf67-22773bc0c396';
 
