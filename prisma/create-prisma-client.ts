@@ -1,18 +1,24 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-type PrismaPgConstructor = new (opts: { connectionString: string }) => NonNullable<Prisma.PrismaClientOptions['adapter']>;
+type CreatePrismaClientOptions = {
+  accelerateUrl?: string;
+};
 
-export function createPrismaClient(): PrismaClient {
+export function createPrismaClient(options: CreatePrismaClientOptions = {}): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) return new PrismaClient();
+  const accelerateUrl = options.accelerateUrl?.trim();
 
-  try {
-    const { PrismaPg } = require('@prisma/adapter-pg') as { PrismaPg: PrismaPgConstructor };
-    const options: Prisma.PrismaClientOptions = {
-      adapter: new PrismaPg({ connectionString }),
-    };
-    return new PrismaClient(options);
-  } catch {
-    return new PrismaClient();
+  if (accelerateUrl) {
+    return new PrismaClient({ accelerateUrl });
   }
+
+  if (!connectionString) {
+    throw new Error('Missing DATABASE_URL. Provide DATABASE_URL or pass accelerateUrl to createPrismaClient().');
+  }
+
+  const clientOptions: Prisma.PrismaClientOptions = {
+    adapter: new PrismaPg({ connectionString }),
+  };
+  return new PrismaClient(clientOptions);
 }
