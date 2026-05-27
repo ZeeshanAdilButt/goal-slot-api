@@ -77,6 +77,7 @@ model User {
   goalReflections    GoalReflection[]
   journalEntries     JournalEntry[]
   coachConversations CoachConversation[]
+  coachInsights      CoachInsight[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -500,20 +501,22 @@ model EncryptedByokKey {
 }
 
 model HabitsProfile {
-  id                       String   @id @default(cuid())
-  userId                   String   @unique
-  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  why                      String   @default("")
-  phoneBlockerInstalled    Boolean  @default(false)
-  distractingSubsCancelled Boolean  @default(false)
-  websiteBlockerUrls       String   @default("")
-  sleepTargetHours         Int      @default(8)
-  bedtime                  String   @default("23:00")
-  wakeTime                 String   @default("07:00")
-  workEnvironment          String   @default("")
-  additionalContext        String   @default("")
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  id                       String           @id @default(cuid())
+  userId                   String           @unique
+  user                     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  why                      String           @default("")
+  phoneBlockerInstalled    Boolean          @default(false)
+  distractingSubsCancelled Boolean          @default(false)
+  websiteBlockerUrls       String           @default("")
+  sleepTargetHours         Int              @default(8)
+  bedtime                  String           @default("23:00")
+  wakeTime                 String           @default("07:00")
+  workEnvironment          String           @default("")
+  additionalContext        String           @default("")
+  religiousContext         ReligiousContext @default(NONE)
+  spiritualNotes           String           @default("")
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
 }
 
 model DailyCheckin {
@@ -594,4 +597,63 @@ model CoachMessage {
   createdAt        DateTime          @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+enum CoachInsightKind {
+  OBSERVATION
+  SUGGESTION
+  EXPERIMENT
+  MEDIA_PROMPT
+}
+
+enum CoachInsightStatus {
+  PROPOSED
+  ACCEPTED
+  DOING
+  DONE
+  DISMISSED
+  SAVED
+}
+
+enum ReligiousContext {
+  NONE
+  ISLAM
+  CHRISTIANITY
+  HINDUISM
+  BUDDHISM
+  JUDAISM
+  SECULAR
+  OTHER
+}
+
+model CoachInsight {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sourceConversationId String?
+  sourceMessageId      String?
+  scopeKey             String
+
+  kind            CoachInsightKind
+  title           String
+  body            String
+  evidence        String
+  suggestedAction String?
+  mediaSlot       String?
+  mediaTopic      String?
+
+  status         CoachInsightStatus @default(PROPOSED)
+  acceptedAt     DateTime?
+  startedDoingAt DateTime?
+  completedAt    DateTime?
+  dismissedAt    DateTime?
+  savedAt        DateTime?
+  userNote       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, scopeKey])
 }

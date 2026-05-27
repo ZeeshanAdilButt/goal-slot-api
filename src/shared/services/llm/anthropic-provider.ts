@@ -3,6 +3,7 @@ import {
   CoachLlmProvider,
   LlmChatMessage,
   LlmStreamChunk,
+  LlmUsage,
 } from './llm.interface';
 
 /**
@@ -80,5 +81,50 @@ export class AnthropicProvider implements CoachLlmProvider {
       done: true,
       usage: { promptTokens, completionTokens },
     };
+  }
+
+  async extractStructured<T = unknown>(args: {
+    messages: LlmChatMessage[];
+    model: string;
+    schemaName: string;
+    schema: Record<string, unknown>;
+  }): Promise<{ data: T; usage: LlmUsage }> {
+    const systemParts: string[] = [];
+    const turns: { role: 'user' | 'assistant'; content: string }[] = [];
+    for (const m of args.messages) {
+      if (m.role === 'system') {
+        systemParts.push(m.content);
+      } else {
+        turns.push({ role: m.role, content: m.content });
+      }
+    }
+
+    const res = await this.client.messages.create({
+      model: args.model,
+      max_tokens: 1500,
+      temperature: 0.2,
+      system: systemParts.join('\n\n') || undefined,
+      messages: turns,
+      tools: [
+        {
+          name: args.schemaName,
+          description: 'Return structured insights.',
+          input_schema: args.schema as any,
+        },
+      ],
+      tool_choice: { type: 'tool', name: args.schemaName } as any,
+    });
+
+    const toolUse = (res.content as any[]).find(
+      (b: any) => b.type === 'tool_use',
+    );
+    if (!toolUse) {
+      throw new Error('Anthropic returned no tool_use block');
+    }
+    const usage: LlmUsage = {
+      promptTokens: res.usage?.input_tokens ?? 0,
+      completionTokens: res.usage?.output_tokens ?? 0,
+    };
+    return { data: toolUse.input as T, usage };
   }
 }

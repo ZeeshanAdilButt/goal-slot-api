@@ -1,6 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ReligiousContext } from '@prisma/client';
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -66,4 +68,15 @@ export class UpsertHabitsProfileDto {
   @IsString()
   @MaxLength(8000)
   additionalContext?: string;
+
+  @ApiPropertyOptional({ enum: ReligiousContext })
+  @IsOptional()
+  @IsEnum(ReligiousContext)
+  religiousContext?: ReligiousContext;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  spiritualNotes?: string;
 }

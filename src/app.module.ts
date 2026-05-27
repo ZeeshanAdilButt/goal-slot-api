@@ -15,6 +15,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { CoachAiModule } from './modules/coach-ai/coach-ai.module';
 import { CoachByokModule } from './modules/coach-byok/coach-byok.module';
 import { CoachCheckinModule } from './modules/coach-checkin/coach-checkin.module';
+import { CoachInsightsModule } from './modules/coach-insights/coach-insights.module';
 import { CoachJournalModule } from './modules/coach-journal/coach-journal.module';
 import { CoachProfileModule } from './modules/coach-profile/coach-profile.module';
 import { CoachReflectionModule } from './modules/coach-reflection/coach-reflection.module';
@@ -57,6 +58,7 @@ import { PostHogModule } from './shared/modules/posthog.module';
     CoachAiModule,
     CoachByokModule,
     CoachCheckinModule,
+    CoachInsightsModule,
     CoachJournalModule,
     CoachProfileModule,
     CoachReflectionModule,

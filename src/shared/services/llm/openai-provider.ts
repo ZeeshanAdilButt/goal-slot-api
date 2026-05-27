@@ -3,6 +3,7 @@ import {
   CoachLlmProvider,
   LlmChatMessage,
   LlmStreamChunk,
+  LlmUsage,
 } from './llm.interface';
 
 /**
@@ -57,5 +58,32 @@ export class OpenAiProvider implements CoachLlmProvider {
       done: true,
       usage: sawUsage ? { promptTokens, completionTokens } : undefined,
     };
+  }
+
+  async extractStructured<T = unknown>(args: {
+    messages: LlmChatMessage[];
+    model: string;
+    schemaName: string;
+    schema: Record<string, unknown>;
+  }): Promise<{ data: T; usage: LlmUsage }> {
+    const completion = await this.client.chat.completions.create({
+      model: args.model,
+      temperature: 0.2,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: args.schemaName,
+          strict: true,
+          schema: args.schema as any,
+        },
+      } as any,
+      messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
+    });
+    const raw = completion.choices[0]?.message?.content ?? '{}';
+    const usage: LlmUsage = {
+      promptTokens: completion.usage?.prompt_tokens ?? 0,
+      completionTokens: completion.usage?.completion_tokens ?? 0,
+    };
+    return { data: JSON.parse(raw) as T, usage };
   }
 }

@@ -32,4 +32,20 @@ export interface CoachLlmProvider {
     messages: LlmChatMessage[],
     model: string,
   ): AsyncIterable<LlmStreamChunk>;
+
+  /**
+   * One-shot, non-streaming structured-output call. The provider is asked to
+   * produce JSON matching `schema` and we return the parsed object plus usage.
+   *
+   * - OpenAI: uses `response_format: { type: 'json_schema', strict: true }`.
+   * - Anthropic: uses tool_use with `tool_choice` forcing the tool by name.
+   *
+   * Implementations MUST NOT log the raw model output or the messages.
+   */
+  extractStructured<T = unknown>(args: {
+    messages: LlmChatMessage[];
+    model: string;
+    schemaName: string;
+    schema: Record<string, unknown>;
+  }): Promise<{ data: T; usage: LlmUsage }>;
 }
