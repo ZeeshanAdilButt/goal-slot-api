@@ -8,7 +8,6 @@ const TARGET_USER_ID = 'c01ee0ef-569c-41ab-bf67-22773bc0c396';
 
 async function main() {
   console.log('🔄 Starting user ID update...');
-  console.log(`📌 Target User ID: ${TARGET_USER_ID}`);
 
   // First, verify the user exists
   const user = await prisma.user.findUnique({
@@ -21,7 +20,6 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`✅ User found: ${user.email} (${user.name})`);
 
   // Get counts before update
   const goalsCount = await prisma.goal.count();

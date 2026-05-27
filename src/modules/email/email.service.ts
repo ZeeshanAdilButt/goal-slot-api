@@ -119,7 +119,6 @@ Happy focusing! 🎯
 - Goal Slot
     `;
 
-    this.logger.log(`Attempting to send share invitation email to ${toEmail} from ${this.notificationEmail}`);
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
@@ -129,8 +128,6 @@ Happy focusing! 🎯
     });
     
     if (result.error) {
-      this.logger.error(`Resend API error for ${toEmail}:`, result.error);
-      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
       throw new InternalServerErrorException(
         `Failed to send share invitation email: ${result.error.message}`,
       );
@@ -236,7 +233,6 @@ ${otp}
 Having trouble? Contact us at Goal Slot for support.
     `;
 
-    this.logger.log(`Attempting to send OTP email (${purpose}) to ${toEmail} from ${this.onboardingEmail}`);
     const result = await this.resend.emails.send({
       from: this.onboardingEmail,
       to: toEmail,
@@ -246,8 +242,6 @@ Having trouble? Contact us at Goal Slot for support.
     });
     
     if (result.error) {
-      this.logger.error(`Resend API error for OTP email to ${toEmail}:`, result.error);
-      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
       throw new InternalServerErrorException(
         `Failed to send OTP email: ${result.error.message}`,
       );
@@ -404,8 +398,7 @@ Remember: Consistency beats intensity. Small daily focus sessions add up to mass
 Happy focusing!
 The Goal Slot Team
     `;
-
-    this.logger.log(`Attempting to send welcome email to ${toEmail} from ${this.onboardingEmail}`);
+ 
     const result = await this.resend.emails.send({
       from: this.onboardingEmail,
       to: toEmail,
@@ -415,8 +408,6 @@ The Goal Slot Team
     });
     
     if (result.error) {
-      this.logger.error(`Resend API error for welcome email to ${toEmail}:`, result.error);
-      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
       throw new InternalServerErrorException(
         `Failed to send welcome email: ${result.error.message}`,
       );
@@ -472,7 +463,6 @@ The Goal Slot Team
       </html>
     `;
 
-    this.logger.log(`Attempting to send share accepted notification to ${toEmail} from ${this.notificationEmail}`);
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
@@ -481,8 +471,6 @@ The Goal Slot Team
     });
     
     if (result.error) {
-      this.logger.error(`Resend API error for share accepted notification to ${toEmail}:`, result.error);
-      this.logger.error(`Error details: ${JSON.stringify(result.error, null, 2)}`);
       throw new InternalServerErrorException(
         `Failed to send share accepted notification: ${result.error.message}`,
       );

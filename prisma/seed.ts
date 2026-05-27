@@ -32,7 +32,6 @@ async function main() {
     },
   });
 
-  console.log('✅ Super Admin created:', superAdmin.email);
 
   // Create sample internal user
   const internalUser = await prisma.user.upsert({
@@ -49,7 +48,6 @@ async function main() {
     },
   });
 
-  console.log('✅ Internal user created:', internalUser.email);
 
   // Create sample goals for the internal user
   const goalsData = [

@@ -114,7 +114,6 @@ const scheduleTemplates = [
 
 async function main() {
   console.log('🌱 Starting comprehensive data generation...');
-  console.log(`📧 Looking for user: ${userEmail}`);
 
   // Check if user exists
   const user = await prisma.user.findUnique({
@@ -127,7 +126,6 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('✅ User found:', user.email);
 
   // Fetch categories for this user
   let categories = await prisma.category.findMany({
