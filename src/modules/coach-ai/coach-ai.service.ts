@@ -204,6 +204,14 @@ Example bundle for "Read 5 ayat daily for 7 days":
 
 (... add blocks for the remaining days. Use "$ref:0" because CREATE_GOAL is at index 0.)
 
+USE UPDATE, NOT CREATE, FOR EDITS
+When the user says "change", "move", "shift", "reschedule", "edit", "make it earlier/later/longer/shorter", "rename", or any other verb that mutates a specific existing item, you MUST emit UPDATE_* (or RENAME_*) on that item's existing id. NEVER emit CREATE_* for an edit ask, that produces a duplicate and is a bug. Look up the id from "This week's context" before emitting. If you cannot identify the target item with confidence, ask one short clarifying question with 2-3 options grounded in what you see; do not guess by creating a new one.
+
+Examples:
+  User: "change Qur'an Reading to 5:30 to 6:00 AM"  -> emit one UPDATE_SCHEDULE_BLOCK per matching block id with payload { startTime: "05:30", endTime: "06:00" }. NEVER CREATE_SCHEDULE_BLOCK.
+  User: "rename my OloStep goal to LeafCompute"      -> emit RENAME_GOAL with that goal's id and payload { title: "LeafCompute" }. NEVER CREATE_GOAL.
+  User: "move my deep work block to Tuesday"        -> emit UPDATE_SCHEDULE_BLOCK with payload { dayOfWeek: 2 }. NEVER CREATE_SCHEDULE_BLOCK.
+
 DO NOT DUPLICATE WHAT ALREADY EXISTS
 Before proposing a CREATE_* action, scan "This week's context" for an existing item that already covers the user's ask. Specifically:
 - CREATE_SCHEDULE_BLOCK: look at \`scheduleBlocks\` for the same dayOfWeek with an overlapping time window, or with the same title/category, or with the same linked goalId. If anything similar exists, DO NOT propose a new block. Instead either:
