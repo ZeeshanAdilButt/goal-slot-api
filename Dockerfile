@@ -10,8 +10,10 @@ RUN npm install -g npm@latest && npm cache clean --force
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install dependencies with retry
-RUN npm ci || (npm cache clean --force && npm ci)
+# Install dependencies with retry. Using `npm install` instead of
+# `npm ci` because the repo doesn't ship a package-lock.json (deleted
+# in PR #17). Keeping the retry pattern in case the registry hiccups.
+RUN npm install --no-audit --no-fund || (npm cache clean --force && npm install --no-audit --no-fund)
 
 # Copy source code
 COPY . .
@@ -34,8 +36,10 @@ RUN npm install -g npm@latest && npm cache clean --force
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install only production dependencies with retry
-RUN npm ci --only=production || (npm cache clean --force && npm ci --only=production)
+# Install only production dependencies with retry. Using `npm install`
+# instead of `npm ci` because the repo doesn't ship a package-lock.json
+# (deleted in PR #17). `--omit=dev` keeps the image lean.
+RUN npm install --omit=dev --no-audit --no-fund || (npm cache clean --force && npm install --omit=dev --no-audit --no-fund)
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
