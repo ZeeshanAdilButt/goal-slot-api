@@ -1164,6 +1164,34 @@ function buildUserContextMessage(
     scheduleBlocks: ctx.scheduleBlocks,
   };
 
+  // Surface unlinked schedule blocks + linkable goals as plain-text sections
+  // so the model cannot bury them in the JSON dump. Drives the proactive
+  // "link blocks to goals" rule reliably.
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const fmt12h = (t: string): string => {
+    const [hStr, mStr] = (t || '').split(':');
+    const h = Number(hStr);
+    const m = Number(mStr);
+    if (Number.isNaN(h) || Number.isNaN(m)) return t;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const dh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${dh}:${m.toString().padStart(2, '0')} ${ampm}`;
+  };
+  const unlinkedBlocks = (ctx.scheduleBlocks ?? []).filter((b) => !b.goalId);
+  const unlinkedSection = unlinkedBlocks.length
+    ? unlinkedBlocks
+        .map(
+          (b) =>
+            `  - id=${b.id} | "${b.title}" | ${dayNames[b.dayOfWeek] ?? '?'} ${fmt12h(b.startTime)} to ${fmt12h(b.endTime)} | category=${b.category ?? 'none'}`,
+        )
+        .join('\n')
+    : '  (none, all blocks are linked to goals)';
+  const goalsListSection = (ctx.activeGoals ?? []).length
+    ? (ctx.activeGoals ?? [])
+        .map((g: { id: string; title: string }) => `  - id=${g.id} | "${g.title}"`)
+        .join('\n')
+    : '  (no active goals)';
+
   const intro =
     mode === 'narrative'
       ? "Write this week's narrative for me. Reference specific data points. Close with one Socratic question."
@@ -1178,7 +1206,13 @@ function buildUserContextMessage(
     "## What you've already suggested (and the user accepted)",
     memorySection,
     '',
-    "## This week's context",
+    '## UNLINKED schedule blocks (no goalId, user cannot log time against them)',
+    unlinkedSection,
+    '',
+    '## Active goals you can link blocks to',
+    goalsListSection,
+    '',
+    "## This week's context (full JSON)",
     JSON.stringify(rest),
   ].join('\n');
 }
