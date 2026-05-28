@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoachByokService } from './coach-byok.service';
 import { SaveByokKeyDto } from './dto/save-byok-key.dto';
 import { ByokStateDto } from './dto/byok-state.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
 import { UpdateTokenBudgetDto } from './dto/update-token-budget.dto';
 import { UsageDto } from './dto/usage.dto';
 
@@ -60,5 +61,17 @@ export class CoachByokController {
     @Body() dto: UpdateTokenBudgetDto,
   ): Promise<ByokStateDto> {
     return this.byokService.updateTokenBudget(req.user.sub, dto.tokensLimit);
+  }
+
+  @Patch('model')
+  @ApiOperation({
+    summary:
+      'Update the specific provider model Coach will call. Must be on the whitelist for the current provider; otherwise the call is rejected.',
+  })
+  async updateModel(
+    @Request() req: any,
+    @Body() dto: UpdateModelDto,
+  ): Promise<ByokStateDto> {
+    return this.byokService.updateModel(req.user.sub, dto.model);
   }
 }

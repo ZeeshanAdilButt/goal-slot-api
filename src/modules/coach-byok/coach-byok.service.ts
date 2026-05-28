@@ -6,6 +6,7 @@ import {
 import { CoachProvider } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../shared/services/encryption.service';
+import { LlmFactory, isAllowedModel } from '../../shared/services/llm/llm-factory';
 import { SaveByokKeyDto } from './dto/save-byok-key.dto';
 import { ByokStateDto } from './dto/byok-state.dto';
 import { UsageDto } from './dto/usage.dto';
@@ -20,6 +21,7 @@ export class CoachByokService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly llmFactory: LlmFactory,
   ) {}
 
   async getState(userId: string): Promise<ByokStateDto> {
@@ -35,7 +37,27 @@ export class CoachByokService {
       maskedKey: row.maskedHint,
       tokensUsed: row.tokensUsedThisMonth,
       tokensLimit: row.tokensLimit,
+      selectedModel: row.selectedModel,
+      allowedModels: this.llmFactory.allowedModels(row.provider),
+      effectiveModel: this.llmFactory.resolveModel(row.provider, row.selectedModel),
     };
+  }
+
+  async updateModel(userId: string, model: string): Promise<ByokStateDto> {
+    const row = await this.prisma.encryptedByokKey.findUnique({
+      where: { userId },
+    });
+    if (!row) throw new NotFoundException('No BYOK key configured');
+    if (!isAllowedModel(row.provider, model)) {
+      throw new BadRequestException(
+        `Model "${model}" is not on the allowed list for provider ${row.provider}`,
+      );
+    }
+    await this.prisma.encryptedByokKey.update({
+      where: { userId },
+      data: { selectedModel: model },
+    });
+    return this.getState(userId);
   }
 
   async saveKey(userId: string, dto: SaveByokKeyDto): Promise<ByokStateDto> {

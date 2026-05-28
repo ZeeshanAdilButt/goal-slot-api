@@ -4,10 +4,40 @@ import { CoachLlmProvider } from './llm.interface';
 import { OpenAiProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
 
+/**
+ * Allowed model whitelist per provider. The user picks from this list in
+ * Settings; anything else is rejected at the API boundary. Keep these in
+ * sync with the provider names billed by OpenAI / Anthropic. Order is the
+ * order shown in the UI dropdown, cheapest -> most expensive within each
+ * provider so users default to the value choice.
+ */
+export const ALLOWED_MODELS: Record<CoachProvider, string[]> = {
+  OPENAI: [
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini',
+    'gpt-4.1',
+    'o4-mini',
+  ],
+  ANTHROPIC: [
+    'claude-3-5-haiku-20241022',
+    'claude-haiku-4-5-20251001',
+    'claude-sonnet-4-6',
+    'claude-opus-4-7',
+  ],
+};
+
 const DEFAULT_MODELS: Record<CoachProvider, string> = {
   OPENAI: 'gpt-4o-mini',
   ANTHROPIC: 'claude-3-5-haiku-20241022',
 };
+
+export function isAllowedModel(
+  provider: CoachProvider,
+  model: string,
+): boolean {
+  return ALLOWED_MODELS[provider]?.includes(model) ?? false;
+}
 
 @Injectable()
 export class LlmFactory {
@@ -34,5 +64,20 @@ export class LlmFactory {
 
   defaultModel(provider: CoachProvider): string {
     return DEFAULT_MODELS[provider];
+  }
+
+  /**
+   * Pick the model to use for this call: the user's selection if it is on
+   * the whitelist, otherwise the provider default.
+   */
+  resolveModel(provider: CoachProvider, userSelection?: string | null): string {
+    if (userSelection && isAllowedModel(provider, userSelection)) {
+      return userSelection;
+    }
+    return DEFAULT_MODELS[provider];
+  }
+
+  allowedModels(provider: CoachProvider): string[] {
+    return ALLOWED_MODELS[provider] ?? [];
   }
 }

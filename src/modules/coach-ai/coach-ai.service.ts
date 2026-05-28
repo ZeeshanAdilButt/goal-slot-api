@@ -531,6 +531,7 @@ export class CoachAiService {
       persistRole: CoachRole.SYSTEM_NARRATIVE,
       scopeKey,
       result,
+      selectedModel: byok.selectedModel,
     });
 
     // Only extract when there is an actual narrative AND we persisted it.
@@ -544,6 +545,7 @@ export class CoachAiService {
         provider: byok.provider,
         decryptedKey,
         contextBundle: context,
+        selectedModel: byok.selectedModel,
       }).catch((err) =>
         this.logger.warn(
           `insight extraction failed user=${userId} scope=${scopeKey}: ${err?.message ?? err}`,
@@ -606,6 +608,7 @@ export class CoachAiService {
       persistRole: CoachRole.ASSISTANT,
       scopeKey,
       result,
+      selectedModel: byok.selectedModel,
     });
     // NOTE: chat does NOT trigger extraction.
   }
@@ -621,9 +624,10 @@ export class CoachAiService {
     persistRole: CoachRole;
     scopeKey: string;
     result: { messageId?: string; fullText: string };
+    selectedModel?: string | null;
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
-    const model = this.llmFactory.defaultModel(args.provider);
+    const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
 
     let fullText = '';
     let usage: { promptTokens: number; completionTokens: number } | undefined;
@@ -921,13 +925,14 @@ export class CoachAiService {
     provider: import('@prisma/client').CoachProvider;
     decryptedKey: string;
     contextBundle: ContextBundle;
+    selectedModel?: string | null;
   }): Promise<void> {
     try {
       const provider = this.llmFactory.create(
         args.provider,
         args.decryptedKey,
       );
-      const model = this.llmFactory.defaultModel(args.provider);
+      const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
 
       const contextJson = JSON.stringify(
         serializeContextForExtraction(args.contextBundle),

@@ -22,4 +22,25 @@ export class ByokStateDto {
 
   @ApiProperty({ required: false, nullable: true })
   tokensLimit?: number | null;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'User-selected model for this provider (null = use default)',
+  })
+  selectedModel?: string | null;
+
+  @ApiProperty({
+    required: false,
+    type: [String],
+    description: 'Models the user can pick from for the current provider',
+  })
+  allowedModels?: string[];
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'Model actually used by Coach (resolves selectedModel or default)',
+  })
+  effectiveModel?: string | null;
 }

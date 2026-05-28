@@ -494,6 +494,7 @@ model EncryptedByokKey {
   tokensUsedThisMonth Int           @default(0)
   tokensLimit         Int           @default(100000)
   tokensWindowStart   DateTime      @default(now())
+  selectedModel       String?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
