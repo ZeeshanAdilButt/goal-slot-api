@@ -250,6 +250,18 @@ export class CoachAiService {
     return { messages };
   }
 
+  /**
+   * Wipe the chat conversation for a single scope so the next message starts
+   * clean. Narrative messages + accepted insights are NOT touched — the
+   * Coach still remembers what the user committed to. Only the chat thread
+   * row + its messages are removed (cascade delete via Prisma relation).
+   */
+  async clearChat(userId: string, scopeKey: string): Promise<void> {
+    await this.prisma.coachConversation.deleteMany({
+      where: { userId, scope: CoachScope.CHAT, scopeKey },
+    });
+  }
+
   // ----- Streaming entry points -----
 
   /**

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -94,6 +95,19 @@ export class CoachAiController {
       body.content,
     );
     return asSseObservable(iter);
+  }
+
+  @Delete('chat/:scopeKey')
+  @ApiOperation({
+    summary:
+      'Clear the chat history for this scope so the next message starts fresh. Accepted insights + narrative stay; only chat messages + the chat conversation row are removed.',
+  })
+  async clearChat(
+    @Request() req: any,
+    @Param('scopeKey') scopeKey: string,
+  ): Promise<{ success: true }> {
+    await this.coachAi.clearChat(req.user.sub, scopeKey);
+    return { success: true };
   }
 }
 
