@@ -18,7 +18,11 @@ RUN npm install --no-audit --no-fund || (npm cache clean --force && npm install 
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client. prisma.config.ts reads DATABASE_URL at
+# config-parse time (env("DATABASE_URL") throws otherwise), so we pin
+# a build-time placeholder. The real URL is injected at runtime by
+# the platform (Render).
+ENV DATABASE_URL="postgresql://stub:stub@localhost:5432/stub"
 RUN npx prisma generate
 
 # Build the application
