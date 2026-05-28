@@ -43,7 +43,15 @@ export class CoachProposalsService {
     const results: CoachActionResult[] = [];
 
     for (let i = 0; i < actions.length; i++) {
-      const action = actions[i];
+      const raw = actions[i];
+      // Resolve any "$ref:N" tokens in the payload against previous results in
+      // this batch. Lets Coach bundle e.g. CREATE_GOAL + N CREATE_SCHEDULE_BLOCK
+      // actions, with the blocks linking goalId: "$ref:0" to the just-created
+      // goal, so the user can log time against the goal as soon as they click apply.
+      const action: CoachProposedAction = {
+        ...raw,
+        payload: resolveRefs(raw.payload, results),
+      };
       try {
         const resultId = await this.dispatch(userId, action);
         results.push({ index: i, type: action.type, ok: true, resultId });
@@ -171,4 +179,36 @@ export class CoachProposalsService {
         throw new Error(`Unknown action type: ${(action as any).type}`);
     }
   }
+}
+
+/**
+ * Replace any `"$ref:N"` strings in the payload with the resultId of the
+ * action at batch index N. Walks objects + arrays recursively. Used so the
+ * Coach can express dependencies inside a single approval batch.
+ */
+function resolveRefs(
+  value: any,
+  results: CoachActionResult[],
+): any {
+  if (typeof value === 'string') {
+    const m = /^\$ref:(\d+)$/.exec(value);
+    if (m) {
+      const idx = Number(m[1]);
+      const ref = results[idx];
+      if (!ref?.ok || !ref.resultId) {
+        throw new Error(
+          `Cannot resolve $ref:${idx}: prior action did not succeed or has no resultId`,
+        );
+      }
+      return ref.resultId;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => resolveRefs(v, results));
+  if (value && typeof value === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(value)) out[k] = resolveRefs(value[k], results);
+    return out;
+  }
+  return value;
 }
