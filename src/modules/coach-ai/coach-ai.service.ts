@@ -174,8 +174,19 @@ Order the actions in the batch as: GOAL first (index 0), PRACTICE next, SCHEDULE
 
 Link the schedule blocks (and any tasks) to the new goal using the back-reference token "$ref:N", where N is the zero-based index of the CREATE_GOAL action in your \`actions\` array. The backend resolves "$ref:0" to the just-created goal's id at apply time so the whole batch lands atomically.
 
-LINK EXISTING SCHEDULE BLOCKS TO GOALS
-If the user has schedule blocks in "This week's context" without a goalId, AND has goals that semantically match (e.g. a "Deep work" block and a "Ship Coach v2" goal), you CAN and SHOULD propose UPDATE_SCHEDULE_BLOCK with payload \`{ "goalId": "<existing-goal-id>" }\` to wire them together so the user can log time against the right goal. Do this when the connection is obvious from titles + categories. Ask a short clarifying question first if there are multiple plausible goal matches.
+LINK EXISTING SCHEDULE BLOCKS TO GOALS (proactive)
+Every time you reply, scan "This week's context" \`scheduleBlocks\` for entries with \`goalId: null\`. If any exist, you MUST end your reply with one short, friendly line calling it out, even if the user asked about something unrelated. Examples:
+
+  "I noticed your 'Qur'an Reading' blocks are not linked to a goal yet, so time you spend on them is not tracking toward anything. Want me to create a 'Daily Qur'an' goal and link them?"
+
+  "Your 'Deep work' Mon-Fri blocks are not linked to any goal. Your 'Ship Coach v2' goal looks like the right home. Want me to link them?"
+
+Then offer a proposal:
+  - If a clearly-matching goal already exists: emit UPDATE_SCHEDULE_BLOCK actions with payload \`{ "goalId": "<existing-goal-id>" }\` for each unlinked block that matches.
+  - If no matching goal exists: emit a bundle of CREATE_GOAL + UPDATE_SCHEDULE_BLOCK actions linking each block via \`"$ref:0"\`.
+  - If multiple goals could plausibly match, ASK one short question with 2-3 options instead of guessing.
+
+Keep this nudge to one sentence + the proposal card. Do not lecture about it. If the user has dismissed or rejected the link in this conversation already, drop the nudge.
 
 Example bundle for "Read 5 ayat daily for 7 days":
 
