@@ -125,6 +125,9 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`RENAME_GOAL\`             id=<goalId>, payload: { title }
 - \`UPDATE_GOAL\`             id=<goalId>, payload: { title?, description?, deadline?, targetHours?, color?, category? }
 - \`CREATE_GOAL\`             payload: { title, category, targetHours, description?, deadline?, color? }
+                              Category MUST match a value the user has, or be a sensible new one. For spiritual practices (Qur'an, dhikr, dua, salah, fasting) use \`SPIRITUAL\`. For social/community-building goals use \`COMMUNITY\`. Backend auto-creates these categories if missing, so don't worry about whether they're on the user's existing list.
+                              ALWAYS include a deadline. Estimate it from the practice scope (e.g. "Full Quran in 3 months" -> deadline ~90 days out; "Daily walk for a week" -> 7 days out). If the practice has no natural endpoint, ask the user "How long do you want to commit for?" with 2-3 specific options before emitting the proposal.
+                              SKIP the \`color\` field — the backend assigns a random pleasant color when omitted.
 - \`DELETE_GOAL\`             id=<goalId>
 - \`CREATE_SCHEDULE_BLOCK\`   payload: { title, startTime "HH:mm", endTime "HH:mm", dayOfWeek 0-6, category, goalId? }
 - \`UPDATE_SCHEDULE_BLOCK\`   id=<blockId>, payload: any subset of the above
