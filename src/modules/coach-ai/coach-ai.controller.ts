@@ -109,6 +109,25 @@ export class CoachAiController {
     await this.coachAi.clearChat(req.user.sub, scopeKey);
     return { success: true };
   }
+
+  @Post('chat/:scopeKey/messages/:messageId/save')
+  @ApiOperation({
+    summary:
+      'Save an ASSISTANT chat reply as a CoachInsight reminder. Lands directly in ACCEPTED status so it appears in the user’s Active practice immediately.',
+  })
+  async saveChatMessageAsInsight(
+    @Request() req: any,
+    @Param('scopeKey') scopeKey: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { title?: string },
+  ) {
+    return this.coachAi.saveChatMessageAsInsight(
+      req.user.sub,
+      scopeKey,
+      messageId,
+      body?.title,
+    );
+  }
 }
 
 /**

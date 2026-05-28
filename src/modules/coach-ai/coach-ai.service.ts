@@ -262,6 +262,65 @@ export class CoachAiService {
     });
   }
 
+  /**
+   * Turn an ASSISTANT chat reply into a tracked CoachInsight (status ACCEPTED
+   * so it shows up in the user’s reminders immediately). User-driven: they
+   * read the reply and decided this is worth keeping. Ownership check goes
+   * through the conversation row.
+   */
+  async saveChatMessageAsInsight(
+    userId: string,
+    scopeKey: string,
+    messageId: string,
+    titleOverride?: string,
+  ) {
+    const message = await this.prisma.coachMessage.findUnique({
+      where: { id: messageId },
+      include: { conversation: true },
+    });
+    if (
+      !message ||
+      message.conversation.userId !== userId ||
+      message.conversation.scope !== CoachScope.CHAT ||
+      message.conversation.scopeKey !== scopeKey
+    ) {
+      throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
+    }
+    if (message.role !== CoachRole.ASSISTANT) {
+      throw new HttpException(
+        'Only Coach replies can be saved as reminders.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const trimmed = (message.content ?? '').trim();
+    const fallbackTitle = (() => {
+      const firstSentence = trimmed.split(/(?<=[.!?])\s+/)[0] ?? trimmed;
+      return firstSentence.length > 80
+        ? firstSentence.slice(0, 77) + '...'
+        : firstSentence;
+    })();
+    const title = (titleOverride ?? fallbackTitle).slice(0, 100) || 'Saved from chat';
+    const body = trimmed.length > 600 ? trimmed.slice(0, 597) + '...' : trimmed;
+
+    const insight = await this.prisma.coachInsight.create({
+      data: {
+        userId,
+        scopeKey,
+        sourceConversationId: message.conversationId,
+        sourceMessageId: message.id,
+        kind: 'SUGGESTION',
+        title,
+        body,
+        evidence: 'Saved from a Coach chat reply.',
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+      },
+    });
+
+    return insight;
+  }
+
   // ----- Streaming entry points -----
 
   /**
