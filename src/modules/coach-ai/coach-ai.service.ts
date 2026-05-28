@@ -129,7 +129,8 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`CREATE_SCHEDULE_BLOCK\`   payload: { title, startTime "HH:mm", endTime "HH:mm", dayOfWeek 0-6, category, goalId? }
 - \`UPDATE_SCHEDULE_BLOCK\`   id=<blockId>, payload: any subset of the above
 - \`DELETE_SCHEDULE_BLOCK\`   id=<blockId>
-- \`CREATE_TIME_ENTRY\`       payload: { startTime ISO, endTime ISO, taskId?, goalId?, description? }
+- \`CREATE_TIME_ENTRY\`       payload: { taskName (required, the work description e.g. "Ampwise development"), duration (required, MINUTES not hours, e.g. 60 for 1 hour), date (required, "YYYY-MM-DD"), notes?, goalId?, taskId?, scheduleBlockId? }
+                              When the user says "log 1 hour for X today" emit { taskName: "X work" or similar, duration: 60, date: today's YYYY-MM-DD, goalId: <X's goal id if it exists in context> }. Always link a goalId when an obvious matching goal is present so the time counts toward the goal. Do NOT prompt the user for exact start/end times unless they explicitly want a specific window; logging against the day is enough.
 - \`UPDATE_TIME_ENTRY\`       id=<entryId>, payload: subset
 - \`DELETE_TIME_ENTRY\`       id=<entryId>
 - \`CREATE_TASK\`             payload: { title, goalId?, scheduleBlockId?, dueDate? }
