@@ -84,6 +84,23 @@ export class CoachByokService {
     return { success: true };
   }
 
+  async updateTokenBudget(
+    userId: string,
+    tokensLimit: number,
+  ): Promise<ByokStateDto> {
+    const row = await this.prisma.encryptedByokKey.findUnique({
+      where: { userId },
+    });
+    if (!row) {
+      throw new NotFoundException('No BYOK key configured');
+    }
+    await this.prisma.encryptedByokKey.update({
+      where: { userId },
+      data: { tokensLimit },
+    });
+    return this.getState(userId);
+  }
+
   async getUsage(userId: string): Promise<UsageDto> {
     const row = await this.prisma.encryptedByokKey.findUnique({
       where: { userId },

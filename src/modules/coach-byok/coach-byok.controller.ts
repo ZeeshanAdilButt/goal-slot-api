@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Patch,
   Post,
   Request,
   UseGuards,
@@ -12,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoachByokService } from './coach-byok.service';
 import { SaveByokKeyDto } from './dto/save-byok-key.dto';
 import { ByokStateDto } from './dto/byok-state.dto';
+import { UpdateTokenBudgetDto } from './dto/update-token-budget.dto';
 import { UsageDto } from './dto/usage.dto';
 
 @ApiTags('coach-byok')
@@ -46,5 +48,17 @@ export class CoachByokController {
   @ApiOperation({ summary: 'Get token usage for the current BYOK window' })
   async getUsage(@Request() req: any): Promise<UsageDto> {
     return this.byokService.getUsage(req.user.sub);
+  }
+
+  @Patch('budget')
+  @ApiOperation({
+    summary:
+      'Update the monthly token budget for the user BYOK key. Soft cap enforced server-side so the user controls their own spend on the underlying provider account.',
+  })
+  async updateBudget(
+    @Request() req: any,
+    @Body() dto: UpdateTokenBudgetDto,
+  ): Promise<ByokStateDto> {
+    return this.byokService.updateTokenBudget(req.user.sub, dto.tokensLimit);
   }
 }
