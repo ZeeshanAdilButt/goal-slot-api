@@ -1093,12 +1093,47 @@ function capText(s: string, max: number): string {
 }
 
 /**
- * Convert an ISO week scopeKey ("2026-W22") into a [from, to] Date range
- * covering Monday 00:00:00 through Sunday 23:59:59.999 UTC. If parsing
- * fails, defaults to the current week.
+ * Convert a scopeKey into a [from, to] Date range. Supports four shapes:
+ *   "YYYY-Www"  ISO week, Monday 00:00 through Sunday 23:59:59.999 UTC
+ *   "YYYY-Mmm"  Calendar month, day 1 through last day 23:59:59.999 UTC
+ *   "YYYY-Qq"   Quarter (q in 1..4), 3-month span UTC
+ *   "YYYY"      Full calendar year UTC
+ * If parsing fails, defaults to the current ISO week. Function name kept
+ * for back-compat with existing callers.
  */
 export function isoWeekRange(scopeKey: string): { from: Date; to: Date } {
-  const m = /^(\d{4})-W(\d{1,2})$/.exec(scopeKey);
+  // Year
+  let m: RegExpExecArray | null = /^(\d{4})$/.exec(scopeKey);
+  if (m) {
+    const y = Number(m[1]);
+    const from = new Date(Date.UTC(y, 0, 1));
+    const to = new Date(Date.UTC(y + 1, 0, 1));
+    to.setUTCMilliseconds(to.getUTCMilliseconds() - 1);
+    return { from, to };
+  }
+  // Quarter
+  m = /^(\d{4})-Q([1-4])$/.exec(scopeKey);
+  if (m) {
+    const y = Number(m[1]);
+    const q = Number(m[2]);
+    const startMonth = (q - 1) * 3;
+    const from = new Date(Date.UTC(y, startMonth, 1));
+    const to = new Date(Date.UTC(y, startMonth + 3, 1));
+    to.setUTCMilliseconds(to.getUTCMilliseconds() - 1);
+    return { from, to };
+  }
+  // Month
+  m = /^(\d{4})-M(\d{2})$/.exec(scopeKey);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const from = new Date(Date.UTC(y, mo, 1));
+    const to = new Date(Date.UTC(y, mo + 1, 1));
+    to.setUTCMilliseconds(to.getUTCMilliseconds() - 1);
+    return { from, to };
+  }
+  // Week (default)
+  m = /^(\d{4})-W(\d{1,2})$/.exec(scopeKey);
   if (!m) {
     return currentIsoWeekRange();
   }
