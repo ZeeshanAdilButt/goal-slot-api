@@ -408,6 +408,42 @@ export class CoachAiService {
   }
 
   /**
+   * Delete the given chat message AND every later message in the same
+   * conversation. Used when the user edits an old USER message: the edit
+   * replaces that turn, so everything after it (the original assistant reply
+   * + any subsequent back-and-forth) becomes stale. Removing it keeps the
+   * LLM context lean and prevents the Coach from contradicting itself.
+   *
+   * Ownership: validated by checking the message's conversation belongs to
+   * the user and matches scope+scopeKey.
+   */
+  async truncateChatFrom(
+    userId: string,
+    scopeKey: string,
+    messageId: string,
+  ): Promise<{ deleted: number }> {
+    const message = await this.prisma.coachMessage.findUnique({
+      where: { id: messageId },
+      include: { conversation: true },
+    });
+    if (
+      !message ||
+      message.conversation.userId !== userId ||
+      message.conversation.scope !== CoachScope.CHAT ||
+      message.conversation.scopeKey !== scopeKey
+    ) {
+      throw new HttpException('Message not found', HttpStatus.NOT_FOUND);
+    }
+    const result = await this.prisma.coachMessage.deleteMany({
+      where: {
+        conversationId: message.conversationId,
+        createdAt: { gte: message.createdAt },
+      },
+    });
+    return { deleted: result.count };
+  }
+
+  /**
    * Turn an ASSISTANT chat reply into a tracked CoachInsight (status ACCEPTED
    * so it shows up in the user’s reminders immediately). User-driven: they
    * read the reply and decided this is worth keeping. Ownership check goes

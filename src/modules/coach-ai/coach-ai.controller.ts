@@ -110,6 +110,19 @@ export class CoachAiController {
     return { success: true };
   }
 
+  @Delete('chat/:scopeKey/messages/from/:messageId')
+  @ApiOperation({
+    summary:
+      'Delete the given chat message and every later message in the same conversation. Used by the edit-and-resend flow so editing an old message clears the now-stale Coach reply and any back-and-forth that followed.',
+  })
+  async truncateChatFrom(
+    @Request() req: any,
+    @Param('scopeKey') scopeKey: string,
+    @Param('messageId') messageId: string,
+  ): Promise<{ deleted: number }> {
+    return this.coachAi.truncateChatFrom(req.user.sub, scopeKey, messageId);
+  }
+
   @Post('chat/:scopeKey/messages/:messageId/save')
   @ApiOperation({
     summary:

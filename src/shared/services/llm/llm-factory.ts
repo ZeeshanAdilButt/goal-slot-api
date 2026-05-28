@@ -13,11 +13,20 @@ import { AnthropicProvider } from './anthropic-provider';
  */
 export const ALLOWED_MODELS: Record<CoachProvider, string[]> = {
   OPENAI: [
+    // 4-series (cheap, fast)
     'gpt-4o-mini',
     'gpt-4o',
     'gpt-4.1-mini',
     'gpt-4.1',
+    // o-series reasoning
     'o4-mini',
+    'o3',
+    'o3-mini',
+    // 5-series (latest, more capable, more expensive)
+    'gpt-5-mini',
+    'gpt-5',
+    'gpt-5.4',
+    'gpt-5.5',
   ],
   ANTHROPIC: [
     'claude-3-5-haiku-20241022',
