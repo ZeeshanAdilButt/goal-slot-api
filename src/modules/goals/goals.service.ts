@@ -33,6 +33,44 @@ export class GoalsService {
   ) {}
 
   /**
+   * Ensure a category with the given value exists for the user. If not,
+   * create it with a sensible color so Coach-proposed goals referencing
+   * categories like "SPIRITUAL" (that may not be on every legacy user's
+   * default list) don't drop into a missing-category limbo.
+   */
+  private async ensureCategoryExists(userId: string, value: string): Promise<void> {
+    const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    if (!normalized) return;
+    const existing = await this.prisma.category.findFirst({
+      where: { userId, value: normalized },
+    });
+    if (existing) return;
+    // Friendly display name from the raw input ("spiritual" -> "Spiritual").
+    const displayName = value
+      .toLowerCase()
+      .replace(/_+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+    const PRESET_COLORS: Record<string, string> = {
+      SPIRITUAL: '#10B981',
+      LEARNING: '#3B82F6',
+      WORK: '#22D3EE',
+      HEALTH: '#22C55E',
+      EXERCISE: '#F97316',
+    };
+    const color = PRESET_COLORS[normalized] || LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
+    await this.prisma.category.create({
+      data: {
+        userId,
+        name: displayName || normalized,
+        value: normalized,
+        color,
+        isDefault: false,
+      },
+    });
+  }
+
+  /**
    * Get or create a label by name for a user
    */
   private async getOrCreateLabel(
@@ -89,9 +127,24 @@ export class GoalsService {
 
     const { labels, ...goalData } = dto;
 
+    // Auto-assign a soft random color when the caller (e.g. Coach proposal)
+    // didn't pick one, so new goals look distinct on the dashboard.
+    const color =
+      goalData.color && goalData.color.trim()
+        ? goalData.color
+        : LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
+
+    // Ensure the category exists for this user. Coach can propose SPIRITUAL or
+    // any category name; if it's not on the user's list yet we create it on
+    // the fly so the goal doesn't end up orphaned to a missing category.
+    if (goalData.category) {
+      await this.ensureCategoryExists(userId, goalData.category);
+    }
+
     const goal = await this.prisma.goal.create({
       data: {
         ...goalData,
+        color,
         userId,
         deadline: dto.deadline ? new Date(dto.deadline) : null,
       },
