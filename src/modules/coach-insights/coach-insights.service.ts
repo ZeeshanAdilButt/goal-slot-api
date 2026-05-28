@@ -16,6 +16,48 @@ const NON_DELETABLE_STATUSES: CoachInsightStatus[] = [
 export class CoachInsightsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Create an insight that lands directly in ACCEPTED (the user already
+   * approved it via a CoachProposalCard, so it's a tracked Active Practice
+   * the moment it's written). Used by CoachProposalsService.CREATE_PRACTICE.
+   */
+  async createAccepted(
+    userId: string,
+    dto: {
+      title: string;
+      body: string;
+      kind?: 'OBSERVATION' | 'SUGGESTION' | 'EXPERIMENT' | 'MEDIA_PROMPT';
+      suggestedAction?: string;
+      evidence?: string;
+      mediaSlot?: string;
+      mediaTopic?: string;
+      scopeKey?: string;
+      sourceMessageId?: string;
+      sourceConversationId?: string;
+    },
+  ) {
+    if (!dto.title?.trim()) throw new HttpException('title is required', HttpStatus.BAD_REQUEST);
+    if (!dto.body?.trim()) throw new HttpException('body is required', HttpStatus.BAD_REQUEST);
+    const now = new Date();
+    return this.prisma.coachInsight.create({
+      data: {
+        userId,
+        kind: (dto.kind ?? 'SUGGESTION') as any,
+        title: dto.title.trim(),
+        body: dto.body.trim(),
+        evidence: (dto.evidence ?? 'User-approved practice via Coach proposal').trim(),
+        suggestedAction: dto.suggestedAction?.trim() || null,
+        mediaSlot: dto.mediaSlot?.trim() || null,
+        mediaTopic: dto.mediaTopic?.trim() || null,
+        scopeKey: dto.scopeKey?.trim() || '',
+        sourceMessageId: dto.sourceMessageId ?? null,
+        sourceConversationId: dto.sourceConversationId ?? null,
+        status: 'ACCEPTED' as any,
+        acceptedAt: now,
+      },
+    });
+  }
+
   async list(userId: string, filter?: InsightStatusFilter) {
     const where: Prisma.CoachInsightWhereInput = { userId };
     const f: InsightStatusFilter = filter ?? 'ACTIVE';

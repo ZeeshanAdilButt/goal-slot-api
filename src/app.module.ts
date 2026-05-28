@@ -18,6 +18,7 @@ import { CoachCheckinModule } from './modules/coach-checkin/coach-checkin.module
 import { CoachInsightsModule } from './modules/coach-insights/coach-insights.module';
 import { CoachJournalModule } from './modules/coach-journal/coach-journal.module';
 import { CoachProfileModule } from './modules/coach-profile/coach-profile.module';
+import { CoachProposalsModule } from './modules/coach-proposals/coach-proposals.module';
 import { CoachReflectionModule } from './modules/coach-reflection/coach-reflection.module';
 import { HealthModule } from './modules/health/health.module';
 import { LabelsModule } from './modules/labels/labels.module';
@@ -61,6 +62,7 @@ import { PostHogModule } from './shared/modules/posthog.module';
     CoachInsightsModule,
     CoachJournalModule,
     CoachProfileModule,
+    CoachProposalsModule,
     CoachReflectionModule,
     LabelsModule,
     NotesModule,

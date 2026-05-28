@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -6,6 +6,8 @@ import { InviteUserDto, CreatePublicLinkDto, PublicLinkResponse, AccessLevel } f
 
 @Injectable()
 export class SharingService {
+  private readonly logger = new Logger(SharingService.name);
+
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
@@ -285,13 +287,24 @@ export class SharingService {
       },
     });
 
-    // Notify the owner that their invite was accepted
+    // Notify the owner that their invite was accepted.
+    // Email is best-effort: a notification failure (Resend unreachable, key
+    // misconfigured, sandbox restriction) must not roll back the user's
+    // already-completed accept, which would surface as "Failed to accept invite"
+    // even though the DB row is already flipped.
     if (user && updatedShare.owner) {
-      await this.emailService.sendShareAcceptedNotification({
-        toEmail: updatedShare.owner.email,
-        accepterName: user.name,
-        accepterEmail: user.email,
-      });
+      try {
+        await this.emailService.sendShareAcceptedNotification({
+          toEmail: updatedShare.owner.email,
+          accepterName: user.name,
+          accepterEmail: user.email,
+        });
+      } catch (err: any) {
+        // Logged here, swallowed for the request.
+        this.logger.warn(
+          `acceptInvite: notification email failed (accept succeeded): ${err?.message ?? err}`,
+        );
+      }
     }
 
     return updatedShare;
