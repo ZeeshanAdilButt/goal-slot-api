@@ -55,9 +55,38 @@ export class CategoriesService {
   }
 
   async findAll(userId: string) {
+    // Backfill: existing users were seeded before Spiritual + Community were
+    // added to the default list. Top them up on every fetch so they show up
+    // for everyone, not just new signups. Idempotent — only inserts the
+    // values the user is missing.
+    await this.ensureBaselineCategories(userId);
     return this.prisma.category.findMany({
       where: { userId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  /**
+   * Ensure every user has the baseline default categories. Safe to call any
+   * number of times — only inserts the values that don't already exist for
+   * the user. Used to backfill the new Spiritual + Community defaults on
+   * existing accounts without a separate migration step.
+   */
+  private async ensureBaselineCategories(userId: string): Promise<void> {
+    const baseline = [
+      { name: 'Spiritual', value: 'SPIRITUAL', color: '#10B981', order: 12 },
+      { name: 'Community', value: 'COMMUNITY', color: '#A855F7', order: 13 },
+    ];
+    const existing = await this.prisma.category.findMany({
+      where: { userId, value: { in: baseline.map((b) => b.value) } },
+      select: { value: true },
+    });
+    const have = new Set(existing.map((c) => c.value));
+    const missing = baseline.filter((b) => !have.has(b.value));
+    if (missing.length === 0) return;
+    await this.prisma.category.createMany({
+      data: missing.map((b) => ({ ...b, userId, isDefault: true })),
+      skipDuplicates: true,
     });
   }
 
