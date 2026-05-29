@@ -49,4 +49,19 @@ export const envValidationSchema = Joi.object({
   // PostHog
   POSTHOG_API_KEY: Joi.string().optional(),
   POSTHOG_HOST: Joi.string().uri().optional(),
+
+  // Coach feature — AES-256-GCM master key for encrypting user BYOK keys at rest
+  BYOK_ENCRYPTION_KEY: Joi.string()
+    .required()
+    .custom((value, helpers) => {
+      try {
+        const buf = Buffer.from(value, 'base64');
+        if (buf.length !== 32) {
+          return helpers.error('any.invalid', { message: 'BYOK_ENCRYPTION_KEY must decode to 32 bytes' });
+        }
+        return value;
+      } catch {
+        return helpers.error('any.invalid', { message: 'BYOK_ENCRYPTION_KEY must be base64' });
+      }
+    }, 'BYOK key validation'),
 });

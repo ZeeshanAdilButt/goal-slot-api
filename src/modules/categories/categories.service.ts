@@ -55,9 +55,38 @@ export class CategoriesService {
   }
 
   async findAll(userId: string) {
+    // Backfill: existing users were seeded before Spiritual + Community were
+    // added to the default list. Top them up on every fetch so they show up
+    // for everyone, not just new signups. Idempotent — only inserts the
+    // values the user is missing.
+    await this.ensureBaselineCategories(userId);
     return this.prisma.category.findMany({
       where: { userId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  /**
+   * Ensure every user has the baseline default categories. Safe to call any
+   * number of times — only inserts the values that don't already exist for
+   * the user. Used to backfill the new Spiritual + Community defaults on
+   * existing accounts without a separate migration step.
+   */
+  private async ensureBaselineCategories(userId: string): Promise<void> {
+    const baseline = [
+      { name: 'Spiritual', value: 'SPIRITUAL', color: '#10B981', order: 12 },
+      { name: 'Community', value: 'COMMUNITY', color: '#A855F7', order: 13 },
+    ];
+    const existing = await this.prisma.category.findMany({
+      where: { userId, value: { in: baseline.map((b) => b.value) } },
+      select: { value: true },
+    });
+    const have = new Set(existing.map((c) => c.value));
+    const missing = baseline.filter((b) => !have.has(b.value));
+    if (missing.length === 0) return;
+    await this.prisma.category.createMany({
+      data: missing.map((b) => ({ ...b, userId, isDefault: true })),
+      skipDuplicates: true,
     });
   }
 
@@ -183,7 +212,9 @@ export class CategoriesService {
       { name: 'Meeting', value: 'MEETING', color: '#8B5CF6', order: 9 }, // purple-500
       { name: 'Admin', value: 'ADMIN', color: '#9CA3AF', order: 10 }, // gray-400
       { name: 'Break', value: 'BREAK', color: '#D1D5DB', order: 11 }, // gray-300
-      { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 12 }, // gray-400
+      { name: 'Spiritual', value: 'SPIRITUAL', color: '#10B981', order: 12 }, // emerald-500
+      { name: 'Community', value: 'COMMUNITY', color: '#A855F7', order: 13 }, // purple-500
+      { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 14 }, // gray-400
     ];
 
     // Check if user already has categories

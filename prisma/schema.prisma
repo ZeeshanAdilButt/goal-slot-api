@@ -1,8 +1,7 @@
 // Time Master - Database Schema (Prisma 7: URLs in prisma.config.ts)
 generator client {
-  provider = "prisma-client-js"
-  moduleFormat    = "cjs"
-
+  provider     = "prisma-client-js"
+  moduleFormat = "cjs"
 }
 
 datasource db {
@@ -11,94 +10,104 @@ datasource db {
 
 // Main User model
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  password      String?   // Null if SSO user
-  name          String
-  avatar        String?
-  
-  role          UserRole  @default(USER)
-  userType      UserType  @default(EXTERNAL)
-  plan          PlanType  @default(FREE)
-  
+  id       String  @id @default(uuid())
+  email    String  @unique
+  password String? // Null if SSO user
+  name     String
+  avatar   String?
+
+  role     UserRole @default(USER)
+  userType UserType @default(EXTERNAL)
+  plan     PlanType @default(FREE)
+
   // Account status
-  isDisabled        Boolean   @default(false)  // Admin can disable accounts
-  disabledAt        DateTime?                  // When account was disabled
-  disabledReason    String?                    // Why account was disabled
-  emailVerified     Boolean   @default(false)  // Email verification status
-  emailVerifiedAt   DateTime?                  // When email was verified
-  
+  isDisabled      Boolean   @default(false) // Admin can disable accounts
+  disabledAt      DateTime? // When account was disabled
+  disabledReason  String? // Why account was disabled
+  emailVerified   Boolean   @default(false) // Email verification status
+  emailVerifiedAt DateTime? // When email was verified
+
   // SSO fields
-  ssoProvider   String?   // 'sso', 'google', etc.
-  ssoId         String?   // External SSO ID
-  
+  ssoProvider String? // 'sso', 'google', etc.
+  ssoId       String? // External SSO ID
+
   // Stripe fields
   stripeCustomerId     String?
   stripeSubscriptionId String?
-  subscriptionStatus   String?   // 'active', 'canceled', 'past_due', 'paused'
+  subscriptionStatus   String? // 'active', 'canceled', 'past_due', 'paused'
   subscriptionEndDate  DateTime?
-  
+
   // Billing tracking
-  firstPaymentDate     DateTime? // When user first paid
-  lastPaymentDate      DateTime? // Most recent successful payment
-  invoicePending       Boolean   @default(false) // True when invoice awaits payment
-  lastInvoiceId        String?   // Stripe invoice ID for reference
-  
+  firstPaymentDate DateTime? // When user first paid
+  lastPaymentDate  DateTime? // Most recent successful payment
+  invoicePending   Boolean   @default(false) // True when invoice awaits payment
+  lastInvoiceId    String? // Stripe invoice ID for reference
+
   // Plan limits override (for internal users or special cases)
   unlimitedAccess Boolean @default(false)
-  
+
   // Admin-assigned plan override (supersedes Stripe subscription)
-  adminAssignedPlan     PlanType?   // Plan assigned by admin
-  adminAssignedPlanAt   DateTime?   // When admin assigned the plan
-  adminAssignedPlanBy   String?     // Admin who assigned the plan
-  adminAssignedPlanNote String?     // Note about why plan was assigned
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
+  adminAssignedPlan     PlanType? // Plan assigned by admin
+  adminAssignedPlanAt   DateTime? // When admin assigned the plan
+  adminAssignedPlanBy   String? // Admin who assigned the plan
+  adminAssignedPlanNote String? // Note about why plan was assigned
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  goals          Goal[]
-  timeEntries    TimeEntry[]
-  scheduleBlocks ScheduleBlock[]
-  tasks          Task[]
-  categories     Category[]
-  labels         Label[]
-  notes          Note[]
-  sharedWithMe   SharedAccess[] @relation("SharedWith")
-  sharedByMe     SharedAccess[] @relation("SharedBy")
-  feedbacks      Feedback[]
+  goals             Goal[]
+  timeEntries       TimeEntry[]
+  scheduleBlocks    ScheduleBlock[]
+  tasks             Task[]
+  categories        Category[]
+  labels            Label[]
+  notes             Note[]
+  sharedWithMe      SharedAccess[]     @relation("SharedWith")
+  sharedByMe        SharedAccess[]     @relation("SharedBy")
+  feedbacks         Feedback[]
   feedbackResponses FeedbackResponse[]
-  notifications Notification[]
-  releaseNotesSeen ReleaseNoteSeen[]
-  
+  notifications     Notification[]
+  releaseNotesSeen  ReleaseNoteSeen[]
+
+  // Coach feature relations
+  encryptedByokKey   EncryptedByokKey?
+  habitsProfile      HabitsProfile?
+  dailyCheckins      DailyCheckin[]
+  goalReflections    GoalReflection[]
+  journalEntries     JournalEntry[]
+  coachConversations CoachConversation[]
+  coachInsights      CoachInsight[]
+
   @@index([email])
   @@index([ssoProvider, ssoId])
 }
 
 // Goals for tracking objectives
 model Goal {
-  id            String       @id @default(uuid())
-  title         String
-  description   String?
-  category      String?      // Category value reference
-  targetHours   Float
-  loggedHours   Float        @default(0)
-  deadline      DateTime?
-  status        GoalStatus   @default(ACTIVE)
-  color         String       @default("#FFD700")
-  order         Int          @default(0)
-  
-  userId        String
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id          String     @id @default(uuid())
+  title       String
+  description String?
+  category    String? // Category value reference
+  targetHours Float
+  loggedHours Float      @default(0)
+  deadline    DateTime?
+  status      GoalStatus @default(ACTIVE)
+  color       String     @default("#FFD700")
+  order       Int        @default(0)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   timeEntries    TimeEntry[]
   scheduleBlocks ScheduleBlock[]
   tasks          Task[]
   labels         GoalLabel[]
-  
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  
+  reflections    GoalReflection[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([status])
   @@index([category])
@@ -106,35 +115,35 @@ model Goal {
 
 // Time entries for logging work
 model TimeEntry {
-  id            String    @id @default(uuid())
-  taskName      String
-  taskTitle     String?   // Snapshot of linked task title for reporting
-  duration      Int       // Duration in minutes
-  date          DateTime
-  startedAt     DateTime? // When the work started
-  dayOfWeek     Int       // 0-6 (Sunday-Saturday)
-  notes         String?
-  
+  id        String    @id @default(uuid())
+  taskName  String
+  taskTitle String? // Snapshot of linked task title for reporting
+  duration  Int // Duration in minutes
+  date      DateTime
+  startedAt DateTime? // When the work started
+  dayOfWeek Int // 0-6 (Sunday-Saturday)
+  notes     String?
+
   // Progress percentage at time of entry
   progressPercent Float?
-  
-  userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  goalId        String?
-  goal          Goal?     @relation(fields: [goalId], references: [id], onDelete: SetNull)
-  
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
   // Link to schedule block if logged from schedule
   scheduleBlockId String?
   scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
 
-  taskId        String?
-  task          Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  source        TimeEntrySource @default(TRACKER)
+  taskId String?
+  task   Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  source TimeEntrySource @default(TRACKER)
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([date])
   @@index([goalId])
@@ -142,28 +151,28 @@ model TimeEntry {
 
 // Schedule blocks for planning
 model ScheduleBlock {
-  id            String           @id @default(uuid())
-  title         String
-  startTime     String           // "09:00" format
-  endTime       String           // "12:00" format
-  dayOfWeek     Int              // 0-6 (Sunday-Saturday)
-  category      String?          // Category value reference
-  color         String           @default("#FFD700")
-  isRecurring   Boolean          @default(true)
-  seriesId      String           @default(uuid())
-  
-  userId        String
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  goalId        String?
-  goal          Goal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
-  
-  timeEntries   TimeEntry[]
-  tasks         Task[]
-  
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  
+  id          String  @id @default(uuid())
+  title       String
+  startTime   String // "09:00" format
+  endTime     String // "12:00" format
+  dayOfWeek   Int // 0-6 (Sunday-Saturday)
+  category    String? // Category value reference
+  color       String  @default("#FFD700")
+  isRecurring Boolean @default(true)
+  seriesId    String  @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  timeEntries TimeEntry[]
+  tasks       Task[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([dayOfWeek])
   @@index([seriesId])
@@ -171,31 +180,31 @@ model ScheduleBlock {
 
 // Tasks linked to schedule blocks and goals
 model Task {
-  id              String       @id @default(uuid())
-  title           String
-  description     String?
-  status          TaskStatus   @default(BACKLOG)
-  category        String?      // Category value reference
+  id               String     @id @default(uuid())
+  title            String
+  description      String?
+  status           TaskStatus @default(BACKLOG)
+  category         String? // Category value reference
   estimatedMinutes Int?
-  actualMinutes   Int?
-  order           Int          @default(0)
-  dueDate         DateTime?
-  completedAt     DateTime?
-  notes           String?      // Task-specific notes
+  actualMinutes    Int?
+  order            Int        @default(0)
+  dueDate          DateTime?
+  completedAt      DateTime?
+  notes            String? // Task-specific notes
 
-  userId          String
-  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   scheduleBlockId String?
   scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
 
-  goalId          String?
-  goal            Goal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
 
-  timeEntries     TimeEntry[]
+  timeEntries TimeEntry[]
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([scheduleBlockId])
@@ -205,32 +214,32 @@ model Task {
 
 // Shared access for collaboration
 model SharedAccess {
-  id            String    @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // User who shared
-  ownerId       String
-  owner         User      @relation("SharedBy", fields: [ownerId], references: [id], onDelete: Cascade)
-  
+  ownerId String
+  owner   User   @relation("SharedBy", fields: [ownerId], references: [id], onDelete: Cascade)
+
   // User who received access (null for pending invites to non-existent users)
-  sharedWithId  String?
-  sharedWith    User?     @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
-  
+  sharedWithId String?
+  sharedWith   User?   @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
+
   // Invitation email (for pending invites)
   inviteEmail   String?
   inviteToken   String?   @unique
   inviteExpires DateTime?
-  
+
   // Public link flag (public links don't require email and can be shared openly)
-  isPublicLink  Boolean   @default(false)
-  
+  isPublicLink Boolean @default(false)
+
   // Access level
-  accessLevel   String     @default("VIEW") // "VIEW" or "EDIT"
-  
-  isAccepted    Boolean   @default(false)
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
+  accessLevel String @default("VIEW") // "VIEW" or "EDIT"
+
+  isAccepted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Unique constraint: one accepted share per owner-sharedWithId pair
   // Note: Multiple pending invites with same ownerId+inviteEmail are prevented by application logic
   @@unique([ownerId, sharedWithId], name: "unique_owner_shared_with")
@@ -242,16 +251,16 @@ model SharedAccess {
 
 // Audit log for tracking changes
 model AuditLog {
-  id          String   @id @default(uuid())
-  userId      String
-  action      String
-  entityType  String
-  entityId    String?
-  metadata    Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
-  
+  id         String   @id @default(uuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
   @@index([userId])
   @@index([action])
   @@index([createdAt])
@@ -262,8 +271,8 @@ model Category {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String   // Display name
-  value     String   // Unique value/slug
+  name      String // Display name
+  value     String // Unique value/slug
   color     String
   isDefault Boolean  @default(false)
   order     Int      @default(0)
@@ -279,8 +288,8 @@ model Label {
   id        String      @id @default(uuid())
   userId    String
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String      // Display name
-  value     String      // Unique value/slug
+  name      String // Display name
+  value     String // Unique value/slug
   color     String      @default("#6B7280")
   isDefault Boolean     @default(false)
   order     Int         @default(0)
@@ -308,27 +317,27 @@ model GoalLabel {
 
 // Notes with hierarchical structure (OneNote-like)
 model Note {
-  id          String   @id @default(uuid())
-  title       String   @default("Untitled")
-  content     String   @default("[]") // JSON string of blocks
-  icon        String?  // Emoji icon
-  color       String?  // Color theme
-  
+  id      String  @id @default(uuid())
+  title   String  @default("Untitled")
+  content String  @default("[]") // JSON string of blocks
+  icon    String? // Emoji icon
+  color   String? // Color theme
+
   // Hierarchical structure
-  parentId    String?
-  parent      Note?    @relation("NoteHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children    Note[]   @relation("NoteHierarchy")
-  
-  order       Int      @default(0)    // For ordering within parent
-  isExpanded  Boolean  @default(true) // Tree expansion state
-  isFavorite  Boolean  @default(false)
-  
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  parentId String?
+  parent   Note?   @relation("NoteHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Note[]  @relation("NoteHierarchy")
+
+  order      Int     @default(0) // For ordering within parent
+  isExpanded Boolean @default(true) // Tree expansion state
+  isFavorite Boolean @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId])
   @@index([parentId])
   @@index([isFavorite])
@@ -336,22 +345,22 @@ model Note {
 
 // User feedback
 model Feedback {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  emoji       Int?      // 0 = love, 1 = okay, 2 = not great, 3 = hate
-  text        String?   // Feedback text content
-  
-  isArchived  Boolean   @default(false)
-  archivedAt  DateTime?
-  archivedBy  String?   // Admin user ID who archived it
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  responses   FeedbackResponse[]
-  
+  emoji Int? // 0 = love, 1 = okay, 2 = not great, 3 = hate
+  text  String? // Feedback text content
+
+  isArchived Boolean   @default(false)
+  archivedAt DateTime?
+  archivedBy String? // Admin user ID who archived it
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  responses FeedbackResponse[]
+
   @@index([userId])
   @@index([isArchived])
   @@index([createdAt])
@@ -372,15 +381,15 @@ model FeedbackResponse {
 }
 
 model Notification {
-  id        String            @id @default(uuid())
+  id        String           @id @default(uuid())
   userId    String
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   type      NotificationType
   title     String
   body      String?
   data      Json?
   readAt    DateTime?
-  createdAt DateTime          @default(now())
+  createdAt DateTime         @default(now())
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
@@ -395,16 +404,16 @@ model ReleaseNote {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  seenBy      ReleaseNoteSeen[]
+  seenBy ReleaseNoteSeen[]
 }
 
 model ReleaseNoteSeen {
-  id        String   @id @default(uuid())
-  noteId    String
-  note      ReleaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  seenAt    DateTime @default(now())
+  id     String      @id @default(uuid())
+  noteId String
+  note   ReleaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  userId String
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seenAt DateTime    @default(now())
 
   @@unique([noteId, userId])
   @@index([userId])
@@ -418,14 +427,14 @@ enum UserRole {
 }
 
 enum UserType {
-  INTERNAL    // Internal members - always free
-  EXTERNAL    // External users - need subscription
+  INTERNAL // Internal members - always free
+  EXTERNAL // External users - need subscription
 }
 
 enum PlanType {
   FREE
-  BASIC     // $7/month - Basic features
-  PRO       // $5/month promotional price - All features
+  BASIC // $7/month - Basic features
+  PRO // $5/month promotional price - All features
 }
 
 enum GoalStatus {
@@ -448,4 +457,204 @@ enum NotificationType {
 enum TimeEntrySource {
   COMPLETION
   TRACKER
+}
+
+// ============================================================================
+// Coach feature — schema additions
+// ============================================================================
+
+enum CoachProvider {
+  OPENAI
+  ANTHROPIC
+}
+
+enum CoachScope {
+  NARRATIVE
+  CHAT
+}
+
+enum CoachRole {
+  USER
+  ASSISTANT
+  SYSTEM_NARRATIVE
+}
+
+// BYOK encrypted key (1:1 with User)
+model EncryptedByokKey {
+  id                  String        @id @default(cuid())
+  userId              String        @unique
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider            CoachProvider
+  ciphertext          Bytes
+  iv                  Bytes
+  authTag             Bytes
+  keyVersion          Int           @default(1)
+  maskedHint          String
+  lastValidatedAt     DateTime?
+  tokensUsedThisMonth Int           @default(0)
+  tokensLimit         Int           @default(100000)
+  tokensWindowStart   DateTime      @default(now())
+  selectedModel       String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([userId])
+}
+
+model HabitsProfile {
+  id                       String           @id @default(cuid())
+  userId                   String           @unique
+  user                     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  why                      String           @default("")
+  phoneBlockerInstalled    Boolean          @default(false)
+  distractingSubsCancelled Boolean          @default(false)
+  websiteBlockerUrls       String           @default("")
+  sleepTargetHours         Int              @default(8)
+  bedtime                  String           @default("23:00")
+  wakeTime                 String           @default("07:00")
+  workEnvironment          String           @default("")
+  additionalContext        String           @default("")
+  religiousContext         ReligiousContext @default(NONE)
+  spiritualNotes           String           @default("")
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+}
+
+model DailyCheckin {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        String // "YYYY-MM-DD" local day per frontend
+  mood        Int
+  energy      Int
+  focus       Int
+  blocked     String   @default("")
+  worked      String   @default("")
+  submittedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model GoalReflection {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalId        String
+  goal          Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  weekKey       String // ISO week, e.g. "2026-W22"
+  feel          Int
+  worked        String   @default("")
+  blocked       String   @default("")
+  nextWeekFocus String   @default("")
+  submittedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, goalId, weekKey])
+  @@index([userId, weekKey])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // "YYYY-MM-DD"
+  mood      Int?
+  energy    Int?
+  content   String   @default("") // TipTap HTML
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model CoachConversation {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope     CoachScope
+  scopeKey  String // ISO week "2026-W22" for NARRATIVE; same for CHAT v1
+  messages  CoachMessage[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([userId, scope, scopeKey])
+  @@index([userId])
+}
+
+model CoachMessage {
+  id               String            @id @default(cuid())
+  conversationId   String
+  conversation     CoachConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role             CoachRole
+  content          String
+  promptTokens     Int               @default(0)
+  completionTokens Int               @default(0)
+  model            String?
+  createdAt        DateTime          @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+enum CoachInsightKind {
+  OBSERVATION
+  SUGGESTION
+  EXPERIMENT
+  MEDIA_PROMPT
+}
+
+enum CoachInsightStatus {
+  PROPOSED
+  ACCEPTED
+  DOING
+  DONE
+  DISMISSED
+  SAVED
+}
+
+enum ReligiousContext {
+  NONE
+  ISLAM
+  CHRISTIANITY
+  HINDUISM
+  BUDDHISM
+  JUDAISM
+  SECULAR
+  OTHER
+}
+
+model CoachInsight {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sourceConversationId String?
+  sourceMessageId      String?
+  scopeKey             String
+
+  kind            CoachInsightKind
+  title           String
+  body            String
+  evidence        String
+  suggestedAction String?
+  mediaSlot       String?
+  mediaTopic      String?
+
+  status         CoachInsightStatus @default(PROPOSED)
+  acceptedAt     DateTime?
+  startedDoingAt DateTime?
+  completedAt    DateTime?
+  dismissedAt    DateTime?
+  savedAt        DateTime?
+  userNote       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, scopeKey])
 }

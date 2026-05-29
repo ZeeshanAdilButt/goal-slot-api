@@ -537,7 +537,9 @@ export class AuthService {
       { name: 'Meeting', value: 'MEETING', color: '#8B5CF6', order: 9 }, // purple-500
       { name: 'Admin', value: 'ADMIN', color: '#9CA3AF', order: 10 }, // gray-400
       { name: 'Break', value: 'BREAK', color: '#D1D5DB', order: 11 }, // gray-300
-      { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 12 }, // gray-400
+      { name: 'Spiritual', value: 'SPIRITUAL', color: '#10B981', order: 12 }, // emerald-500
+      { name: 'Community', value: 'COMMUNITY', color: '#A855F7', order: 13 }, // purple-500
+      { name: 'Other', value: 'OTHER', color: '#9CA3AF', order: 14 }, // gray-400
     ];
 
     // Check if user already has categories
