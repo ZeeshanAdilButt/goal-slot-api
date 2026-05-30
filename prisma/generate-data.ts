@@ -10,7 +10,6 @@ const userEmail = process.argv[2];
 
 if (!userEmail) {
   console.error('❌ Error: User email is required');
-  console.log('Usage: npm run generate-data <user-email>');
   process.exit(1);
 }
 
@@ -114,7 +113,6 @@ const scheduleTemplates = [
 
 async function main() {
   console.log('🌱 Starting comprehensive data generation...');
-  console.log(`📧 Looking for user: ${userEmail}`);
 
   // Check if user exists
   const user = await prisma.user.findUnique({
@@ -122,12 +120,10 @@ async function main() {
   });
 
   if (!user) {
-    console.error(`❌ Error: User with email "${userEmail}" not found`);
     console.log('Please ensure the user exists in the database before running this script.');
     process.exit(1);
   }
 
-  console.log('✅ User found:', user.email);
 
   // Fetch categories for this user
   let categories = await prisma.category.findMany({
@@ -402,7 +398,6 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error('❌ Data generation failed:', e);
     process.exit(1);
   })
   .finally(async () => {

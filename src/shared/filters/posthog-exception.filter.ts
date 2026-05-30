@@ -19,8 +19,6 @@ export class PostHogExceptionFilter implements ExceptionFilter {
       colors: false,
     })
     const serializedException = this.toSerializable(exception)
-    this.logger.error(`[Exception:raw] ${rawException}`)
-    this.logger.error(`[Exception:json] ${JSON.stringify(serializedException)}`)
 
     const ctx = host.switchToHttp()
     const response = ctx.getResponse<Response>()
@@ -60,7 +58,6 @@ export class PostHogExceptionFilter implements ExceptionFilter {
         userEmail: (request as any).user?.email,
         userRole: (request as any).user?.role,
         queryParams: request.query,
-        bodyParams: request.method !== 'GET' ? request.body : undefined,
         exceptionRaw: rawException,
         exceptionJson: serializedException,
       })
