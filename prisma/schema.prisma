@@ -73,6 +73,7 @@ model User {
   // Coach feature relations
   encryptedByokKey   EncryptedByokKey?
   habitsProfile      HabitsProfile?
+  sharedCoachUsage   SharedCoachUsage[]
   dailyCheckins      DailyCheckin[]
   goalReflections    GoalReflection[]
   journalEntries     JournalEntry[]
@@ -466,6 +467,8 @@ enum TimeEntrySource {
 enum CoachProvider {
   OPENAI
   ANTHROPIC
+  GEMINI
+  OPENROUTER
 }
 
 enum CoachScope {
@@ -477,6 +480,24 @@ enum CoachRole {
   USER
   ASSISTANT
   SYSTEM_NARRATIVE
+}
+
+// Daily message count for the shared-fallback Coach (users with no
+// BYOK row of their own get a small allowance of Gemini Flash calls
+// from the operator's shared key so they can try the Coach without
+// signing up for any provider first). One row per user per UTC day;
+// counter resets when the date in `day` differs from today.
+model SharedCoachUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day          DateTime @db.Date
+  messageCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, day])
+  @@index([userId])
 }
 
 // BYOK encrypted key (1:1 with User)
