@@ -134,8 +134,10 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`DELETE_SCHEDULE_BLOCK\`   id=<blockId>
 - \`CREATE_TIME_ENTRY\`       payload: { taskName (required, the work description e.g. "Ampwise development"), duration (required, MINUTES not hours, e.g. 60 for 1 hour), date (required, "YYYY-MM-DD"), notes?, goalId?, taskId?, scheduleBlockId? }
                               When the user says "log 1 hour for X today" emit { taskName: "X work" or similar, duration: 60, date: today's YYYY-MM-DD, goalId: <X's goal id if it exists in context> }. Always link a goalId when an obvious matching goal is present so the time counts toward the goal. Do NOT prompt the user for exact start/end times unless they explicitly want a specific window; logging against the day is enough.
-- \`UPDATE_TIME_ENTRY\`       id=<entryId>, payload: subset
+- \`UPDATE_TIME_ENTRY\`       id=<entryId>, payload: subset of { taskName, duration, date "YYYY-MM-DD", notes, goalId, taskId, scheduleBlockId }
+                              Pick the entry id from the "Recent time entries" section in the user context — it's a plain list of \`id | date | duration | task | goal\`. If the user describes the entry by attributes ("the 33m Ampwise entry") match against that list yourself; ONLY ask for clarification when two or more entries genuinely fit the description. Never invent an id.
 - \`DELETE_TIME_ENTRY\`       id=<entryId>
+                              Same matching rule as UPDATE_TIME_ENTRY — use the Recent time entries section.
 - \`CREATE_TASK\`             payload: { title, goalId?, scheduleBlockId?, dueDate? }
 - \`UPDATE_TASK\`             id=<taskId>, payload: subset
 - \`DELETE_TASK\`             id=<taskId>
@@ -305,6 +307,21 @@ interface ContextBundle {
   activeGoals: unknown[];
   weekReflections: unknown[];
   hoursByGoalThisWeek: Array<{ goalId: string; minutes: number }>;
+  // Individual time entries from the last ~14 days, with IDs, so the
+  // model can target a specific entry when emitting an
+  // UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposal (previously the
+  // model only had aggregated totals and refused to edit because it
+  // couldn't identify which entry to touch).
+  recentTimeEntries: Array<{
+    id: string;
+    date: string;
+    duration: number;
+    taskName: string;
+    taskId: string | null;
+    goalId: string | null;
+    goalTitle: string | null;
+    notes: string | null;
+  }>;
   scheduleBlocks: Array<
     Pick<
       ScheduleBlock,
@@ -323,6 +340,19 @@ interface ContextBundle {
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Truncate to the start of the UTC calendar day. Used as the unique
+ * key on SharedCoachUsage so the per-user daily quota resets at
+ * 00:00 UTC regardless of where the user is in the world. Keeps the
+ * quota predictable and matches when most free LLM provider tiers
+ * reset (Google, OpenRouter, Groq all reset on a UTC boundary).
+ */
+function startOfUtcDay(d: Date): Date {
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+}
 const MEMORY_BLOCK_CAP = 800;
 
 const ACTIVE_INSIGHT_STATUSES: CoachInsightStatus[] = ['ACCEPTED', 'DOING'];
@@ -518,8 +548,12 @@ export class CoachAiService {
     scopeKey: string,
     force: boolean,
   ): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
-    const byok = await this.loadByokOr412(userId);
-    await this.assertWithinBudget(byok);
+    const resolved = await this.resolveCoachKey(userId);
+    if (resolved.kind === 'byok') {
+      await this.assertWithinBudget(resolved.byok);
+    } else {
+      await this.assertSharedQuota(userId);
+    }
 
     const conversation = await this.findOrCreateConversation(
       userId,
@@ -550,30 +584,35 @@ export class CoachAiService {
 
     // SECURITY: capture decrypted key into a local variable BEFORE opening the
     // stream so a concurrent DELETE cannot pull it out from under us.
-    const decryptedKey = this.encryption.decrypt({
-      ciphertext: Buffer.from(byok.ciphertext),
-      iv: Buffer.from(byok.iv),
-      authTag: Buffer.from(byok.authTag),
-      keyVersion: byok.keyVersion,
-    });
+    const decryptedKey =
+      resolved.kind === 'byok'
+        ? this.encryption.decrypt({
+            ciphertext: Buffer.from(resolved.byok.ciphertext),
+            iv: Buffer.from(resolved.byok.iv),
+            authTag: Buffer.from(resolved.byok.authTag),
+            keyVersion: resolved.byok.keyVersion,
+          })
+        : resolved.decryptedKey;
+    const activeProvider =
+      resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
+    const activeSelectedModel =
+      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
 
-    // Result ref the runAndPersist generator fills in so we can fire the
-    // extraction call after the stream closes.
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
     yield* this.runAndPersist({
       userId,
       conversationId: conversation.id,
-      provider: byok.provider,
+      provider: activeProvider,
       decryptedKey,
       messages,
       persistRole: CoachRole.SYSTEM_NARRATIVE,
       scopeKey,
       result,
-      selectedModel: byok.selectedModel,
+      selectedModel: activeSelectedModel,
+      isShared: resolved.kind === 'shared',
     });
 
-    // Only extract when there is an actual narrative AND we persisted it.
     if (result.fullText.length > 0 && result.messageId) {
       this.extractInsightsAsync({
         userId,
@@ -581,10 +620,10 @@ export class CoachAiService {
         conversationId: conversation.id,
         narrativeMessageId: result.messageId,
         narrativeText: result.fullText,
-        provider: byok.provider,
+        provider: activeProvider,
         decryptedKey,
         contextBundle: context,
-        selectedModel: byok.selectedModel,
+        selectedModel: activeSelectedModel,
       }).catch((err) =>
         this.logger.warn(
           `insight extraction failed user=${userId} scope=${scopeKey}: ${err?.message ?? err}`,
@@ -603,8 +642,12 @@ export class CoachAiService {
     scopeKey: string,
     userContent: string,
   ): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
-    const byok = await this.loadByokOr412(userId);
-    await this.assertWithinBudget(byok);
+    const resolved = await this.resolveCoachKey(userId);
+    if (resolved.kind === 'byok') {
+      await this.assertWithinBudget(resolved.byok);
+    } else {
+      await this.assertSharedQuota(userId);
+    }
 
     const conversation = await this.findOrCreateConversation(
       userId,
@@ -629,25 +672,33 @@ export class CoachAiService {
     const context = await this.buildContextBundle(userId, scopeKey);
     const messages = this.buildChatMessages(context, history);
 
-    const decryptedKey = this.encryption.decrypt({
-      ciphertext: Buffer.from(byok.ciphertext),
-      iv: Buffer.from(byok.iv),
-      authTag: Buffer.from(byok.authTag),
-      keyVersion: byok.keyVersion,
-    });
+    const decryptedKey =
+      resolved.kind === 'byok'
+        ? this.encryption.decrypt({
+            ciphertext: Buffer.from(resolved.byok.ciphertext),
+            iv: Buffer.from(resolved.byok.iv),
+            authTag: Buffer.from(resolved.byok.authTag),
+            keyVersion: resolved.byok.keyVersion,
+          })
+        : resolved.decryptedKey;
+    const activeProvider =
+      resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
+    const activeSelectedModel =
+      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
 
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
     yield* this.runAndPersist({
       userId,
       conversationId: conversation.id,
-      provider: byok.provider,
+      provider: activeProvider,
       decryptedKey,
       messages,
       persistRole: CoachRole.ASSISTANT,
       scopeKey,
       result,
-      selectedModel: byok.selectedModel,
+      selectedModel: activeSelectedModel,
+      isShared: resolved.kind === 'shared',
     });
     // NOTE: chat does NOT trigger extraction.
   }
@@ -664,6 +715,11 @@ export class CoachAiService {
     scopeKey: string;
     result: { messageId?: string; fullText: string };
     selectedModel?: string | null;
+    /** True when running against the operator's shared Gemini key
+     *  instead of a user-owned BYOK row. Token counts are NOT charged
+     *  to a non-existent BYOK row; daily message count is incremented
+     *  on the user's SharedCoachUsage row instead. */
+    isShared?: boolean;
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
     const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
@@ -702,7 +758,7 @@ export class CoachAiService {
     const totalTokens = promptTokens + completionTokens;
 
     try {
-      const [createdMsg] = await this.prisma.$transaction([
+      const ops: any[] = [
         this.prisma.coachMessage.create({
           data: {
             conversationId: args.conversationId,
@@ -713,20 +769,37 @@ export class CoachAiService {
             model,
           },
         }),
-        this.prisma.encryptedByokKey.update({
-          where: { userId: args.userId },
-          data: {
-            tokensUsedThisMonth: { increment: totalTokens },
-            lastValidatedAt: new Date(),
-          },
-        }),
-      ]);
+      ];
+      if (args.isShared) {
+        // Shared-fallback path: increment the per-user daily message
+        // counter so the next request is gated by the quota helper.
+        const day = startOfUtcDay(new Date());
+        ops.push(
+          this.prisma.sharedCoachUsage.upsert({
+            where: { userId_day: { userId: args.userId, day } },
+            update: { messageCount: { increment: 1 } },
+            create: { userId: args.userId, day, messageCount: 1 },
+          }),
+        );
+      } else {
+        ops.push(
+          this.prisma.encryptedByokKey.update({
+            where: { userId: args.userId },
+            data: {
+              tokensUsedThisMonth: { increment: totalTokens },
+              lastValidatedAt: new Date(),
+            },
+          }),
+        );
+      }
+      const [createdMsg] = await this.prisma.$transaction(ops);
 
       args.result.messageId = (createdMsg as { id: string }).id;
 
       this.logger.log(
         `coach stream done scope=${args.scopeKey} user=${args.userId} ` +
-          `prompt=${promptTokens} completion=${completionTokens} model=${model}`,
+          `prompt=${promptTokens} completion=${completionTokens} model=${model}` +
+          (args.isShared ? ' (shared)' : ''),
       );
     } catch (err: any) {
       this.logger.error(
@@ -753,6 +826,110 @@ export class CoachAiService {
       );
     }
     return byok;
+  }
+
+  /**
+   * Resolve which key/provider this user's next Coach call should use.
+   *
+   * Preference order:
+   *   1. The user's own BYOK row (best — uses their quota, their model
+   *      choice, their billing).
+   *   2. The operator's shared Gemini Flash key from
+   *      GOOGLE_AI_SHARED_API_KEY, gated by a per-user daily message
+   *      count so one user can't drain the shared free tier for
+   *      everyone else. Lets brand-new users try the Coach without
+   *      signing up for any AI provider first.
+   *
+   * Throws PRECONDITION_FAILED only when both are unavailable (no
+   * BYOK AND no shared key configured on the server).
+   */
+  private async resolveCoachKey(userId: string): Promise<
+    | { kind: 'byok'; byok: import('@prisma/client').EncryptedByokKey }
+    | {
+        kind: 'shared';
+        provider: import('@prisma/client').CoachProvider;
+        decryptedKey: string;
+        selectedModel: string;
+      }
+  > {
+    const byok = await this.prisma.encryptedByokKey.findUnique({
+      where: { userId },
+    });
+    if (byok) return { kind: 'byok', byok };
+
+    const sharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+    if (sharedKey && sharedKey.length > 0) {
+      return {
+        kind: 'shared',
+        provider: 'GEMINI',
+        decryptedKey: sharedKey,
+        selectedModel: 'gemini-2.5-flash',
+      };
+    }
+
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.PRECONDITION_FAILED,
+        message: 'BYOK key not configured',
+        error: 'PreconditionFailed',
+      },
+      HttpStatus.PRECONDITION_FAILED,
+    );
+  }
+
+  /**
+   * Enforce the per-user daily cap on shared-key Coach calls. Reads
+   * SHARED_COACH_DAILY_LIMIT from env (default 20). Throws 429 when
+   * the user has hit it, with a message that nudges them to add their
+   * own key for unlimited usage.
+   */
+  private async assertSharedQuota(userId: string): Promise<void> {
+    const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
+    const day = startOfUtcDay(new Date());
+    const usage = await this.prisma.sharedCoachUsage.findUnique({
+      where: { userId_day: { userId, day } },
+    });
+    const used = usage?.messageCount ?? 0;
+    if (used >= limit) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message:
+            'Shared Coach daily limit reached. Add your own free Gemini or OpenRouter key in Settings to keep going.',
+          error: 'TooManyRequests',
+          shared: true,
+          messagesUsedToday: used,
+          dailyLimit: limit,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * Read-only summary the BYOK state endpoint returns to the web app
+   * so the Coach UI can show a "shared usage X of Y today" meter
+   * before the user even sends a message.
+   */
+  async getSharedUsageSummary(userId: string): Promise<{
+    available: boolean;
+    used: number;
+    limit: number;
+  }> {
+    const sharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+    if (!sharedKey || sharedKey.length === 0) {
+      return { available: false, used: 0, limit: 0 };
+    }
+    const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
+    const day = startOfUtcDay(new Date());
+    const usage = await this.prisma.sharedCoachUsage.findUnique({
+      where: { userId_day: { userId, day } },
+    });
+    return {
+      available: true,
+      used: usage?.messageCount ?? 0,
+      limit,
+    };
   }
 
   private async assertWithinBudget(byok: {
@@ -868,6 +1045,37 @@ export class CoachAiService {
       to,
     );
 
+    // Last ~14 days of individual time entries with IDs so the model
+    // can emit precise UPDATE/DELETE proposals. Goals are inner-joined
+    // for the title — saves the model a lookup when it explains the
+    // proposal to the user.
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const recentTimeEntriesRaw = await this.prisma.timeEntry.findMany({
+      where: { userId, date: { gte: fourteenDaysAgo } },
+      orderBy: { date: 'desc' },
+      take: 80,
+      select: {
+        id: true,
+        date: true,
+        duration: true,
+        taskName: true,
+        taskId: true,
+        goalId: true,
+        notes: true,
+        goal: { select: { title: true } },
+      },
+    });
+    const recentTimeEntries = recentTimeEntriesRaw.map((e) => ({
+      id: e.id,
+      date: e.date.toISOString().slice(0, 10),
+      duration: e.duration,
+      taskName: e.taskName,
+      taskId: e.taskId,
+      goalId: e.goalId,
+      goalTitle: e.goal?.title ?? null,
+      notes: e.notes,
+    }));
+
     const scheduleBlocksRaw = await this.prisma.scheduleBlock.findMany({
       where: { userId },
       select: {
@@ -895,6 +1103,7 @@ export class CoachAiService {
       activeGoals,
       weekReflections,
       hoursByGoalThisWeek,
+      recentTimeEntries,
       scheduleBlocks: scheduleBlocksRaw,
       acceptedInsights,
       weekKey: scopeKey,
@@ -1240,6 +1449,7 @@ function buildUserContextMessage(
     activeGoals: ctx.activeGoals,
     weekReflections: ctx.weekReflections,
     hoursByGoalThisWeek: ctx.hoursByGoalThisWeek,
+    recentTimeEntries: ctx.recentTimeEntries,
     scheduleBlocks: ctx.scheduleBlocks,
   };
 
@@ -1271,6 +1481,21 @@ function buildUserContextMessage(
         .join('\n')
     : '  (no active goals)';
 
+  // Plain-text recent time entries — mirrors the unlinkedBlocks /
+  // goalsList pattern so the model can grab IDs without parsing the
+  // JSON dump. Capped at 30 lines (most recent first) to keep the
+  // prompt size sane; the full 80 is still in the JSON blob below.
+  const recentEntriesSection = (ctx.recentTimeEntries ?? []).length
+    ? (ctx.recentTimeEntries ?? [])
+        .slice(0, 30)
+        .map((e) => {
+          const goal = e.goalTitle ? `goal="${e.goalTitle}"` : 'goal=(none)';
+          const task = e.taskName ? `"${e.taskName}"` : '(no task title)';
+          return `  - id=${e.id} | ${e.date} | ${e.duration}m | ${task} | ${goal}`;
+        })
+        .join('\n')
+    : '  (no time entries in the last 14 days)';
+
   const intro =
     mode === 'narrative'
       ? "Write this week's narrative for me. Reference specific data points. Close with one Socratic question."
@@ -1290,6 +1515,9 @@ function buildUserContextMessage(
     '',
     '## Active goals you can link blocks to',
     goalsListSection,
+    '',
+    '## Recent time entries (use these IDs for UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposals — never invent an id)',
+    recentEntriesSection,
     '',
     "## This week's context (full JSON)",
     JSON.stringify(rest),

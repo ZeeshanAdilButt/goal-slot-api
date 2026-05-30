@@ -14,6 +14,12 @@ import { UsageDto } from './dto/usage.dto';
 const PROVIDER_PREFIXES: Record<CoachProvider, string[]> = {
   OPENAI: ['sk-'],
   ANTHROPIC: ['sk-ant-'],
+  // Google AI Studio (Gemini) keys are issued as plain Google API
+  // keys with the standard AIza prefix.
+  GEMINI: ['AIza'],
+  // OpenRouter keys are issued as `sk-or-v1-...` today; we accept
+  // any `sk-or-` prefix so future revisions don't break the check.
+  OPENROUTER: ['sk-or-'],
 };
 
 @Injectable()
@@ -25,11 +31,15 @@ export class CoachByokService {
   ) {}
 
   async getState(userId: string): Promise<ByokStateDto> {
-    const row = await this.prisma.encryptedByokKey.findUnique({
-      where: { userId },
-    });
+    const [row, shared] = await Promise.all([
+      this.prisma.encryptedByokKey.findUnique({ where: { userId } }),
+      this.getSharedUsage(userId),
+    ]);
     if (!row) {
-      return { status: 'unset' };
+      // No personal key, but tell the client whether the shared
+      // Gemini Flash fallback is configured so the Coach UI can offer
+      // a "try free" button + show the daily quota meter.
+      return { status: 'unset', shared };
     }
     return {
       status: 'active',
@@ -40,6 +50,34 @@ export class CoachByokService {
       selectedModel: row.selectedModel,
       allowedModels: this.llmFactory.allowedModels(row.provider),
       effectiveModel: this.llmFactory.resolveModel(row.provider, row.selectedModel),
+      shared,
+    };
+  }
+
+  /**
+   * Inline shared-usage lookup so the BYOK module doesn't need to
+   * cross-import the CoachAiService (would create a module cycle).
+   * Mirrors CoachAiService.getSharedUsageSummary exactly.
+   */
+  private async getSharedUsage(
+    userId: string,
+  ): Promise<{ available: boolean; used: number; limit: number }> {
+    const sharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+    if (!sharedKey || sharedKey.length === 0) {
+      return { available: false, used: 0, limit: 0 };
+    }
+    const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
+    const today = new Date();
+    const day = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+    );
+    const usage = await this.prisma.sharedCoachUsage.findUnique({
+      where: { userId_day: { userId, day } },
+    });
+    return {
+      available: true,
+      used: usage?.messageCount ?? 0,
+      limit,
     };
   }
 
