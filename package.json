@@ -56,7 +56,8 @@
     "resend": "^6.6.0",
     "rxjs": "^7.8.1",
     "stripe": "^14.11.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "@google/generative-ai": "^0.24.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",

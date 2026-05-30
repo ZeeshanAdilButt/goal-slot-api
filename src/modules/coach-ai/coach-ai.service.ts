@@ -340,6 +340,19 @@ interface ContextBundle {
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Truncate to the start of the UTC calendar day. Used as the unique
+ * key on SharedCoachUsage so the per-user daily quota resets at
+ * 00:00 UTC regardless of where the user is in the world. Keeps the
+ * quota predictable and matches when most free LLM provider tiers
+ * reset (Google, OpenRouter, Groq all reset on a UTC boundary).
+ */
+function startOfUtcDay(d: Date): Date {
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+}
 const MEMORY_BLOCK_CAP = 800;
 
 const ACTIVE_INSIGHT_STATUSES: CoachInsightStatus[] = ['ACCEPTED', 'DOING'];
@@ -535,8 +548,12 @@ export class CoachAiService {
     scopeKey: string,
     force: boolean,
   ): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
-    const byok = await this.loadByokOr412(userId);
-    await this.assertWithinBudget(byok);
+    const resolved = await this.resolveCoachKey(userId);
+    if (resolved.kind === 'byok') {
+      await this.assertWithinBudget(resolved.byok);
+    } else {
+      await this.assertSharedQuota(userId);
+    }
 
     const conversation = await this.findOrCreateConversation(
       userId,
@@ -567,30 +584,35 @@ export class CoachAiService {
 
     // SECURITY: capture decrypted key into a local variable BEFORE opening the
     // stream so a concurrent DELETE cannot pull it out from under us.
-    const decryptedKey = this.encryption.decrypt({
-      ciphertext: Buffer.from(byok.ciphertext),
-      iv: Buffer.from(byok.iv),
-      authTag: Buffer.from(byok.authTag),
-      keyVersion: byok.keyVersion,
-    });
+    const decryptedKey =
+      resolved.kind === 'byok'
+        ? this.encryption.decrypt({
+            ciphertext: Buffer.from(resolved.byok.ciphertext),
+            iv: Buffer.from(resolved.byok.iv),
+            authTag: Buffer.from(resolved.byok.authTag),
+            keyVersion: resolved.byok.keyVersion,
+          })
+        : resolved.decryptedKey;
+    const activeProvider =
+      resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
+    const activeSelectedModel =
+      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
 
-    // Result ref the runAndPersist generator fills in so we can fire the
-    // extraction call after the stream closes.
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
     yield* this.runAndPersist({
       userId,
       conversationId: conversation.id,
-      provider: byok.provider,
+      provider: activeProvider,
       decryptedKey,
       messages,
       persistRole: CoachRole.SYSTEM_NARRATIVE,
       scopeKey,
       result,
-      selectedModel: byok.selectedModel,
+      selectedModel: activeSelectedModel,
+      isShared: resolved.kind === 'shared',
     });
 
-    // Only extract when there is an actual narrative AND we persisted it.
     if (result.fullText.length > 0 && result.messageId) {
       this.extractInsightsAsync({
         userId,
@@ -598,10 +620,10 @@ export class CoachAiService {
         conversationId: conversation.id,
         narrativeMessageId: result.messageId,
         narrativeText: result.fullText,
-        provider: byok.provider,
+        provider: activeProvider,
         decryptedKey,
         contextBundle: context,
-        selectedModel: byok.selectedModel,
+        selectedModel: activeSelectedModel,
       }).catch((err) =>
         this.logger.warn(
           `insight extraction failed user=${userId} scope=${scopeKey}: ${err?.message ?? err}`,
@@ -620,8 +642,12 @@ export class CoachAiService {
     scopeKey: string,
     userContent: string,
   ): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
-    const byok = await this.loadByokOr412(userId);
-    await this.assertWithinBudget(byok);
+    const resolved = await this.resolveCoachKey(userId);
+    if (resolved.kind === 'byok') {
+      await this.assertWithinBudget(resolved.byok);
+    } else {
+      await this.assertSharedQuota(userId);
+    }
 
     const conversation = await this.findOrCreateConversation(
       userId,
@@ -646,25 +672,33 @@ export class CoachAiService {
     const context = await this.buildContextBundle(userId, scopeKey);
     const messages = this.buildChatMessages(context, history);
 
-    const decryptedKey = this.encryption.decrypt({
-      ciphertext: Buffer.from(byok.ciphertext),
-      iv: Buffer.from(byok.iv),
-      authTag: Buffer.from(byok.authTag),
-      keyVersion: byok.keyVersion,
-    });
+    const decryptedKey =
+      resolved.kind === 'byok'
+        ? this.encryption.decrypt({
+            ciphertext: Buffer.from(resolved.byok.ciphertext),
+            iv: Buffer.from(resolved.byok.iv),
+            authTag: Buffer.from(resolved.byok.authTag),
+            keyVersion: resolved.byok.keyVersion,
+          })
+        : resolved.decryptedKey;
+    const activeProvider =
+      resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
+    const activeSelectedModel =
+      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
 
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
     yield* this.runAndPersist({
       userId,
       conversationId: conversation.id,
-      provider: byok.provider,
+      provider: activeProvider,
       decryptedKey,
       messages,
       persistRole: CoachRole.ASSISTANT,
       scopeKey,
       result,
-      selectedModel: byok.selectedModel,
+      selectedModel: activeSelectedModel,
+      isShared: resolved.kind === 'shared',
     });
     // NOTE: chat does NOT trigger extraction.
   }
@@ -681,6 +715,11 @@ export class CoachAiService {
     scopeKey: string;
     result: { messageId?: string; fullText: string };
     selectedModel?: string | null;
+    /** True when running against the operator's shared Gemini key
+     *  instead of a user-owned BYOK row. Token counts are NOT charged
+     *  to a non-existent BYOK row; daily message count is incremented
+     *  on the user's SharedCoachUsage row instead. */
+    isShared?: boolean;
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
     const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
@@ -719,7 +758,7 @@ export class CoachAiService {
     const totalTokens = promptTokens + completionTokens;
 
     try {
-      const [createdMsg] = await this.prisma.$transaction([
+      const ops: any[] = [
         this.prisma.coachMessage.create({
           data: {
             conversationId: args.conversationId,
@@ -730,20 +769,37 @@ export class CoachAiService {
             model,
           },
         }),
-        this.prisma.encryptedByokKey.update({
-          where: { userId: args.userId },
-          data: {
-            tokensUsedThisMonth: { increment: totalTokens },
-            lastValidatedAt: new Date(),
-          },
-        }),
-      ]);
+      ];
+      if (args.isShared) {
+        // Shared-fallback path: increment the per-user daily message
+        // counter so the next request is gated by the quota helper.
+        const day = startOfUtcDay(new Date());
+        ops.push(
+          this.prisma.sharedCoachUsage.upsert({
+            where: { userId_day: { userId: args.userId, day } },
+            update: { messageCount: { increment: 1 } },
+            create: { userId: args.userId, day, messageCount: 1 },
+          }),
+        );
+      } else {
+        ops.push(
+          this.prisma.encryptedByokKey.update({
+            where: { userId: args.userId },
+            data: {
+              tokensUsedThisMonth: { increment: totalTokens },
+              lastValidatedAt: new Date(),
+            },
+          }),
+        );
+      }
+      const [createdMsg] = await this.prisma.$transaction(ops);
 
       args.result.messageId = (createdMsg as { id: string }).id;
 
       this.logger.log(
         `coach stream done scope=${args.scopeKey} user=${args.userId} ` +
-          `prompt=${promptTokens} completion=${completionTokens} model=${model}`,
+          `prompt=${promptTokens} completion=${completionTokens} model=${model}` +
+          (args.isShared ? ' (shared)' : ''),
       );
     } catch (err: any) {
       this.logger.error(
@@ -770,6 +826,110 @@ export class CoachAiService {
       );
     }
     return byok;
+  }
+
+  /**
+   * Resolve which key/provider this user's next Coach call should use.
+   *
+   * Preference order:
+   *   1. The user's own BYOK row (best — uses their quota, their model
+   *      choice, their billing).
+   *   2. The operator's shared Gemini Flash key from
+   *      GOOGLE_AI_SHARED_API_KEY, gated by a per-user daily message
+   *      count so one user can't drain the shared free tier for
+   *      everyone else. Lets brand-new users try the Coach without
+   *      signing up for any AI provider first.
+   *
+   * Throws PRECONDITION_FAILED only when both are unavailable (no
+   * BYOK AND no shared key configured on the server).
+   */
+  private async resolveCoachKey(userId: string): Promise<
+    | { kind: 'byok'; byok: import('@prisma/client').EncryptedByokKey }
+    | {
+        kind: 'shared';
+        provider: import('@prisma/client').CoachProvider;
+        decryptedKey: string;
+        selectedModel: string;
+      }
+  > {
+    const byok = await this.prisma.encryptedByokKey.findUnique({
+      where: { userId },
+    });
+    if (byok) return { kind: 'byok', byok };
+
+    const sharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+    if (sharedKey && sharedKey.length > 0) {
+      return {
+        kind: 'shared',
+        provider: 'GEMINI',
+        decryptedKey: sharedKey,
+        selectedModel: 'gemini-2.5-flash',
+      };
+    }
+
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.PRECONDITION_FAILED,
+        message: 'BYOK key not configured',
+        error: 'PreconditionFailed',
+      },
+      HttpStatus.PRECONDITION_FAILED,
+    );
+  }
+
+  /**
+   * Enforce the per-user daily cap on shared-key Coach calls. Reads
+   * SHARED_COACH_DAILY_LIMIT from env (default 20). Throws 429 when
+   * the user has hit it, with a message that nudges them to add their
+   * own key for unlimited usage.
+   */
+  private async assertSharedQuota(userId: string): Promise<void> {
+    const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
+    const day = startOfUtcDay(new Date());
+    const usage = await this.prisma.sharedCoachUsage.findUnique({
+      where: { userId_day: { userId, day } },
+    });
+    const used = usage?.messageCount ?? 0;
+    if (used >= limit) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message:
+            'Shared Coach daily limit reached. Add your own free Gemini or OpenRouter key in Settings to keep going.',
+          error: 'TooManyRequests',
+          shared: true,
+          messagesUsedToday: used,
+          dailyLimit: limit,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * Read-only summary the BYOK state endpoint returns to the web app
+   * so the Coach UI can show a "shared usage X of Y today" meter
+   * before the user even sends a message.
+   */
+  async getSharedUsageSummary(userId: string): Promise<{
+    available: boolean;
+    used: number;
+    limit: number;
+  }> {
+    const sharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+    if (!sharedKey || sharedKey.length === 0) {
+      return { available: false, used: 0, limit: 0 };
+    }
+    const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
+    const day = startOfUtcDay(new Date());
+    const usage = await this.prisma.sharedCoachUsage.findUnique({
+      where: { userId_day: { userId, day } },
+    });
+    return {
+      available: true,
+      used: usage?.messageCount ?? 0,
+      limit,
+    };
   }
 
   private async assertWithinBudget(byok: {
