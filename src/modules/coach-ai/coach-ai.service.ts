@@ -134,8 +134,10 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`DELETE_SCHEDULE_BLOCK\`   id=<blockId>
 - \`CREATE_TIME_ENTRY\`       payload: { taskName (required, the work description e.g. "Ampwise development"), duration (required, MINUTES not hours, e.g. 60 for 1 hour), date (required, "YYYY-MM-DD"), notes?, goalId?, taskId?, scheduleBlockId? }
                               When the user says "log 1 hour for X today" emit { taskName: "X work" or similar, duration: 60, date: today's YYYY-MM-DD, goalId: <X's goal id if it exists in context> }. Always link a goalId when an obvious matching goal is present so the time counts toward the goal. Do NOT prompt the user for exact start/end times unless they explicitly want a specific window; logging against the day is enough.
-- \`UPDATE_TIME_ENTRY\`       id=<entryId>, payload: subset
+- \`UPDATE_TIME_ENTRY\`       id=<entryId>, payload: subset of { taskName, duration, date "YYYY-MM-DD", notes, goalId, taskId, scheduleBlockId }
+                              Pick the entry id from the "Recent time entries" section in the user context — it's a plain list of \`id | date | duration | task | goal\`. If the user describes the entry by attributes ("the 33m Ampwise entry") match against that list yourself; ONLY ask for clarification when two or more entries genuinely fit the description. Never invent an id.
 - \`DELETE_TIME_ENTRY\`       id=<entryId>
+                              Same matching rule as UPDATE_TIME_ENTRY — use the Recent time entries section.
 - \`CREATE_TASK\`             payload: { title, goalId?, scheduleBlockId?, dueDate? }
 - \`UPDATE_TASK\`             id=<taskId>, payload: subset
 - \`DELETE_TASK\`             id=<taskId>
@@ -305,6 +307,21 @@ interface ContextBundle {
   activeGoals: unknown[];
   weekReflections: unknown[];
   hoursByGoalThisWeek: Array<{ goalId: string; minutes: number }>;
+  // Individual time entries from the last ~14 days, with IDs, so the
+  // model can target a specific entry when emitting an
+  // UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposal (previously the
+  // model only had aggregated totals and refused to edit because it
+  // couldn't identify which entry to touch).
+  recentTimeEntries: Array<{
+    id: string;
+    date: string;
+    duration: number;
+    taskName: string;
+    taskId: string | null;
+    goalId: string | null;
+    goalTitle: string | null;
+    notes: string | null;
+  }>;
   scheduleBlocks: Array<
     Pick<
       ScheduleBlock,
@@ -868,6 +885,37 @@ export class CoachAiService {
       to,
     );
 
+    // Last ~14 days of individual time entries with IDs so the model
+    // can emit precise UPDATE/DELETE proposals. Goals are inner-joined
+    // for the title — saves the model a lookup when it explains the
+    // proposal to the user.
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const recentTimeEntriesRaw = await this.prisma.timeEntry.findMany({
+      where: { userId, date: { gte: fourteenDaysAgo } },
+      orderBy: { date: 'desc' },
+      take: 80,
+      select: {
+        id: true,
+        date: true,
+        duration: true,
+        taskName: true,
+        taskId: true,
+        goalId: true,
+        notes: true,
+        goal: { select: { title: true } },
+      },
+    });
+    const recentTimeEntries = recentTimeEntriesRaw.map((e) => ({
+      id: e.id,
+      date: e.date.toISOString().slice(0, 10),
+      duration: e.duration,
+      taskName: e.taskName,
+      taskId: e.taskId,
+      goalId: e.goalId,
+      goalTitle: e.goal?.title ?? null,
+      notes: e.notes,
+    }));
+
     const scheduleBlocksRaw = await this.prisma.scheduleBlock.findMany({
       where: { userId },
       select: {
@@ -895,6 +943,7 @@ export class CoachAiService {
       activeGoals,
       weekReflections,
       hoursByGoalThisWeek,
+      recentTimeEntries,
       scheduleBlocks: scheduleBlocksRaw,
       acceptedInsights,
       weekKey: scopeKey,
@@ -1240,6 +1289,7 @@ function buildUserContextMessage(
     activeGoals: ctx.activeGoals,
     weekReflections: ctx.weekReflections,
     hoursByGoalThisWeek: ctx.hoursByGoalThisWeek,
+    recentTimeEntries: ctx.recentTimeEntries,
     scheduleBlocks: ctx.scheduleBlocks,
   };
 
@@ -1271,6 +1321,21 @@ function buildUserContextMessage(
         .join('\n')
     : '  (no active goals)';
 
+  // Plain-text recent time entries — mirrors the unlinkedBlocks /
+  // goalsList pattern so the model can grab IDs without parsing the
+  // JSON dump. Capped at 30 lines (most recent first) to keep the
+  // prompt size sane; the full 80 is still in the JSON blob below.
+  const recentEntriesSection = (ctx.recentTimeEntries ?? []).length
+    ? (ctx.recentTimeEntries ?? [])
+        .slice(0, 30)
+        .map((e) => {
+          const goal = e.goalTitle ? `goal="${e.goalTitle}"` : 'goal=(none)';
+          const task = e.taskName ? `"${e.taskName}"` : '(no task title)';
+          return `  - id=${e.id} | ${e.date} | ${e.duration}m | ${task} | ${goal}`;
+        })
+        .join('\n')
+    : '  (no time entries in the last 14 days)';
+
   const intro =
     mode === 'narrative'
       ? "Write this week's narrative for me. Reference specific data points. Close with one Socratic question."
@@ -1290,6 +1355,9 @@ function buildUserContextMessage(
     '',
     '## Active goals you can link blocks to',
     goalsListSection,
+    '',
+    '## Recent time entries (use these IDs for UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposals — never invent an id)',
+    recentEntriesSection,
     '',
     "## This week's context (full JSON)",
     JSON.stringify(rest),
