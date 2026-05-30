@@ -21,6 +21,8 @@ export const envValidationSchema = Joi.object({
   // Email (Resend)
   RESEND_API_KEY: Joi.string().required(),
   APP_URL: Joi.string().uri().required(),
+  ONBOARDING_EMAIL: Joi.string().required(),
+  NOTIFICATION_EMAIL: Joi.string().required(),
 
   // Stripe
   STRIPE_SECRET_KEY: Joi.string().required(),
