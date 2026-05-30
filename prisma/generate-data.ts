@@ -10,7 +10,6 @@ const userEmail = process.argv[2];
 
 if (!userEmail) {
   console.error('❌ Error: User email is required');
-  console.log('Usage: npm run generate-data <user-email>');
   process.exit(1);
 }
 
@@ -121,7 +120,6 @@ async function main() {
   });
 
   if (!user) {
-    console.error(`❌ Error: User with email "${userEmail}" not found`);
     console.log('Please ensure the user exists in the database before running this script.');
     process.exit(1);
   }
@@ -400,7 +398,6 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error('❌ Data generation failed:', e);
     process.exit(1);
   })
   .finally(async () => {
