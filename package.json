@@ -24,9 +24,11 @@
     "update-user-id": "ts-node prisma/update-user-id.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
@@ -36,6 +38,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/swagger": "^7.2.0",
+    "@nestjs/throttler": "^6.5.0",
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "@supabase/supabase-js": "^2.39.0",
@@ -45,6 +48,7 @@
     "class-validator": "^0.14.0",
     "express": "^5.2.1",
     "joi": "^18.0.2",
+    "openai": "^4.104.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.18.0",
@@ -53,8 +57,7 @@
     "resend": "^6.6.0",
     "rxjs": "^7.8.1",
     "stripe": "^14.11.0",
-    "uuid": "^9.0.0",
-    "@google/generative-ai": "^0.24.1"
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
