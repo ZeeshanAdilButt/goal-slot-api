@@ -124,7 +124,13 @@ STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
 SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_URL
+
+# Optional shared Coach free tier
+GOOGLE_AI_SHARED_API_KEY       # operator-owned Gemini key for users with no BYOK
+SHARED_COACH_DAILY_LIMIT       # default 20 per user per UTC day
 ```
+
+`GOOGLE_AI_SHARED_API_KEY` is optional. When set, users who have not added their own BYOK key can still chat with the Coach using this key, gated by a per-user daily message count. Get a free Gemini key at https://aistudio.google.com/apikey (no credit card needed). Leave the var blank to disable the shared free tier and require every user to add their own key.
 
 `CORS_ORIGIN` should be a comma-separated list of allowed web origins (e.g. `https://www.goalslot.io,https://goalslot.io,http://localhost:3010`).
 

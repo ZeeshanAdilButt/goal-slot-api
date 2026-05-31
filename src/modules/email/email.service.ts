@@ -6,13 +6,15 @@ import { Resend } from 'resend';
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private resend: Resend;
-  private onboardingEmail = 'Goal Slot <no-reply@mail.goalslot.io>';
-  private notificationEmail = 'Goal Slot <notification@mail.goalslot.io>';
+  private onboardingEmail: string;
+  private notificationEmail: string;
   private appUrl = '';
 
   constructor(private readonly configService: ConfigService) {
     this.resend = new Resend(this.configService.getOrThrow<string>('RESEND_API_KEY'));
     this.appUrl = this.configService.getOrThrow<string>('APP_URL');
+    this.onboardingEmail = this.configService.getOrThrow<string>('ONBOARDING_EMAIL');
+    this.notificationEmail = this.configService.getOrThrow<string>('NOTIFICATION_EMAIL');  
   }
 
   async sendShareInvitation(params: {
@@ -233,6 +235,10 @@ ${otp}
 Having trouble? Contact us at Goal Slot for support.
     `;
 
+
+    this.logger.log(`Attempting to send OTP email (${purpose}) to ${toEmail} from ${this.onboardingEmail}`);
+    const start = Date.now();
+    
     const result = await this.resend.emails.send({
       from: this.onboardingEmail,
       to: toEmail,
@@ -240,6 +246,7 @@ Having trouble? Contact us at Goal Slot for support.
       html,
       text,
     });
+    this.logger.log(`Resend send for OTP to ${toEmail} took ${Date.now() - start} ms`);
     
     if (result.error) {
       throw new InternalServerErrorException(

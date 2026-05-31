@@ -21,6 +21,8 @@ export const envValidationSchema = Joi.object({
   // Email (Resend)
   RESEND_API_KEY: Joi.string().required(),
   APP_URL: Joi.string().uri().required(),
+  ONBOARDING_EMAIL: Joi.string().required(),
+  NOTIFICATION_EMAIL: Joi.string().required(),
 
   // Stripe
   STRIPE_SECRET_KEY: Joi.string().required(),
@@ -62,4 +64,10 @@ export const envValidationSchema = Joi.object({
         return helpers.error('any.invalid', { message: 'BYOK_ENCRYPTION_KEY must be base64' });
       }
     }, 'BYOK key validation'),
+
+  // Optional shared Gemini Flash fallback so users without their own
+  // BYOK key can still try the Coach. Disabled when not set; daily
+  // per-user cap defaults to 20.
+  GOOGLE_AI_SHARED_API_KEY: Joi.string().optional().allow(''),
+  SHARED_COACH_DAILY_LIMIT: Joi.number().integer().min(1).max(1000).default(20),
 });

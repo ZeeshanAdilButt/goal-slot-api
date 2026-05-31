@@ -43,4 +43,15 @@ export class ByokStateDto {
     description: 'Model actually used by Coach (resolves selectedModel or default)',
   })
   effectiveModel?: string | null;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Shared free-tier fallback. When status is "unset" but shared.available is true, the Coach can still answer using the operator-provided shared Gemini Flash key, gated by shared.used / shared.limit messages per UTC day.',
+  })
+  shared?: {
+    available: boolean;
+    used: number;
+    limit: number;
+  };
 }

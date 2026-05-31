@@ -3,6 +3,8 @@ import { CoachProvider } from '@prisma/client';
 import { CoachLlmProvider } from './llm.interface';
 import { OpenAiProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
+import { GeminiProvider } from './gemini-provider';
+import { OpenRouterProvider } from './openrouter-provider';
 
 /**
  * Allowed model whitelist per provider. The user picks from this list in
@@ -34,11 +36,35 @@ export const ALLOWED_MODELS: Record<CoachProvider, string[]> = {
     'claude-sonnet-4-6',
     'claude-opus-4-7',
   ],
+  // Google AI Studio (Gemini). Free tier covers Flash models with generous
+  // limits and no credit card required. Pro variants are paid but cheap.
+  GEMINI: [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-2.5-pro',
+  ],
+  // OpenRouter aggregator. The `:free` suffix is the community-hosted
+  // free tier; paid alternatives use the same naming without the suffix.
+  // We curate a handful of strong free models plus a couple of paid
+  // anchors so users have an obvious "try free / pay for top quality" pick.
+  OPENROUTER: [
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'deepseek/deepseek-chat-v3.1:free',
+    'qwen/qwen3-coder:free',
+    'mistralai/mistral-small-3.2-24b-instruct:free',
+    'google/gemini-2.0-flash-exp:free',
+    'anthropic/claude-3.5-haiku',
+    'openai/gpt-4o-mini',
+  ],
 };
 
 const DEFAULT_MODELS: Record<CoachProvider, string> = {
   OPENAI: 'gpt-4o-mini',
   ANTHROPIC: 'claude-3-5-haiku-20241022',
+  GEMINI: 'gemini-2.5-flash',
+  OPENROUTER: 'meta-llama/llama-3.3-70b-instruct:free',
 };
 
 export function isAllowedModel(
@@ -63,8 +89,11 @@ export class LlmFactory {
         return new OpenAiProvider(apiKey);
       case 'ANTHROPIC':
         return new AnthropicProvider(apiKey);
+      case 'GEMINI':
+        return new GeminiProvider(apiKey);
+      case 'OPENROUTER':
+        return new OpenRouterProvider(apiKey);
       default: {
-        // Exhaustiveness — keep TS happy if the enum grows.
         const _exhaustive: never = provider;
         throw new Error(`Unsupported coach provider: ${_exhaustive as string}`);
       }
