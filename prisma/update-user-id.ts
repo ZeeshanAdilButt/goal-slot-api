@@ -15,6 +15,8 @@ async function main() {
   });
 
   if (!user) {
+    console.error(`❌ User not found!`);
+    console.error('Please ensure the user exists before running this script.');
     process.exit(1);
   }
 
