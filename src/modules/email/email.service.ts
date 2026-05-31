@@ -13,8 +13,8 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {
     this.resend = new Resend(this.configService.getOrThrow<string>('RESEND_API_KEY'));
     this.appUrl = this.configService.getOrThrow<string>('APP_URL');
-    this.onboardingEmail = this.configService.getOrThrow<string>('ONBOARDING_EMAIL') ;
-    this.notificationEmail =this.configService.getOrThrow<string>('NOTIFICATION_EMAIL') ;  
+    this.onboardingEmail = this.configService.getOrThrow<string>('ONBOARDING_EMAIL');
+    this.notificationEmail = this.configService.getOrThrow<string>('NOTIFICATION_EMAIL');  
   }
 
   async sendShareInvitation(params: {
