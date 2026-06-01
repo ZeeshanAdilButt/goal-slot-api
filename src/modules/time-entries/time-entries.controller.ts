@@ -54,6 +54,8 @@ export class TimeEntriesController {
     @Query('pageSize') pageSize?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('search') search?: string,
+    @Query('goalId') goalId?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : undefined;
     const pageSizeNum = pageSize ? parseInt(pageSize, 10) : undefined;
@@ -62,6 +64,8 @@ export class TimeEntriesController {
       pageSize: pageSizeNum,
       startDate,
       endDate,
+      search,
+      goalId,
     });
   }
 

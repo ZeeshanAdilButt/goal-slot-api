@@ -223,7 +223,14 @@ export class TimeEntriesService {
 
   async getRecentEntries(
     userId: string,
-    params?: { page?: number; pageSize?: number; startDate?: string; endDate?: string },
+    params?: {
+      page?: number;
+      pageSize?: number;
+      startDate?: string;
+      endDate?: string;
+      search?: string;
+      goalId?: string;
+    },
   ) {
     const page = params?.page && params.page > 0 ? params.page : 1;
     const pageSize = params?.pageSize && params.pageSize > 0 ? Math.min(params.pageSize, 100) : 10;
@@ -242,6 +249,25 @@ export class TimeEntriesService {
         ...(start ? { gte: start } : {}),
         ...(end ? { lte: end } : {}),
       };
+    }
+
+    const search = params?.search?.trim();
+    if (search) {
+      where.OR = [
+        { taskName: { contains: search, mode: 'insensitive' } },
+        { notes: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (params?.goalId) {
+      // Sentinel for "entries without a goal" so the UI can offer it as
+      // an explicit filter (otherwise "no goal" is indistinguishable from
+      // "no filter").
+      if (params.goalId === '__NO_GOAL__') {
+        where.goalId = null;
+      } else {
+        where.goalId = params.goalId;
+      }
     }
 
     const [items, total] = await Promise.all([

@@ -533,19 +533,27 @@ export class ReportsService {
       const taskKey = entry.taskId || entry.taskName.trim().toLowerCase();
       
       if (!taskMap.has(taskKey)) {
+        // Use the entry's stored taskName as the displayed name (not the
+        // currently-linked task's title). Previously this preferred
+        // task.title, which silently drifted from what the user saw in
+        // the Detailed report whenever a linked task got renamed — same
+        // data, two reports, two names. Anchoring on the per-entry
+        // snapshot makes both reports agree.
         taskMap.set(taskKey, {
-          taskName: entry.task?.title || entry.taskName,
+          taskName: entry.taskName,
           taskId: entry.taskId,
           goalTitle: entry.goal?.title || null,
           goalColor: entry.goal?.color || null,
           totalMinutes: 0,
           totalFormatted: '',
+          entryCount: 0,
           dayOfWeek,
         });
       }
 
       const task = taskMap.get(taskKey)!;
       task.totalMinutes += entry.duration;
+      task.entryCount += 1;
       totalMinutes += entry.duration;
       totalEntries++;
     }

@@ -230,6 +230,10 @@ export interface DayByTaskEntry {
   goalColor: string | null;
   totalMinutes: number;
   totalFormatted: string;
+  // Number of underlying time entries rolled up into this row. > 1
+  // when the user logged the same linked task more than once on a day
+  // (or two free-form entries with the same normalized name).
+  entryCount: number;
 }
 
 export interface DayByTaskBreakdown {
