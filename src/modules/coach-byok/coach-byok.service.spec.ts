@@ -137,7 +137,7 @@ describe("CoachByokService prefix validation", () => {
 
       try {
         await service.saveKey("user_1", { provider, apiKey });
-        fail("expected saveKey to reject");
+        throw new Error("expected saveKey to reject");
       } catch (err: any) {
         const response = err.getResponse();
         const serialized = JSON.stringify(response);
