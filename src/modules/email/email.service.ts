@@ -142,6 +142,77 @@ Happy focusing! 🎯
     return { success: true, id: result.data?.id };
   }
 
+  // Note share invitation. Recipients land on the dashboard with the
+  // shared note pre-selected; signing in (or signing up with the same
+  // email) auto-resolves the share to their user account.
+  async sendNoteShareInvitation(params: {
+    toEmail: string;
+    inviterName: string;
+    inviterEmail: string;
+    noteTitle: string;
+    noteId: string;
+    isExistingUser: boolean;
+  }) {
+    const { toEmail, inviterName, inviterEmail, noteTitle, noteId, isExistingUser } = params;
+    const viewLink = `${this.appUrl}/dashboard/notes?shared=${noteId}`;
+    const safeTitle = (noteTitle || 'Untitled').replace(/</g, '&lt;');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #1a1a1a; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #FFD700; padding: 20px; border: 3px solid #1a1a1a; margin-bottom: 20px; }
+            .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+            .content { background: #fff; padding: 20px; border: 3px solid #1a1a1a; }
+            .button { display: inline-block; background: #FFD700; color: #1a1a1a; padding: 12px 24px; text-decoration: none; font-weight: bold; text-transform: uppercase; border: 3px solid #1a1a1a; margin: 20px 0; }
+            .note-title { background: #fafafa; border: 2px solid #1a1a1a; padding: 12px; font-weight: bold; margin: 16px 0; }
+            .footer { margin-top: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header"><h1>Goal Slot</h1></div>
+            <div class="content">
+              <h2>A note has been shared with you</h2>
+              <p><strong>${inviterName}</strong> (${inviterEmail}) shared a note with you on Goal Slot.</p>
+              <div class="note-title">${safeTitle}</div>
+              <p>${isExistingUser
+                ? 'Open it from your Shared with me section in Notes, or click below.'
+                : 'You will need to sign up with this email address to view it. Sign up is quick and free.'}</p>
+              <a href="${viewLink}" class="button">${isExistingUser ? 'Open the note' : 'Sign up and view'}</a>
+              <p style="font-size: 12px; color: #666;">If the button does not work, copy and paste this URL: ${viewLink}</p>
+              <div class="footer">
+                <p>You received this because someone shared a Goal Slot note with you. If this looks wrong, you can safely ignore this email.</p>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    const text = `${inviterName} (${inviterEmail}) shared a Goal Slot note with you: "${safeTitle}".\nOpen it: ${viewLink}`;
+
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: `${inviterName} shared a note with you on Goal Slot`,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      this.logger.error(`Resend API error for note share to ${toEmail}: ${result.error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to send note share email: ${result.error.message}`,
+      );
+    }
+
+    this.logger.log(`Note share invitation sent to ${toEmail}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };
+  }
+
   async sendOTPEmail(params: {
     toEmail: string;
     otp: string;

@@ -63,6 +63,8 @@ model User {
   categories        Category[]
   labels            Label[]
   notes             Note[]
+  noteSharesByMe    NoteShare[]        @relation("NoteShareOwner")
+  noteSharesWithMe  NoteShare[]        @relation("NoteShareRecipient")
   sharedWithMe      SharedAccess[]     @relation("SharedWith")
   sharedByMe        SharedAccess[]     @relation("SharedBy")
   feedbacks         Feedback[]
@@ -333,8 +335,14 @@ model Note {
   isExpanded Boolean @default(true) // Tree expansion state
   isFavorite Boolean @default(false)
 
+  // Public sharing. When non-null, /public/notes/:token returns this
+  // note read-only without any auth. Rotated by toggling off and back on.
+  publicShareToken String? @unique
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  shares NoteShare[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -342,6 +350,35 @@ model Note {
   @@index([userId])
   @@index([parentId])
   @@index([isFavorite])
+}
+
+// Per-recipient note share. One row per (note, email) pair.
+// recipientUserId is null until the email matches a registered user
+// (existing user → set immediately on invite; new user → set when their
+// /notes/shared-with-me request resolves pending shares for their email).
+model NoteShare {
+  id     String @id @default(uuid())
+  noteId String
+  note   Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("NoteShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  recipientEmail  String
+  recipientUserId String?
+  recipientUser   User?   @relation("NoteShareRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  // Read-only for v1; reserved for future "comment"/"edit" levels.
+  permission String @default("VIEW")
+
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([noteId, recipientEmail])
+  @@index([recipientUserId])
+  @@index([recipientEmail])
+  @@index([ownerId])
 }
 
 // User feedback
