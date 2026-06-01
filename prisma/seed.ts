@@ -32,8 +32,6 @@ async function main() {
     },
   });
 
-  console.log('✅ Super Admin created:', superAdmin.email);
-
   // Create sample internal user
   const internalUser = await prisma.user.upsert({
     where: { email: 'mentor@devweekends.com' },
@@ -48,8 +46,6 @@ async function main() {
       unlimitedAccess: true,
     },
   });
-
-  console.log('✅ Internal user created:', internalUser.email);
 
   // Create sample goals for the internal user
   const goalsData = [

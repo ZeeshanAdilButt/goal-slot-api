@@ -60,7 +60,6 @@ export class PostHogExceptionFilter implements ExceptionFilter {
         userEmail: (request as any).user?.email,
         userRole: (request as any).user?.role,
         queryParams: request.query,
-        bodyParams: request.method !== 'GET' ? request.body : undefined,
         exceptionRaw: rawException,
         exceptionJson: serializedException,
       })

@@ -9,8 +9,7 @@ const prisma = createPrismaClient();
 const userEmail = process.argv[2];
 
 if (!userEmail) {
-  console.error('❌ Error: User email is required');
-  console.log('Usage: npm run generate-data <user-email>');
+  console.error("❌ Error: User email is required");
   process.exit(1);
 }
 
@@ -113,8 +112,7 @@ const scheduleTemplates = [
 ];
 
 async function main() {
-  console.log('🌱 Starting comprehensive data generation...');
-  console.log(`📧 Looking for user: ${userEmail}`);
+  console.log("🌱 Starting comprehensive data generation...");
 
   // Check if user exists
   const user = await prisma.user.findUnique({
@@ -122,12 +120,10 @@ async function main() {
   });
 
   if (!user) {
-    console.error(`❌ Error: User with email "${userEmail}" not found`);
+    console.error("User not found");
     console.log('Please ensure the user exists in the database before running this script.');
     process.exit(1);
   }
-
-  console.log('✅ User found:', user.email);
 
   // Fetch categories for this user
   let categories = await prisma.category.findMany({
