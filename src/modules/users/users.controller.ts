@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, Request, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { 
@@ -151,6 +151,12 @@ export class UsersController {
   @ApiOperation({ summary: 'Demote admin to user (Super Admin only)' })
   async demoteFromAdmin(@Request() req: any, @Param('userId') userId: string) {
     return this.usersService.demoteFromAdmin(req.user.sub, userId);
+  }
+
+  @Delete('account')
+  @ApiOperation({ summary: 'Delete current user account' })
+  async deleteAccount(@Request() req: any) {
+    return this.usersService.deleteAccount(req.user.sub);
   }
 }
 
