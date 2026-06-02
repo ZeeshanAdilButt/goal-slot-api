@@ -509,26 +509,4 @@ export class UsersService {
       },
     };
   }
-
-  //Delete user account
-  async deleteAccount(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Soft delete (recommended)
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        email: `deleted_${user.id}_${user.email}`,
-        isDisabled: true,
-        disabledAt: new Date(),
-        disabledReason: 'User deleted account',
-      }
-    });
-  }
 }
