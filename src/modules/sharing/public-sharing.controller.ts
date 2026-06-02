@@ -7,6 +7,13 @@ import { SharingService } from './sharing.service';
 export class PublicSharingController {
   constructor(private sharingService: SharingService) {}
 
+  @Get('accept')
+  @ApiOperation({ summary: 'Accept email-based invitation without authentication' })
+  @ApiQuery({ name: 'token', required: true, description: 'Invitation token from email' })
+  async acceptEmailInvitation(@Query('token') token: string) {
+    return this.sharingService.acceptEmailInvitationPublic(token);
+  }
+
   @Get('view/:token')
   @ApiOperation({ summary: 'View shared data via public token (no auth required)' })
   async viewSharedData(@Param('token') token: string) {
