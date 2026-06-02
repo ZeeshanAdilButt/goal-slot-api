@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { 
@@ -31,6 +31,14 @@ export class UsersController {
   @ApiOperation({ summary: 'Update current user profile' })
   async updateProfile(@Request() req: any, @Body() dto: UpdateUserDto) {
     return this.usersService.updateProfile(req.user.sub, dto);
+  }
+
+  @Delete('account')
+  @ApiOperation({ summary: 'Delete current user account permanently' })
+  @ApiResponse({ status: 200, description: 'Account deleted successfully' })
+  async deleteAccount(@Request() req: any) {
+    await this.usersService.deleteAccount(req.user.sub);
+    return { success: true };
   }
 
   // Admin endpoints

@@ -70,6 +70,21 @@ export class UsersService {
     return this.sanitizeUser(updatedUser);
   }
 
+  async deleteAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Hard delete user - cascade will delete all related data
+    // (goals, tasks, time entries, journal entries, notes, etc.)
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return { success: true };
+  }
+
   // Admin: Create internal user
   async createInternalUser(adminId: string, dto: CreateInternalUserDto) {
     await this.verifyAdmin(adminId);
