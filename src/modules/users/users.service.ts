@@ -1,20 +1,28 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { 
-  UpdateUserDto, 
+import { EmailService } from '../email/email.service';
+import {
+  UpdateUserDto,
   CreateInternalUserDto,
   AdminToggleUserStatusDto,
   AdminAssignPlanDto,
   AdminBulkAssignPlanDto,
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
+import { BulkInviteDto, BulkInviteRow, BulkInviteResponse } from './dto/bulk-invite.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { resolvePlanLimits } from '../auth/plan-limits';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   private sanitizeUser(user: any) {
     const { password, ...rest } = user;
@@ -507,6 +515,155 @@ export class UsersService {
         basic: planCountsMap[PlanType.BASIC] || 0,
         pro: planCountsMap[PlanType.PRO] || 0,
       },
+    };
+  }
+
+  // ============================================================
+  // Bulk invite
+  // ============================================================
+
+  // Permissive email parser that handles whatever the admin pastes:
+  // commas, spaces, newlines, semicolons, angle brackets, or even
+  // "Name <email@example.com>" formats. Deduped case-insensitively.
+  // Anything that doesn't look like a valid email is dropped to the
+  // invalid pile and surfaced in the response.
+  private parseEmails(text: string): { valid: string[]; invalid: string[] } {
+    // Split on any non-email-char boundary
+    const tokens = text
+      .split(/[\s,;<>()\[\]"'\\]+/u)
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+    const valid = new Set<string>();
+    const invalid: string[] = [];
+    // Conservative RFC-lite email regex. Good enough for cohort imports;
+    // edge cases (quoted locals, plus-addressing inside subdomains) are
+    // not worth the false-positive risk for an admin tool.
+    const emailRe = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
+    for (const t of tokens) {
+      if (emailRe.test(t)) {
+        valid.add(t);
+      } else if (t.includes('@')) {
+        // Looked like an email but failed validation. Surface it so
+        // the admin can fix typos rather than silently dropping.
+        invalid.push(t);
+      }
+    }
+    return { valid: Array.from(valid), invalid };
+  }
+
+  async bulkInvite(adminId: string, dto: BulkInviteDto): Promise<BulkInviteResponse> {
+    await this.verifyAdmin(adminId);
+
+    const inviter = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { name: true, email: true },
+    });
+    if (!inviter) {
+      throw new NotFoundException('Inviter not found');
+    }
+
+    const { valid, invalid } = this.parseEmails(dto.text);
+    const targetRole = dto.role || UserRole.USER;
+
+    const rows: BulkInviteRow[] = invalid.map((email) => ({
+      email,
+      status: 'invalid',
+      reason: 'Not a valid email address',
+    }));
+
+    if (valid.length === 0) {
+      return {
+        total: invalid.length,
+        invited: 0,
+        alreadyUsers: 0,
+        invalid: invalid.length,
+        failed: 0,
+        rows,
+      };
+    }
+
+    // Single query to find which emails already have accounts; saves N
+    // round trips on big batches.
+    const existing = await this.prisma.user.findMany({
+      where: { email: { in: valid } },
+      select: { email: true },
+    });
+    const existingSet = new Set(existing.map((u) => u.email.toLowerCase()));
+
+    for (const email of valid) {
+      if (existingSet.has(email)) {
+        rows.push({
+          email,
+          status: 'already_user',
+          reason: 'An account with this email already exists',
+        });
+        continue;
+      }
+
+      try {
+        // Pre-create the account with a long random password that the
+        // invitee will replace via the forgot-password flow on first
+        // visit. We mark them email-verified because the admin has
+        // vouched, and grant unlimited PRO access (fellowship pattern).
+        const tempPassword = randomBytes(24).toString('base64url');
+        const hashed = await bcrypt.hash(tempPassword, 10);
+        const namePrefix = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+        const created = await this.prisma.user.create({
+          data: {
+            email,
+            password: hashed,
+            name: namePrefix || 'Member',
+            role: targetRole,
+            userType: UserType.INTERNAL,
+            plan: PlanType.PRO,
+            unlimitedAccess: true,
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
+          },
+          select: { id: true },
+        });
+
+        // Best-effort email. Don't fail the whole row if Resend hiccups;
+        // the account still exists and the admin can resend the email
+        // separately.
+        try {
+          await this.emailService.sendBulkInviteWelcome({
+            toEmail: email,
+            inviterName: inviter.name,
+            inviterEmail: inviter.email,
+            role: targetRole,
+          });
+        } catch (err) {
+          this.logger.error(
+            `Bulk invite created account ${created.id} but email failed for ${email}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+
+        rows.push({
+          email,
+          status: 'invited',
+          userId: created.id,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Bulk invite failed for ${email}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        rows.push({
+          email,
+          status: 'failed',
+          reason: err instanceof Error ? err.message : 'Unknown failure creating the account',
+        });
+      }
+    }
+
+    return {
+      total: rows.length,
+      invited: rows.filter((r) => r.status === 'invited').length,
+      alreadyUsers: rows.filter((r) => r.status === 'already_user').length,
+      invalid: rows.filter((r) => r.status === 'invalid').length,
+      failed: rows.filter((r) => r.status === 'failed').length,
+      rows,
     };
   }
 }
