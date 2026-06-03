@@ -56,33 +56,33 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  goals             Goal[]
-  timeEntries       TimeEntry[]
-  scheduleBlocks    ScheduleBlock[]
-  tasks             Task[]
-  categories        Category[]
-  labels            Label[]
-  notes             Note[]
-  noteSharesByMe    NoteShare[]        @relation("NoteShareOwner")
-  noteSharesWithMe  NoteShare[]        @relation("NoteShareRecipient")
-  sharedWithMe      SharedAccess[]     @relation("SharedWith")
-  sharedByMe        SharedAccess[]     @relation("SharedBy")
-  feedbacks         Feedback[]
-  feedbackResponses FeedbackResponse[]
-  notifications     Notification[]
-  releaseNotesSeen  ReleaseNoteSeen[]
-  whiteboards      Whiteboard[]
-whiteboardShares WhiteboardShare[] @relation("WhiteboardShareOwner")
-whiteboardSharesReceived WhiteboardShare[] @relation("WhiteboardShareRecipient")
+  goals                    Goal[]
+  timeEntries              TimeEntry[]
+  scheduleBlocks           ScheduleBlock[]
+  tasks                    Task[]
+  categories               Category[]
+  labels                   Label[]
+  notes                    Note[]
+  noteSharesByMe           NoteShare[]         @relation("NoteShareOwner")
+  noteSharesWithMe         NoteShare[]         @relation("NoteShareRecipient")
+  sharedWithMe             SharedAccess[]      @relation("SharedWith")
+  sharedByMe               SharedAccess[]      @relation("SharedBy")
+  feedbacks                Feedback[]
+  feedbackResponses        FeedbackResponse[]
+  notifications            Notification[]
+  releaseNotesSeen         ReleaseNoteSeen[]
+  whiteboards              Whiteboard[]
+  whiteboardShares         WhiteboardShare[]   @relation("WhiteboardShareOwner")
+  whiteboardSharesReceived WhiteboardShare[]   @relation("WhiteboardShareRecipient")
   // Coach feature relations
-  encryptedByokKey   EncryptedByokKey?
-  habitsProfile      HabitsProfile?
-  sharedCoachUsage   SharedCoachUsage[]
-  dailyCheckins      DailyCheckin[]
-  goalReflections    GoalReflection[]
-  journalEntries     JournalEntry[]
-  coachConversations CoachConversation[]
-  coachInsights      CoachInsight[]
+  encryptedByokKey         EncryptedByokKey?
+  habitsProfile            HabitsProfile?
+  sharedCoachUsage         SharedCoachUsage[]
+  dailyCheckins            DailyCheckin[]
+  goalReflections          GoalReflection[]
+  journalEntries           JournalEntry[]
+  coachConversations       CoachConversation[]
+  coachInsights            CoachInsight[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -462,7 +462,7 @@ model ReleaseNoteSeen {
 model Whiteboard {
   id      String  @id @default(uuid())
   title   String  @default("Untitled")
-  content Json    @default("{\"elements\":[],\"appState\":{},\"files\":{}}") 
+  content Json    @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
   icon    String?
   color   String?
 
@@ -478,9 +478,9 @@ model Whiteboard {
   shares WhiteboardShare[]
 
   // Soft delete columns (required for data-integrity work)
-  deletedAt        DateTime?
-  deletedReason    String?
-  deletedByUserId  String?
+  deletedAt       DateTime?
+  deletedReason   String?
+  deletedByUserId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -501,16 +501,17 @@ model WhiteboardShare {
   recipientUserId String?
   recipientUser   User?   @relation("WhiteboardShareRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
 
-  permission String   @default("VIEW")
+  permission String    @default("VIEW")
   acceptedAt DateTime?
   revokedAt  DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@unique([whiteboardId, recipientEmail])
   @@index([recipientUserId])
   @@index([recipientEmail])
   @@index([ownerId])
 }
+
 // User roles and types
 enum UserRole {
   SUPER_ADMIN
