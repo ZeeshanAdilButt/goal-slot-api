@@ -11,13 +11,12 @@ export class NotionIntegrationController {
   constructor(private readonly service: NotionIntegrationService) {}
 
   @Get('connect')
-  @ApiOperation({ summary: 'Initiate Notion OAuth flow and redirect browser' })
-  async connect(@Query('userId') userId: string, @Res() res: Response) {
-    if (!userId) {
-      return res.redirect(`${this.service.getFrontendUrl()}/dashboard/settings?tab=integrations&notion=error&message=Missing+user+ID`);
-    }
-    const url = this.service.getAuthorizationUrl(userId);
-    return res.redirect(url);
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Initiate Notion OAuth flow and get authorize URL' })
+  async connect(@Request() req: any) {
+    const url = this.service.getAuthorizationUrl(req.user.sub);
+    return { url };
   }
 
   @Get('callback')
