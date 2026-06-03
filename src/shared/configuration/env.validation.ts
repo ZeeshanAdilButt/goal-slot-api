@@ -70,4 +70,9 @@ export const envValidationSchema = Joi.object({
   // per-user cap defaults to 20.
   GOOGLE_AI_SHARED_API_KEY: Joi.string().optional().allow(''),
   SHARED_COACH_DAILY_LIMIT: Joi.number().integer().min(1).max(1000).default(20),
+
+  // Notion Integration
+  NOTION_CLIENT_ID: Joi.string().required(),
+  NOTION_CLIENT_SECRET: Joi.string().required(),
+  NOTION_REDIRECT_URI: Joi.string().uri().required(),
 });
