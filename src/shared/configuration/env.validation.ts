@@ -74,5 +74,10 @@ export const envValidationSchema = Joi.object({
   // Notion Integration
   NOTION_CLIENT_ID: Joi.string().required(),
   NOTION_CLIENT_SECRET: Joi.string().required(),
-  NOTION_REDIRECT_URI: Joi.string().uri().required(),
+  NOTION_REDIRECT_URI: Joi.alternatives()
+    .try(
+      Joi.string().uri({ scheme: ['https'] }),
+      Joi.string().pattern(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/),
+    )
+    .required(),
 });
