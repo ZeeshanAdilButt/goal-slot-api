@@ -1,9 +1,9 @@
-import { Module } from '@nestjs/common';
-import { WhiteboardsController } from './whiteboards.controller';
-import { PublicWhiteboardsController } from './public-whiteboards.controller';
-import { WhiteboardsService } from './whiteboards.service';
-import { PrismaModule } from '../../prisma/prisma.module';
-import { EmailModule } from '../email/email.module';
+import { Module } from "@nestjs/common";
+import { WhiteboardsController } from "./whiteboards.controller";
+import { PublicWhiteboardsController } from "./public-whiteboards.controller";
+import { WhiteboardsService } from "./whiteboards.service";
+import { PrismaModule } from "../../prisma/prisma.module";
+import { EmailModule } from "../email/email.module";
 
 @Module({
   imports: [PrismaModule, EmailModule],
@@ -12,3 +12,4 @@ import { EmailModule } from '../email/email.module';
   exports: [WhiteboardsService],
 })
 export class WhiteboardsModule {}
+

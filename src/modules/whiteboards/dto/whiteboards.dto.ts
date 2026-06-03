@@ -5,28 +5,19 @@ import {
   IsArray,
   IsObject,
   ValidateNested,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-
-export class ExcalidrawElementDto {
-  @IsString()
-  id!: string;
-
-  @IsString()
-  type!: string;
-}
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class ExcalidrawSceneDto {
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ExcalidrawElementDto)
-  elements!: ExcalidrawElementDto[];
+  @IsObject({ each: true })
+  elements!: Record<string, unknown>[];
 
   @IsObject()
-  appState!: Record<string, any>;
+  appState!: Record<string, unknown>;
 
   @IsObject()
-  files!: Record<string, any>;
+  files!: Record<string, unknown>;
 }
 
 export class CreateWhiteboardDto {

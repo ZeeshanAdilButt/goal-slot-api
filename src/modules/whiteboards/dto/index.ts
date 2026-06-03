@@ -1,1 +1,2 @@
-export * from './whiteboards.dto';
+export * from "./whiteboards.dto";
+
