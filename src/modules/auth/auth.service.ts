@@ -461,6 +461,55 @@ export class AuthService {
     };
   }
 
+  // Handle Google OAuth login (create or login user)
+  async handleGoogleLogin(profile: any) {
+    const email = profile.email;
+    const googleId = profile.googleId;
+
+    // Find existing user by email or linked google ssoId
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          { ssoId: googleId, ssoProvider: 'google' },
+        ],
+      },
+    });
+
+    if (!user) {
+      // Create new user (MVP defaults)
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          name: profile.name || (email ? email.split('@')[0] : 'Google User'),
+          avatar: profile.avatar,
+          ssoProvider: 'google',
+          ssoId: googleId,
+          userType: UserType.EXTERNAL,
+          role: UserRole.USER,
+          plan: PlanType.FREE,
+        },
+      });
+
+      // Seed defaults for new users
+      await this.seedDefaultCategories(user.id);
+      await this.seedDefaultLabels(user.id);
+    } else if (!user.ssoId) {
+      // Link existing account to Google
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { ssoProvider: 'google', ssoId: googleId },
+      });
+    }
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    return {
+      user: this.sanitizeUser(user),
+      ...tokens,
+    };
+  }
+
   async validateUser(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

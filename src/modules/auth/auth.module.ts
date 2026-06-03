@@ -6,12 +6,14 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
 import { UsersModule } from '../users/users.module';
 import { SubscriptionGuard } from './guards/subscription.guard';
 import { PrismaModule } from '../../prisma/prisma.module';
 
 @Module({
   imports: [
+    ConfigModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -31,7 +33,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
     PrismaModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, SubscriptionGuard],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, SubscriptionGuard],
   exports: [AuthService, JwtModule, SubscriptionGuard],
 })
 export class AuthModule {}
