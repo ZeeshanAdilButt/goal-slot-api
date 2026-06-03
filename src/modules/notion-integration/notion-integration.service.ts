@@ -24,9 +24,8 @@ export class NotionIntegrationService {
   private readonly clientSecret: string;
   private readonly redirectUri: string;
   private readonly frontendUrl: string;
+  private readonly jwtSecret: string;
 
-  // In-memory store for secure state tokens with 5-minute expiry
-  private readonly oauthStates = new Map<string, OAuthStateData>();
   private readonly STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
@@ -37,40 +36,67 @@ export class NotionIntegrationService {
     this.clientId = this.config.getOrThrow<string>('NOTION_CLIENT_ID');
     this.clientSecret = this.config.getOrThrow<string>('NOTION_CLIENT_SECRET');
     this.redirectUri = this.config.getOrThrow<string>('NOTION_REDIRECT_URI');
+    this.jwtSecret = this.config.getOrThrow<string>('JWT_SECRET');
     
     // Support comma-separated CORS_ORIGIN lists by choosing the first primary URL
     const corsOrigin = this.config.getOrThrow<string>('CORS_ORIGIN');
     this.frontendUrl = corsOrigin.split(',')[0].trim();
- 
-    // Periodically clean up expired states every 5 minutes
-    setInterval(() => this.cleanupExpiredStates(), this.STATE_TTL_MS);
   }
 
   getFrontendUrl(): string {
     return this.frontendUrl;
   }
 
-  getAuthorizationUrl(userId: string): string {
-    const stateToken = crypto.randomUUID();
+  // Helper to generate signed state token
+  private generateSignedState(userId: string): string {
     const expiresAt = Date.now() + this.STATE_TTL_MS;
+    const nonce = crypto.randomUUID();
+    const payload = JSON.stringify({ userId, expiresAt, nonce });
+    const payloadB64 = Buffer.from(payload).toString('base64url');
+    const signature = crypto
+      .createHmac('sha256', this.jwtSecret)
+      .update(payloadB64)
+      .digest('base64url');
+    return `${payloadB64}.${signature}`;
+  }
 
-    this.oauthStates.set(stateToken, { userId, expiresAt });
+  // Helper to verify signed state token and extract payload
+  private verifyAndExtractState(state: string): { userId: string } | null {
+    try {
+      const parts = state.split('.');
+      if (parts.length !== 2) return null;
+      const [payloadB64, signature] = parts;
+      
+      // Verify signature
+      const expectedSignature = crypto
+        .createHmac('sha256', this.jwtSecret)
+        .update(payloadB64)
+        .digest('base64url');
+      if (signature !== expectedSignature) return null;
 
+      // Parse payload
+      const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
+      const { userId, expiresAt } = JSON.parse(payloadStr);
+
+      if (typeof userId !== 'string' || typeof expiresAt !== 'number') return null;
+      if (expiresAt < Date.now()) return null;
+
+      return { userId };
+    } catch {
+      return null;
+    }
+  }
+
+  getAuthorizationUrl(userId: string): string {
+    const stateToken = this.generateSignedState(userId);
     return `https://api.notion.com/v1/oauth/authorize?client_id=${this.clientId}&response_type=code&owner=user&redirect_uri=${encodeURIComponent(this.redirectUri)}&state=${stateToken}`;
   }
 
   async handleCallback(code: string, state: string, error?: string): Promise<string> {
     // 1. Verify state parameter
-    const stateData = this.oauthStates.get(state);
+    const stateData = this.verifyAndExtractState(state);
     if (!stateData) {
       return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=error&message=${encodeURIComponent('Invalid or expired state session')}`;
-    }
-    
-    // Consume the state token immediately
-    this.oauthStates.delete(state);
-
-    if (stateData.expiresAt < Date.now()) {
-      return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=error&message=${encodeURIComponent('OAuth state validation session expired')}`;
     }
 
     const userId = stateData.userId;
@@ -202,12 +228,4 @@ export class NotionIntegrationService {
     });
   }
 
-  private cleanupExpiredStates() {
-    const now = Date.now();
-    for (const [state, data] of this.oauthStates.entries()) {
-      if (data.expiresAt < now) {
-        this.oauthStates.delete(state);
-      }
-    }
-  }
 }
