@@ -71,7 +71,9 @@ model User {
   feedbackResponses FeedbackResponse[]
   notifications     Notification[]
   releaseNotesSeen  ReleaseNoteSeen[]
-
+  whiteboards      Whiteboard[]
+whiteboardShares WhiteboardShare[] @relation("WhiteboardShareOwner")
+whiteboardSharesReceived WhiteboardShare[] @relation("WhiteboardShareRecipient")
   // Coach feature relations
   encryptedByokKey   EncryptedByokKey?
   habitsProfile      HabitsProfile?
@@ -457,6 +459,58 @@ model ReleaseNoteSeen {
   @@index([userId])
 }
 
+model Whiteboard {
+  id      String  @id @default(uuid())
+  title   String  @default("Untitled")
+  content Json    @default("{\"elements\":[],\"appState\":{},\"files\":{}}") 
+  icon    String?
+  color   String?
+
+  isFavorite Boolean @default(false)
+
+  // Public sharing. When non-null, /public/whiteboards/:token returns this
+  // whiteboard read-only without any auth. Rotated by toggling off and back on.
+  publicShareToken String? @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  shares WhiteboardShare[]
+
+  // Soft delete columns (required for data-integrity work)
+  deletedAt        DateTime?
+  deletedReason    String?
+  deletedByUserId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isFavorite])
+}
+
+model WhiteboardShare {
+  id           String     @id @default(uuid())
+  whiteboardId String
+  whiteboard   Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("WhiteboardShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  recipientEmail  String
+  recipientUserId String?
+  recipientUser   User?   @relation("WhiteboardShareRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  permission String   @default("VIEW")
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@unique([whiteboardId, recipientEmail])
+  @@index([recipientUserId])
+  @@index([recipientEmail])
+  @@index([ownerId])
+}
 // User roles and types
 enum UserRole {
   SUPER_ADMIN
