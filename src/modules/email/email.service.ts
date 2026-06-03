@@ -317,6 +317,83 @@ Happy focusing! 🎯
     );
     return { success: true, id: result.data?.id };
   }
+  // Bulk-invite welcome. Sent after an admin pre-creates the account.
+  // The recipient already has a User row (email-verified, PRO access),
+  // so the email's job is to (a) tell them they were invited, (b) point
+  // them at the forgot-password flow so they can set a password and log
+  // in. We deliberately do not include the temp random password.
+  async sendBulkInviteWelcome(params: {
+    toEmail: string;
+    inviterName: string;
+    inviterEmail: string;
+    role: string;
+  }) {
+    const { toEmail, inviterName, inviterEmail, role } = params;
+    const setPasswordLink = `${this.appUrl}/forgot-password?email=${encodeURIComponent(toEmail)}`;
+    const loginLink = `${this.appUrl}/login`;
+    const roleLine =
+      role === 'ADMIN'
+        ? 'You have been added as an admin.'
+        : 'Your free Fellowship account is ready.';
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #1a1a1a; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #FFD700; padding: 20px; border: 3px solid #1a1a1a; margin-bottom: 20px; }
+            .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+            .content { background: #fff; padding: 20px; border: 3px solid #1a1a1a; }
+            .button { display: inline-block; background: #FFD700; color: #1a1a1a; padding: 12px 24px; text-decoration: none; font-weight: bold; text-transform: uppercase; border: 3px solid #1a1a1a; margin: 12px 0; }
+            .step { background: #fafafa; border: 2px solid #1a1a1a; padding: 14px; margin: 14px 0; }
+            .footer { margin-top: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header"><h1>Goal Slot</h1></div>
+            <div class="content">
+              <h2>Welcome to Goal Slot</h2>
+              <p>${inviterName} (${inviterEmail}) invited you to join Goal Slot. ${roleLine}</p>
+              <div class="step">
+                <p style="margin: 0;"><strong>Step 1.</strong> Set your password by clicking the button below. Use this email address (${toEmail}) when prompted.</p>
+                <p style="text-align: center;"><a href="${setPasswordLink}" class="button">Set my password</a></p>
+              </div>
+              <div class="step">
+                <p style="margin: 0;"><strong>Step 2.</strong> Once your password is set, log in here: <a href="${loginLink}">${loginLink}</a></p>
+              </div>
+              <p style="font-size: 12px; color: #666;">Your account already exists, you just need a password to log in. If the button does not work, paste this URL into your browser: ${setPasswordLink}</p>
+              <div class="footer">
+                <p>You received this because an admin added you to Goal Slot. If you were not expecting this, you can ignore the email and the pre-created account will sit unused.</p>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    const text = `${inviterName} (${inviterEmail}) invited you to Goal Slot. ${roleLine}\n\nStep 1: set your password at ${setPasswordLink}\nStep 2: log in at ${loginLink}\n\nUse this email address when prompted: ${toEmail}`;
+
+    const result = await this.resend.emails.send({
+      from: this.onboardingEmail,
+      to: toEmail,
+      subject: `${inviterName} invited you to Goal Slot`,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      this.logger.error(`Resend API error for bulk invite to ${toEmail}: ${result.error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to send bulk invite email: ${result.error.message}`,
+      );
+    }
+
+    this.logger.log(`Bulk invite email sent to ${toEmail}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };
+  }
+
   async sendOTPEmail(params: {
     toEmail: string;
     otp: string;
