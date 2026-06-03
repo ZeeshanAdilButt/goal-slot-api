@@ -1,4 +1,33 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsArray,
+  IsObject,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ExcalidrawElementDto {
+  @IsString()
+  id!: string;
+
+  @IsString()
+  type!: string;
+}
+
+export class ExcalidrawSceneDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExcalidrawElementDto)
+  elements!: ExcalidrawElementDto[];
+
+  @IsObject()
+  appState!: Record<string, any>;
+
+  @IsObject()
+  files!: Record<string, any>;
+}
 
 export class CreateWhiteboardDto {
   @IsString()
@@ -19,7 +48,10 @@ export class UpdateWhiteboardDto {
   title?: string;
 
   @IsOptional()
-  content?: any; // Excalidraw scene JSON
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ExcalidrawSceneDto)
+  content?: ExcalidrawSceneDto;
 
   @IsString()
   @IsOptional()
