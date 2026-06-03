@@ -24,7 +24,7 @@ export class NotionIntegrationService {
   private readonly clientSecret: string;
   private readonly redirectUri: string;
   private readonly frontendUrl: string;
-  private readonly jwtSecret: string;
+  private readonly integrationStateSecret: string;
 
   private readonly STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -36,9 +36,15 @@ export class NotionIntegrationService {
     this.clientId = this.config.getOrThrow<string>('NOTION_CLIENT_ID');
     this.clientSecret = this.config.getOrThrow<string>('NOTION_CLIENT_SECRET');
     this.redirectUri = this.config.getOrThrow<string>('NOTION_REDIRECT_URI');
-    this.jwtSecret = this.config.getOrThrow<string>('JWT_SECRET');
-    
-    // Support comma-separated CORS_ORIGIN lists by choosing the first primary URL
+    // Use a dedicated key for signing OAuth state tokens so JWT secret rotation
+    // does not invalidate pending Notion connect flows. Falls back to JWT_SECRET
+    // if INTEGRATION_STATE_SECRET is not set (keeps existing dev envs working).
+    this.integrationStateSecret =
+      this.config.get<string>('INTEGRATION_STATE_SECRET') ??
+      this.config.getOrThrow<string>('JWT_SECRET');
+
+    // SINGLE-ORIGIN NOTE: picks the first origin from CORS_ORIGIN for OAuth redirects.
+    // If production ever has multiple origins, introduce a dedicated FRONTEND_URL env var.
     const corsOrigin = this.config.getOrThrow<string>('CORS_ORIGIN');
     this.frontendUrl = corsOrigin.split(',')[0].trim();
   }
@@ -47,14 +53,15 @@ export class NotionIntegrationService {
     return this.frontendUrl;
   }
 
-  // Helper to generate signed state token
+  // Generates a signed OAuth state token (HMAC-SHA256 + expiry).
+  // The HMAC + expiry is sufficient for forgery protection; no nonce is needed
+  // unless we add a single-use check (a future concern for higher-sensitivity providers).
   private generateSignedState(userId: string): string {
     const expiresAt = Date.now() + this.STATE_TTL_MS;
-    const nonce = crypto.randomUUID();
-    const payload = JSON.stringify({ userId, expiresAt, nonce });
+    const payload = JSON.stringify({ userId, expiresAt });
     const payloadB64 = Buffer.from(payload).toString('base64url');
     const signature = crypto
-      .createHmac('sha256', this.jwtSecret)
+      .createHmac('sha256', this.integrationStateSecret)
       .update(payloadB64)
       .digest('base64url');
     return `${payloadB64}.${signature}`;
@@ -69,7 +76,7 @@ export class NotionIntegrationService {
       
       // Verify signature
       const expectedSignature = crypto
-        .createHmac('sha256', this.jwtSecret)
+        .createHmac('sha256', this.integrationStateSecret)
         .update(payloadB64)
         .digest('base64url');
       if (signature !== expectedSignature) return null;
@@ -162,7 +169,8 @@ export class NotionIntegrationService {
 
       return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=connected`;
     } catch (err: any) {
-      return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=error&message=${encodeURIComponent(err.message || 'Token exchange failed')}`;
+      console.error('[NotionIntegration] handleCallback error:', err.message);
+      return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=error&message=${encodeURIComponent('Notion declined the connection. Please try again or contact support.')}`;
     }
   }
 
@@ -189,22 +197,11 @@ export class NotionIntegrationService {
   }
 
   async disconnect(userId: string): Promise<void> {
-    const connection = await this.prisma.integrationConnection.findUnique({
-      where: {
-        userId_provider: {
-          userId,
-          provider: 'notion',
-        },
-      },
-    });
-
-    if (!connection) {
-      throw new NotFoundException('Notion connection not found');
-    }
-
-    // Deletes connection and cascades to NotionTarget entries due to schema `onDelete: Cascade`
-    await this.prisma.integrationConnection.delete({
-      where: { id: connection.id },
+    // Idempotent: deleteMany is a no-op when no record exists, so clicking
+    // disconnect twice (or after an already-disconnected state) is always safe.
+    // Cascades to NotionTarget entries via schema `onDelete: Cascade`.
+    await this.prisma.integrationConnection.deleteMany({
+      where: { userId, provider: 'notion' },
     });
   }
 

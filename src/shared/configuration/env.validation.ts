@@ -80,4 +80,7 @@ export const envValidationSchema = Joi.object({
       Joi.string().pattern(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/),
     )
     .required(),
+  // Dedicated HMAC signing key for OAuth state tokens (all integrations share this).
+  // Optional: falls back to JWT_SECRET if not set so existing dev envs keep working.
+  INTEGRATION_STATE_SECRET: Joi.string().optional(),
 });

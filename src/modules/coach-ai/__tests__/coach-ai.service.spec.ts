@@ -242,7 +242,7 @@ class FakePrisma {
   journalEntry = { findMany: async () => [] };
   goal = { findMany: async () => [] };
   goalReflection = { findMany: async () => [] };
-  timeEntry = { groupBy: async () => [], findMany: async () => [] };
+  timeEntry = { groupBy: async () => [] };
   scheduleBlock = {
     findMany: async () => {
       this.calls.push({ op: 'scheduleBlock.findMany' });
