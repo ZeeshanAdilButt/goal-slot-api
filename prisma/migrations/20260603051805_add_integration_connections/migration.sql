@@ -35,7 +35,7 @@ CREATE TABLE "NotionTarget" (
 CREATE INDEX "IntegrationConnection_userId_idx" ON "IntegrationConnection"("userId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "IntegrationConnection_userId_provider_workspaceId_key" ON "IntegrationConnection"("userId", "provider", "workspaceId");
+CREATE UNIQUE INDEX "IntegrationConnection_userId_provider_key" ON "IntegrationConnection"("userId", "provider");
 
 -- CreateIndex
 CREATE INDEX "NotionTarget_connectionId_idx" ON "NotionTarget"("connectionId");

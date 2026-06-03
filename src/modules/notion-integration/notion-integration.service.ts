@@ -108,10 +108,9 @@ export class NotionIntegrationService {
       // 4. Save connection
       await this.prisma.integrationConnection.upsert({
         where: {
-          userId_provider_workspaceId: {
+          userId_provider: {
             userId,
             provider: 'notion',
-            workspaceId: workspace_id,
           },
         },
         create: {
@@ -142,8 +141,13 @@ export class NotionIntegrationService {
   }
 
   async getStatus(userId: string): Promise<NotionStatusDto> {
-    const connection = await this.prisma.integrationConnection.findFirst({
-      where: { userId, provider: 'notion' },
+    const connection = await this.prisma.integrationConnection.findUnique({
+      where: {
+        userId_provider: {
+          userId,
+          provider: 'notion',
+        },
+      },
     });
 
     if (!connection) {
@@ -159,8 +163,13 @@ export class NotionIntegrationService {
   }
 
   async disconnect(userId: string): Promise<void> {
-    const connection = await this.prisma.integrationConnection.findFirst({
-      where: { userId, provider: 'notion' },
+    const connection = await this.prisma.integrationConnection.findUnique({
+      where: {
+        userId_provider: {
+          userId,
+          provider: 'notion',
+        },
+      },
     });
 
     if (!connection) {
@@ -174,8 +183,13 @@ export class NotionIntegrationService {
   }
 
   async getDecryptedToken(userId: string): Promise<string> {
-    const connection = await this.prisma.integrationConnection.findFirst({
-      where: { userId, provider: 'notion' },
+    const connection = await this.prisma.integrationConnection.findUnique({
+      where: {
+        userId_provider: {
+          userId,
+          provider: 'notion',
+        },
+      },
     });
     if (!connection) {
       throw new NotFoundException('Notion connection not found');

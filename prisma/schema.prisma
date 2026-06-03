@@ -739,7 +739,7 @@ model IntegrationConnection {
   updatedAt             DateTime       @updatedAt
   targets               NotionTarget[]
 
-  @@unique([userId, provider, workspaceId])
+  @@unique([userId, provider])
   @@index([userId])
 }
 
