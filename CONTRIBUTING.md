@@ -140,6 +140,51 @@ contributor's intermediate PRs within a multi-PR plan (e.g., Notion
 auth as PR 1 of 3) AS LONG AS the staged plan was pre-approved in the
 issue by a maintainer.
 
+## Changing environment variables
+
+This is the most operationally sensitive rule on the API repo because
+production auto-deploys on every push to `main`. **If your PR adds,
+renames, or removes any env var that the API actually reads, it does
+NOT merge until that var is live on the production VPS.** Skipping
+this has already taken production down (api PR #52, Google OAuth)
+when a strategy's constructor crashed at bootstrap on a missing
+`GOOGLE_CLIENT_ID`.
+
+What this looks like in practice:
+
+- Call out the new env vars at the top of the PR description in a
+  `### Required env vars` section, with one bullet per var explaining
+  what it is and where the value should come from.
+- Mirror the new vars in `.env.example` with a clear placeholder so
+  other contributors can run the feature locally.
+- Add the var to `src/shared/configuration/env.validation.ts` so the
+  app fails loudly at startup with a clear error rather than crashing
+  mid-bootstrap with an opaque stack.
+- If your code reads the new var in a module-level constructor (a
+  Passport strategy's `super({ clientID: ... })`, a service that
+  initializes a third-party SDK at construction, etc.), guard the
+  provider so it does NOT register when the var is missing. Otherwise
+  a missing var crashes the whole API at bootstrap, not just the new
+  feature. Pattern:
+  ```ts
+  // In auth.module.ts (or similar)
+  const googleProviders =
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [GoogleStrategy]
+      : [];
+  providers: [AuthService, JwtStrategy, ...googleProviders],
+  ```
+  The corresponding controller route should return `503 Provider not
+  configured` when the strategy is not registered, not 500.
+- Tag the maintainer (@ZeeshanAdilButt) in the PR comments and wait
+  for explicit confirmation that the production env has been updated
+  before you merge.
+
+**You merge your own PR once the maintainer confirms the env is live.**
+Maintainers do not press the merge button on contributor PRs, they
+approve and let the contributor merge when production is ready to
+receive the change.
+
 ## Database migrations
 
 - New migrations go in `prisma/migrations/` with a clear name like
