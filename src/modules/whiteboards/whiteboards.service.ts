@@ -211,46 +211,46 @@ export class WhiteboardsService {
     });
 
     const share = await this.prisma.whiteboardShare.upsert({
-  where: {
-    whiteboardId_recipientEmail: { whiteboardId, recipientEmail: email },
-  },
-  update: {
-    revokedAt: null,
-    acceptedAt: null,
-    recipientUserId: recipientUser?.id ?? null,
-  },
-  create: {
-    whiteboardId,
-    ownerId,
-    recipientEmail: email,
-    recipientUserId: recipientUser?.id ?? null,
-  },
-});
+      where: {
+        whiteboardId_recipientEmail: { whiteboardId, recipientEmail: email },
+      },
+      update: {
+        revokedAt: null,
+        acceptedAt: null,
+        recipientUserId: recipientUser?.id ?? null,
+      },
+      create: {
+        whiteboardId,
+        ownerId,
+        recipientEmail: email,
+        recipientUserId: recipientUser?.id ?? null,
+      },
+    });
 
-// Best-effort email. If Resend is misconfigured we still want the
-// share record to exist so the recipient can find it in-app.
-let emailSent = false;
-let emailError: string | null = null;
-try {
-  const whiteboard = await this.prisma.whiteboard.findUnique({
-    where: { id: whiteboardId },
-    select: { title: true },
-  });
-  await this.emailService.sendWhiteboardShareInvitation({
-    toEmail: email,
-    inviterName: owner.name,
-    inviterEmail: owner.email,
-    whiteboardTitle: whiteboard?.title || 'Untitled',
-    whiteboardId,
-    isExistingUser: !!recipientUser,
-  });
-  emailSent = true;
-} catch (err) {
-  emailError = err instanceof Error ? err.message : 'Unknown error';
-  // swallow: share record still works in-app
-}
+    // Best-effort email. If Resend is misconfigured we still want the
+    // share record to exist so the recipient can find it in-app.
+    let emailSent = false;
+    let emailError: string | null = null;
+    try {
+      const whiteboard = await this.prisma.whiteboard.findUnique({
+        where: { id: whiteboardId },
+        select: { title: true },
+      });
+      await this.emailService.sendWhiteboardShareInvitation({
+        toEmail: email,
+        inviterName: owner.name,
+        inviterEmail: owner.email,
+        whiteboardTitle: whiteboard?.title || "Untitled",
+        whiteboardId,
+        isExistingUser: !!recipientUser,
+      });
+      emailSent = true;
+    } catch (err) {
+      emailError = err instanceof Error ? err.message : "Unknown error";
+      // swallow: share record still works in-app
+    }
 
-return { ...share, emailSent, emailError };
+    return { ...share, emailSent, emailError };
   }
 
   async revokeInvite(whiteboardId: string, ownerId: string, shareId: string) {
@@ -288,7 +288,11 @@ return { ...share, emailSent, emailError };
     });
 
     const shares = await this.prisma.whiteboardShare.findMany({
-      where: { recipientUserId: userId, revokedAt: null },
+      where: {
+        recipientUserId: userId,
+        revokedAt: null,
+        whiteboard: { deletedAt: null },
+      },
       orderBy: { createdAt: "desc" },
       include: {
         whiteboard: {
