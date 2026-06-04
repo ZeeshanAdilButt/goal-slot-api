@@ -462,7 +462,11 @@ model ReleaseNoteSeen {
 model Whiteboard {
   id      String  @id @default(uuid())
   title   String  @default("Untitled")
-  content Json    @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
+  // Excalidraw scene JSON. Shape assumes @excalidraw/excalidraw ^0.17.x.
+  // Keys: { elements: ExcalidrawElement[], appState: AppState, files: BinaryFiles }
+  // If Excalidraw bumps its scene version, run a migration to backfill existing
+  // content through excalidraw's restoreElements() before deploying the new client.
+  content Json @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
   icon    String?
   color   String?
 
