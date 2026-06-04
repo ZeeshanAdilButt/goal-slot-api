@@ -130,11 +130,17 @@ Happy focusing! 🎯
     });
     
     if (result.error) {
+      const errorMessage = result.error.message || 'Unknown Resend API error';
       this.logger.error(
-        `Resend API error for ${toEmail}: ${result.error.message}`
+        `Resend API error for ${toEmail}: ${errorMessage}`,
+        {
+          errorCode: result.error.message,
+          sender: this.notificationEmail,
+          recipient: toEmail,
+        }
       );
       throw new InternalServerErrorException(
-        `Failed to send share invitation email: ${result.error.message}`,
+        `Failed to send share invitation email: ${errorMessage}. The invitation link is available, please share it manually.`,
       );
     }
     
