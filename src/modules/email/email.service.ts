@@ -338,9 +338,9 @@ Happy focusing! 🎯
     const setPasswordLink = `${this.appUrl}/forgot-password?email=${encodeURIComponent(toEmail)}`;
     const loginLink = `${this.appUrl}/login`;
     const roleLine =
-      role === "ADMIN"
-        ? "You have been added as an admin."
-        : "Your free Fellowship account is ready.";
+      role === 'ADMIN'
+        ? 'You have been added as an admin.'
+        : 'Your free Fellowship account is ready.';
 
     const html = `
       <!DOCTYPE html>
@@ -390,17 +390,13 @@ Happy focusing! 🎯
     });
 
     if (result.error) {
-      this.logger.error(
-        `Resend API error for bulk invite to ${toEmail}: ${result.error.message}`,
-      );
+      this.logger.error(`Resend API error for bulk invite to ${toEmail}: ${result.error.message}`);
       throw new InternalServerErrorException(
         `Failed to send bulk invite email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(
-      `Bulk invite email sent to ${toEmail}, id: ${result.data?.id}`,
-    );
+    this.logger.log(`Bulk invite email sent to ${toEmail}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 

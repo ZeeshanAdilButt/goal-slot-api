@@ -1,14 +1,15 @@
 import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { 
-  UpdateUserDto, 
+import {
+  UpdateUserDto,
   CreateInternalUserDto,
   AdminToggleUserStatusDto,
   AdminAssignPlanDto,
   AdminBulkAssignPlanDto,
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
+import { BulkInviteDto } from './dto/bulk-invite.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -80,6 +81,14 @@ export class UsersController {
   @ApiOperation({ summary: 'Create internal user (Admin only)' })
   async createInternalUser(@Request() req: any, @Body() dto: CreateInternalUserDto) {
     return this.usersService.createInternalUser(req.user.sub, dto);
+  }
+
+  @Post('admin/bulk-invite')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Bulk-invite many users by pasting a list of emails (Admin only)' })
+  async bulkInvite(@Request() req: any, @Body() dto: BulkInviteDto) {
+    return this.usersService.bulkInvite(req.user.sub, dto);
   }
 
   @Post('admin/grant-access/:userId')
