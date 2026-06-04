@@ -100,14 +100,14 @@ export class AuthController {
       const profile = req.user;
       const result = await this.authService.handleGoogleLogin(profile);
 
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3011';
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3010';
       const redirectUrl = `${frontendUrl.replace(/\/$/, '')}/auth/callback?token=${encodeURIComponent(
         result.accessToken,
       )}&refresh=${encodeURIComponent(result.refreshToken)}`;
 
       return res.redirect(redirectUrl);
     } catch (err) {
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3011';
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3010';
       return res.redirect(`${frontendUrl.replace(/\/$/, '')}/login?error=oauth_failed`);
     }
   }
