@@ -16,6 +16,11 @@ model User {
   name     String
   avatar   String?
 
+  // IANA timezone, e.g. "Asia/Karachi". Backfilled to "UTC" for existing
+  // rows; the web client refines it from the browser on register + /auth/me.
+  // Powers Calendar push mapping and Coach "today"/"this week" math.
+  timezone String?
+
   role     UserRole @default(USER)
   userType UserType @default(EXTERNAL)
   plan     PlanType @default(FREE)
@@ -71,6 +76,9 @@ model User {
   feedbackResponses FeedbackResponse[]
   notifications     Notification[]
   releaseNotesSeen  ReleaseNoteSeen[]
+
+  // Integration relations
+  calendarConnections CalendarConnection[]
 
   // Coach feature relations
   encryptedByokKey   EncryptedByokKey?
@@ -557,6 +565,81 @@ model EncryptedByokKey {
   updatedAt           DateTime      @updatedAt
 
   @@index([userId])
+}
+
+// ============================================================
+// Google Calendar integration (PR1: OAuth connect + read sync)
+// ============================================================
+
+// One OAuth grant to an external calendar provider ("google" for now).
+// The refresh token is encrypted at rest exactly like EncryptedByokKey:
+// AES-256-GCM output stored as a Bytes triplet + keyVersion for rotation.
+model CalendarConnection {
+  id           String @id @default(cuid())
+  userId       String
+  provider     String // "google"
+  accountEmail String
+
+  // Encrypted refresh token — mirrors EncryptionService.encrypt() output.
+  refreshCiphertext Bytes
+  refreshIv         Bytes
+  refreshAuthTag    Bytes
+  keyVersion        Int    @default(1)
+
+  scopes             String[]
+  goalSlotCalendarId String? // dedicated push-target calendar, created lazily in PR2
+  status             String   @default("active") // "active" | "stale" (invalid_grant -> reconnect)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selections     CalendarSelection[]
+  externalEvents ExternalEvent[]
+
+  @@unique([userId, provider, accountEmail])
+  @@index([userId])
+}
+
+// A calendar the user chose to sync, plus its incremental cursor. Google
+// issues nextSyncToken per events.list stream (per calendar), so the token
+// lives here and not on the connection.
+model CalendarSelection {
+  id            String  @id @default(cuid())
+  connectionId  String
+  externalCalId String
+  displayName   String
+  color         String?
+  syncDirection String // "in" | "out" | "both" (PR1 honors "in"/"both")
+  syncToken     String? // per-calendar incremental cursor
+
+  createdAt DateTime @default(now())
+
+  connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalCalId])
+}
+
+// A single expanded external event instance (singleEvents:true), cached for
+// the schedule grid overlay. Cascades away when the connection is deleted.
+model ExternalEvent {
+  id              String   @id @default(cuid())
+  userId          String
+  connectionId    String
+  externalCalId   String
+  externalEventId String
+  title           String
+  startsAt        DateTime
+  endsAt          DateTime
+  isAllDay        Boolean  @default(false)
+  status          String // confirmed | tentative | cancelled
+  raw             Json
+  updatedAt       DateTime @updatedAt
+
+  connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalEventId])
+  @@index([userId, startsAt])
 }
 
 model HabitsProfile {

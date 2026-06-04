@@ -348,6 +348,7 @@ export class AuthService {
           plan: PlanType.BASIC,
           subscriptionStatus: 'active',
           subscriptionEndDate: sixtyDaysFromNow,
+          timezone: dto.timezone,
         },
       });
 

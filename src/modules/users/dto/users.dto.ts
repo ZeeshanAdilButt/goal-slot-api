@@ -12,6 +12,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   avatar?: string;
+
+  @ApiPropertyOptional({ example: 'Asia/Karachi', description: 'IANA timezone from the browser' })
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 }
 
 export class CreateInternalUserDto {

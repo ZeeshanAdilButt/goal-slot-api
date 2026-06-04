@@ -109,6 +109,30 @@ A shared-key fallback (Google Gemini Flash via `GOOGLE_AI_SHARED_API_KEY`) is al
 
 Full route surface in [docs/coach-api.md](docs/coach-api.md).
 
+## Integrations
+
+### Google Calendar
+
+Two-way Google Calendar sync. PR1 ships the inbound half: connect a Google account, pick calendars, and see their events on the schedule grid (read-only). Refresh tokens are encrypted at rest with the same AES-256-GCM `EncryptionService` as Coach BYOK keys.
+
+#### Env vars
+
+```
+GOOGLE_OAUTH_CLIENT_ID=<from Google Cloud console>
+GOOGLE_OAUTH_CLIENT_SECRET=<from Google Cloud console>
+GOOGLE_OAUTH_REDIRECT_URI=https://api.goalslot.io/api/integrations/google/callback
+```
+
+All three are optional — when unset the feature is disabled and `GET /api/integrations/google/connect` returns `503`. For local dev set the redirect URI to `http://localhost:4000/api/integrations/google/callback` and add it to the OAuth client's authorized redirect URIs.
+
+Scope requested: `https://www.googleapis.com/auth/calendar` (full, up front so the PR2 push half needs no second consent) plus `userinfo.email`.
+
+#### Notes
+
+- **Unverified app:** v1 ships before Google app verification, so users see a "Google hasn't verified this app" warning on the consent screen. The web connect dialog explains this.
+- **One Google account per user**, enforced at the API — a second account with a different email is rejected.
+- **Sync:** incremental via per-calendar `syncToken`; a 5-minute `@Cron` reconciles all active connections (first cron in the codebase, runs fine on the long-running VPS). A revoked grant (`invalid_grant`) marks the connection `stale` and is surfaced in Settings.
+
 ## Deployment
 
 The production API runs on a self-hosted Windows VPS at api.goalslot.io. Auto-deploy is via GitHub Actions on every push to `main`. See [docs/deploy-windows-vps.md](docs/deploy-windows-vps.md) for the runbook.
