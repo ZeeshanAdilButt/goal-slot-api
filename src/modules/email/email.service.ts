@@ -146,7 +146,7 @@ Happy focusing! 🎯
 
     if (result.error) {
       this.logger.error(
-        `Resend API error for ${toEmail}: ${result.error.message}`,
+        `Resend API error for ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send share invitation email: ${result.error.message}`,
@@ -154,7 +154,7 @@ Happy focusing! 🎯
     }
 
     this.logger.log(
-      `Share invitation email sent to ${toEmail}, id: ${result.data?.id}`,
+      `Share invitation email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
     );
     return { success: true, id: result.data?.id };
   }
@@ -230,7 +230,7 @@ Happy focusing! 🎯
 
     if (result.error) {
       this.logger.error(
-        `Resend API error for note share to ${toEmail}: ${result.error.message}`,
+        `Resend API error for note share to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send note share email: ${result.error.message}`,
@@ -238,7 +238,7 @@ Happy focusing! 🎯
     }
 
     this.logger.log(
-      `Note share invitation sent to ${toEmail}, id: ${result.data?.id}`,
+      `Note share invitation sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
     );
     return { success: true, id: result.data?.id };
   }
@@ -390,13 +390,13 @@ Happy focusing! 🎯
     });
 
     if (result.error) {
-      this.logger.error(`Resend API error for bulk invite to ${toEmail}: ${result.error.message}`);
+      this.logger.error(`Resend API error for bulk invite to ${this.maskEmail(toEmail)}: ${result.error.message}`);
       throw new InternalServerErrorException(
         `Failed to send bulk invite email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(`Bulk invite email sent to ${toEmail}, id: ${result.data?.id}`);
+    this.logger.log(`Bulk invite email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 
@@ -499,7 +499,7 @@ Having trouble? Contact us at Goal Slot for support.
     `;
 
     this.logger.log(
-      `Attempting to send OTP email (${purpose}) to ${toEmail} from ${this.onboardingEmail}`,
+      `Attempting to send OTP email (${purpose}) to ${this.maskEmail(toEmail)} from ${this.onboardingEmail}`,
     );
     const start = Date.now();
     const result = await this.resend.emails.send({
@@ -510,19 +510,19 @@ Having trouble? Contact us at Goal Slot for support.
       text,
     });
     this.logger.log(
-      `Resend send for OTP to ${toEmail} took ${Date.now() - start} ms`,
+      `Resend send for OTP to ${this.maskEmail(toEmail)} took ${Date.now() - start} ms`,
     );
 
     if (result.error) {
       this.logger.error(
-        `Resend API error for OTP email to ${toEmail}: ${result.error.message}`,
+        `Resend API error for OTP email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send OTP email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(`OTP email sent to ${toEmail}, id: ${result.data?.id}`);
+    this.logger.log(`OTP email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 
@@ -681,14 +681,14 @@ The Goal Slot Team
 
     if (result.error) {
       this.logger.error(
-        `Resend API error for welcome email to ${toEmail}: ${result.error.message}`,
+        `Resend API error for welcome email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send welcome email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(`Welcome email sent to ${toEmail}, id: ${result.data?.id}`);
+    this.logger.log(`Welcome email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 
@@ -747,7 +747,7 @@ The Goal Slot Team
 
     if (result.error) {
       this.logger.error(
-        `Resend API error for share accepted notification to ${toEmail}: ${result.error.message}`,
+        `Resend API error for share accepted notification to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send share accepted notification: ${result.error.message}`,
@@ -755,7 +755,7 @@ The Goal Slot Team
     }
 
     this.logger.log(
-      `Share accepted notification sent to ${toEmail}, id: ${result.data?.id}`,
+      `Share accepted notification sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
     );
   }
 }
