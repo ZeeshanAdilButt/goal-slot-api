@@ -35,6 +35,7 @@ import { GoogleCalendarModule } from './modules/google-calendar/google-calendar.
 import { EncryptionModule } from './shared/modules/encryption.module';
 import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
+import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { PostHogModule } from './shared/modules/posthog.module';
     NotificationsModule,
     ReleaseNotesModule,
     GoogleCalendarModule,
+    WhiteboardsModule,
     TemplatesModule,
   ],
 })

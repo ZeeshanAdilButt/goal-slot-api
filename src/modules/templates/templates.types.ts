@@ -33,6 +33,15 @@ export interface TemplateGoal {
   description?: string;
   category?: string;
   color: string;
+  // Explicit target for the goal's progress meter, in hours. If omitted the
+  // service derives a weekly estimate from schedule block coverage, but for
+  // multi-month sized goals (e.g. "200 LeetCode problems in 3 months") set
+  // this directly so the meter is calibrated.
+  targetHours?: number;
+  // Optional deadline expressed as a number of days from import time. The
+  // service stamps the actual Date on the user's goal at import. Omit for
+  // open-ended goals with no deadline.
+  deadlineDays?: number;
 }
 
 export interface TemplateTask {
@@ -43,6 +52,11 @@ export interface TemplateTask {
   title: string;
   description?: string;
   category?: string;
+  // Optional stable per-task key used by the sync flow to dedupe. When
+  // omitted the service derives a slug from the title. Set explicitly if
+  // you plan to rename the task later but want existing imports to still
+  // consider it the same task.
+  key?: string;
 }
 
 export interface TemplateDefinition {
@@ -78,6 +92,11 @@ export interface TemplateImportOptions {
   schedule: boolean;
   goals: boolean;
   tasks: boolean;
+  // When true, the service deletes the user's existing schedule blocks,
+  // goals, and tasks for whichever sections are being imported, BEFORE
+  // creating the new rows. Used for the "I imported, do not like it, let
+  // me retry" flow. Destructive; the dialog confirms first.
+  replaceExisting?: boolean;
 }
 
 export interface TemplateImportResult {

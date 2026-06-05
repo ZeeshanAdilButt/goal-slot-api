@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsOptional } from 'class-validator';
 
 export class ImportTemplateDto {
   @ApiProperty({
@@ -22,4 +22,13 @@ export class ImportTemplateDto {
   })
   @IsBoolean()
   tasks: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "Delete the user's existing schedule blocks / goals / tasks first for whichever sections are being imported. Used to retry an import cleanly without leftover data from a previous run.",
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  replaceExisting?: boolean;
 }
