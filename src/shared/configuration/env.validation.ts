@@ -72,14 +72,15 @@ export const envValidationSchema = Joi.object({
   SHARED_COACH_DAILY_LIMIT: Joi.number().integer().min(1).max(1000).default(20),
 
   // Notion Integration
-  NOTION_CLIENT_ID: Joi.string().required(),
-  NOTION_CLIENT_SECRET: Joi.string().required(),
+  NOTION_CLIENT_ID: Joi.string().optional().allow(''),
+  NOTION_CLIENT_SECRET: Joi.string().optional().allow(''),
   NOTION_REDIRECT_URI: Joi.alternatives()
     .try(
       Joi.string().uri({ scheme: ['https'] }),
       Joi.string().pattern(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/),
     )
-    .required(),
+    .optional()
+    .allow(''),
   // Dedicated HMAC signing key for OAuth state tokens (all integrations share this).
   // Optional: falls back to JWT_SECRET if not set so existing dev envs keep working.
   INTEGRATION_STATE_SECRET: Joi.string().optional(),

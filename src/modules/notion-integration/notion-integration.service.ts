@@ -29,6 +29,7 @@ interface NotionOAuthTokenResponse {
   bot_id?: string;
 }
 
+
 @Injectable()
 export class NotionIntegrationService {
   private readonly logger = new Logger(NotionIntegrationService.name);
@@ -47,9 +48,9 @@ export class NotionIntegrationService {
     private readonly encryption: EncryptionService,
     private readonly config: ConfigService,
   ) {
-    this.clientId = this.config.getOrThrow<string>('NOTION_CLIENT_ID');
-    this.clientSecret = this.config.getOrThrow<string>('NOTION_CLIENT_SECRET');
-    this.redirectUri = this.config.getOrThrow<string>('NOTION_REDIRECT_URI');
+    this.clientId = this.config.get<string>('NOTION_CLIENT_ID') ?? '';
+    this.clientSecret = this.config.get<string>('NOTION_CLIENT_SECRET') ?? '';
+    this.redirectUri = this.config.get<string>('NOTION_REDIRECT_URI') ?? '';
     // State signing secret falls back to JWT_SECRET to keep dev envs working.
     this.integrationStateSecret =
       this.config.get<string>('INTEGRATION_STATE_SECRET') ??
@@ -98,7 +99,17 @@ export class NotionIntegrationService {
     }
   }
 
+  private isConfigured(): boolean {
+    return !!(this.clientId && this.clientSecret && this.redirectUri);
+  }
+
   getAuthorizationUrl(userId: string): string {
+    if (!this.isConfigured()) {
+      throw new HttpException(
+        'Notion integration is not configured on this server',
+        503,
+      );
+    }
     const stateToken = this.generateSignedState(userId);
     return `https://api.notion.com/v1/oauth/authorize?client_id=${this.clientId}&response_type=code&owner=user&redirect_uri=${encodeURIComponent(this.redirectUri)}&state=${stateToken}`;
   }
