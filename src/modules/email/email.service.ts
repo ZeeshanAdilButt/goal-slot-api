@@ -1,20 +1,34 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Resend } from 'resend';
+import {
+  Injectable,
+  Logger,
+  InternalServerErrorException,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Resend } from "resend";
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
+
+  private maskEmail(email: string): string {
+    const [local, domain] = email.split("@");
+    if (!local || !domain) return "***";
+    return `${local.slice(0, 2)}***@${domain}`;
+  }
   private resend: Resend;
   private onboardingEmail: string;
   private notificationEmail: string;
-  private appUrl = '';
+  private appUrl = "";
 
   constructor(private readonly configService: ConfigService) {
-    this.resend = new Resend(this.configService.getOrThrow<string>('RESEND_API_KEY'));
-    this.appUrl = this.configService.getOrThrow<string>('APP_URL');
-    this.onboardingEmail = this.configService.getOrThrow<string>('ONBOARDING_EMAIL');
-    this.notificationEmail = this.configService.getOrThrow<string>('NOTIFICATION_EMAIL');  
+    this.resend = new Resend(
+      this.configService.getOrThrow<string>("RESEND_API_KEY"),
+    );
+    this.appUrl = this.configService.getOrThrow<string>("APP_URL");
+    this.onboardingEmail =
+      this.configService.getOrThrow<string>("ONBOARDING_EMAIL");
+    this.notificationEmail =
+      this.configService.getOrThrow<string>("NOTIFICATION_EMAIL");
   }
 
   async sendShareInvitation(params: {
@@ -24,10 +38,11 @@ export class EmailService {
     inviteToken: string;
     isExistingUser: boolean;
   }) {
-    const { toEmail, inviterName, inviterEmail, inviteToken, isExistingUser } = params;
-    
+    const { toEmail, inviterName, inviterEmail, inviteToken, isExistingUser } =
+      params;
+
     const viewLink = `${this.appUrl}/share/accept?token=${inviteToken}`;
-    
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -82,7 +97,7 @@ export class EmailService {
                   <li>This link contains a secure, unique code for <strong>view-only access</strong></li>
                   <li>You can view reports without creating an account</li>
                   <li>The link expires in 7 days for security</li>
-                  ${!isExistingUser ? '<li>Sign up for a free account to track your own focus time and unlock full features!</li>' : ''}
+                  ${!isExistingUser ? "<li>Sign up for a free account to track your own focus time and unlock full features!</li>" : ""}
                 </ul>
               </div>
               
@@ -113,7 +128,7 @@ ${viewLink}
 - This link contains a secure, unique code for view-only access
 - You can view reports without creating an account
 - The link expires in 7 days for security
-${!isExistingUser ? '- Sign up for a free account to track your own focus time and unlock full features!' : ''}
+${!isExistingUser ? "- Sign up for a free account to track your own focus time and unlock full features!" : ""}
 
 If you didn't expect this invitation, you can safely ignore it.
 
@@ -128,17 +143,19 @@ Happy focusing! 🎯
       html,
       text,
     });
-    
+
     if (result.error) {
       this.logger.error(
-        `Resend API error for ${toEmail}: ${result.error.message}`
+        `Resend API error for ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send share invitation email: ${result.error.message}`,
       );
     }
-    
-    this.logger.log(`Share invitation email sent to ${toEmail}, id: ${result.data?.id}`);
+
+    this.logger.log(
+      `Share invitation email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
     return { success: true, id: result.data?.id };
   }
 
@@ -153,9 +170,16 @@ Happy focusing! 🎯
     noteId: string;
     isExistingUser: boolean;
   }) {
-    const { toEmail, inviterName, inviterEmail, noteTitle, noteId, isExistingUser } = params;
+    const {
+      toEmail,
+      inviterName,
+      inviterEmail,
+      noteTitle,
+      noteId,
+      isExistingUser,
+    } = params;
     const viewLink = `${this.appUrl}/dashboard/notes?shared=${noteId}`;
-    const safeTitle = (noteTitle || 'Untitled').replace(/</g, '&lt;');
+    const safeTitle = (noteTitle || "Untitled").replace(/</g, "&lt;");
 
     const html = `
       <!DOCTYPE html>
@@ -179,10 +203,12 @@ Happy focusing! 🎯
               <h2>A note has been shared with you</h2>
               <p><strong>${inviterName}</strong> (${inviterEmail}) shared a note with you on Goal Slot.</p>
               <div class="note-title">${safeTitle}</div>
-              <p>${isExistingUser
-                ? 'Open it from your Shared with me section in Notes, or click below.'
-                : 'You will need to sign up with this email address to view it. Sign up is quick and free.'}</p>
-              <a href="${viewLink}" class="button">${isExistingUser ? 'Open the note' : 'Sign up and view'}</a>
+              <p>${
+                isExistingUser
+                  ? "Open it from your Shared with me section in Notes, or click below."
+                  : "You will need to sign up with this email address to view it. Sign up is quick and free."
+              }</p>
+              <a href="${viewLink}" class="button">${isExistingUser ? "Open the note" : "Sign up and view"}</a>
               <p style="font-size: 12px; color: #666;">If the button does not work, copy and paste this URL: ${viewLink}</p>
               <div class="footer">
                 <p>You received this because someone shared a Goal Slot note with you. If this looks wrong, you can safely ignore this email.</p>
@@ -203,16 +229,100 @@ Happy focusing! 🎯
     });
 
     if (result.error) {
-      this.logger.error(`Resend API error for note share to ${toEmail}: ${result.error.message}`);
+      this.logger.error(
+        `Resend API error for note share to ${this.maskEmail(toEmail)}: ${result.error.message}`,
+      );
       throw new InternalServerErrorException(
         `Failed to send note share email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(`Note share invitation sent to ${toEmail}, id: ${result.data?.id}`);
+    this.logger.log(
+      `Note share invitation sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
     return { success: true, id: result.data?.id };
   }
+  async sendWhiteboardShareInvitation(params: {
+    toEmail: string;
+    inviterName: string;
+    inviterEmail: string;
+    whiteboardTitle: string;
+    whiteboardId: string;
+    isExistingUser: boolean;
+  }) {
+    const {
+      toEmail,
+      inviterName,
+      inviterEmail,
+      whiteboardTitle,
+      whiteboardId,
+      isExistingUser,
+    } = params;
+    const viewLink = `${this.appUrl}/dashboard/whiteboards?shared=${whiteboardId}`;
+    const safeTitle = (whiteboardTitle || "Untitled").replace(/</g, "&lt;");
 
+    const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #1a1a1a; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #FFD700; padding: 20px; border: 3px solid #1a1a1a; margin-bottom: 20px; }
+          .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+          .content { background: #fff; padding: 20px; border: 3px solid #1a1a1a; }
+          .button { display: inline-block; background: #FFD700; color: #1a1a1a; padding: 12px 24px; text-decoration: none; font-weight: bold; text-transform: uppercase; border: 3px solid #1a1a1a; margin: 20px 0; }
+          .board-title { background: #fafafa; border: 2px solid #1a1a1a; padding: 12px; font-weight: bold; margin: 16px 0; }
+          .footer { margin-top: 20px; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header"><h1>Goal Slot</h1></div>
+          <div class="content">
+            <h2>A whiteboard has been shared with you</h2>
+            <p><strong>${inviterName}</strong> (${inviterEmail}) shared a whiteboard with you on Goal Slot.</p>
+            <div class="board-title">${safeTitle}</div>
+            <p>${
+              isExistingUser
+                ? "Open it from your Shared with me section in Whiteboards, or click below."
+                : "You will need to sign up with this email address to view it. Sign up is quick and free."
+            }</p>
+            <a href="${viewLink}" class="button">${isExistingUser ? "Open the whiteboard" : "Sign up and view"}</a>
+            <p style="font-size: 12px; color: #666;">If the button does not work, copy and paste this URL: ${viewLink}</p>
+            <div class="footer">
+              <p>You received this because someone shared a Goal Slot whiteboard with you. If this looks wrong, you can safely ignore this email.</p>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+    const text = `${inviterName} (${inviterEmail}) shared a Goal Slot whiteboard with you: "${safeTitle}".\nOpen it: ${viewLink}`;
+
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: `${inviterName} shared a whiteboard with you on Goal Slot`,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      this.logger.error(
+        `Resend API error for whiteboard share to ${this.maskEmail(toEmail)}: ${result.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `Failed to send whiteboard share email: ${result.error.message}`,
+      );
+    }
+
+    this.logger.log(
+      `Whiteboard share invitation sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
+    return { success: true, id: result.data?.id };
+  }
   // Bulk-invite welcome. Sent after an admin pre-creates the account.
   // The recipient already has a User row (email-verified, PRO access),
   // so the email's job is to (a) tell them they were invited, (b) point
@@ -280,27 +390,29 @@ Happy focusing! 🎯
     });
 
     if (result.error) {
-      this.logger.error(`Resend API error for bulk invite to ${toEmail}: ${result.error.message}`);
+      this.logger.error(`Resend API error for bulk invite to ${this.maskEmail(toEmail)}: ${result.error.message}`);
       throw new InternalServerErrorException(
         `Failed to send bulk invite email: ${result.error.message}`,
       );
     }
 
-    this.logger.log(`Bulk invite email sent to ${toEmail}, id: ${result.data?.id}`);
+    this.logger.log(`Bulk invite email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 
   async sendOTPEmail(params: {
     toEmail: string;
     otp: string;
-    purpose: 'signup' | 'forgot-password';
+    purpose: "signup" | "forgot-password";
   }) {
     const { toEmail, otp, purpose } = params;
 
-    const purposeText = purpose === 'signup' ? 'Email Verification' : 'Password Reset';
-    const purposeDescription = purpose === 'signup' 
-      ? 'to complete your registration' 
-      : 'to reset your password';
+    const purposeText =
+      purpose === "signup" ? "Email Verification" : "Password Reset";
+    const purposeDescription =
+      purpose === "signup"
+        ? "to complete your registration"
+        : "to reset your password";
 
     const html = `
       <!DOCTYPE html>
@@ -386,7 +498,9 @@ ${otp}
 Having trouble? Contact us at Goal Slot for support.
     `;
 
-    this.logger.log(`Attempting to send OTP email (${purpose}) to ${toEmail} from ${this.onboardingEmail}`);
+    this.logger.log(
+      `Attempting to send OTP email (${purpose}) to ${this.maskEmail(toEmail)} from ${this.onboardingEmail}`,
+    );
     const start = Date.now();
     const result = await this.resend.emails.send({
       from: this.onboardingEmail,
@@ -395,29 +509,28 @@ Having trouble? Contact us at Goal Slot for support.
       html,
       text,
     });
-    this.logger.log(`Resend send for OTP to ${toEmail} took ${Date.now() - start} ms`);
-    
+    this.logger.log(
+      `Resend send for OTP to ${this.maskEmail(toEmail)} took ${Date.now() - start} ms`,
+    );
+
     if (result.error) {
       this.logger.error(
-        `Resend API error for OTP email to ${toEmail}: ${result.error.message}`
+        `Resend API error for OTP email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send OTP email: ${result.error.message}`,
       );
     }
-    
-    this.logger.log(`OTP email sent to ${toEmail}, id: ${result.data?.id}`);
+
+    this.logger.log(`OTP email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
     return { success: true, id: result.data?.id };
   }
 
-  async sendWelcomeEmail(params: {
-    toEmail: string;
-    userName: string;
-  }) {
+  async sendWelcomeEmail(params: { toEmail: string; userName: string }) {
     const { toEmail, userName } = params;
 
     const dashboardLink = `${this.appUrl}/dashboard`;
-    const firstName = userName.split(' ')[0];
+    const firstName = userName.split(" ")[0];
 
     const html = `
       <!DOCTYPE html>
@@ -565,18 +678,18 @@ The Goal Slot Team
       html,
       text,
     });
-    
+
     if (result.error) {
       this.logger.error(
-        `Resend API error for welcome email to ${toEmail}: ${result.error.message}`
+        `Resend API error for welcome email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send welcome email: ${result.error.message}`,
       );
     }
-    
-    this.logger.log(`Welcome email sent to ${toEmail}, id: ${result.data?.id}`);
-    return { success: true, id: result.data?.id };  
+
+    this.logger.log(`Welcome email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`);
+    return { success: true, id: result.data?.id };
   }
 
   async sendShareAcceptedNotification(params: {
@@ -631,16 +744,18 @@ The Goal Slot Team
       subject: `${accepterName} accepted your share invitation`,
       html,
     });
-    
+
     if (result.error) {
       this.logger.error(
-       `Resend API error for share accepted notification to ${toEmail}: ${result.error.message}`
+        `Resend API error for share accepted notification to ${this.maskEmail(toEmail)}: ${result.error.message}`,
       );
       throw new InternalServerErrorException(
         `Failed to send share accepted notification: ${result.error.message}`,
       );
     }
-    
-    this.logger.log(`Share accepted notification sent to ${toEmail}, id: ${result.data?.id}`);
+
+    this.logger.log(
+      `Share accepted notification sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
   }
 }

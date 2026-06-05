@@ -32,6 +32,7 @@ import { envValidationSchema } from './shared/configuration/env.validation';
 import { EncryptionModule } from './shared/modules/encryption.module';
 import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
+import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { PostHogModule } from './shared/modules/posthog.module';
     FeedbackModule,
     NotificationsModule,
     ReleaseNotesModule,
+    WhiteboardsModule,
     TemplatesModule,
   ],
 })
