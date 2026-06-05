@@ -21,6 +21,7 @@ export class HealthService {
   // In-memory cache with TTL (10 seconds)
   private cachedResponse: HealthCheckResult | null = null;
   private cacheTimestamp: number = 0;
+  private refreshPromise: Promise<HealthCheckResult> | null = null;
   private readonly CACHE_TTL_MS = 10000; // 10 seconds
 
   constructor(
@@ -44,6 +45,19 @@ export class HealthService {
       return this.cachedResponse;
     }
 
+    if (this.refreshPromise) {
+      this.logger.debug('Returning in-flight health check refresh');
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.runHealthChecks().finally(() => {
+      this.refreshPromise = null;
+    });
+
+    return this.refreshPromise;
+  }
+
+  private async runHealthChecks(): Promise<HealthCheckResult> {
     this.logger.debug('Running fresh health checks');
 
     // Run all checks in parallel. Each check is isolated so one dependency
@@ -88,7 +102,7 @@ export class HealthService {
 
     // Cache the response
     this.cachedResponse = result;
-    this.cacheTimestamp = now;
+    this.cacheTimestamp = Date.now();
 
     return result;
   }
@@ -103,7 +117,8 @@ export class HealthService {
   }> {
     const startTime = Date.now();
     try {
-      // Use Promise.race with a timeout
+      // Prisma does not cancel the underlying query when this timeout wins;
+      // the DB connection is released only after the query eventually returns.
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(
           () => reject(new Error('Database check timeout')),

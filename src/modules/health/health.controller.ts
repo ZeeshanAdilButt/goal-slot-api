@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Post, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { EmailService } from '../email/email.service';
 import { HealthService } from './health.service';
 
@@ -75,8 +76,16 @@ export class HealthController {
       },
     },
   })
-  async getDetailedHealth() {
-    return this.healthService.getDetailedHealth();
+  async getDetailedHealth(@Res({ passthrough: true }) res: Response) {
+    const result = await this.healthService.getDetailedHealth();
+
+    res.status(
+      result.status === 'down'
+        ? HttpStatus.SERVICE_UNAVAILABLE
+        : HttpStatus.OK,
+    );
+
+    return result;
   }
 
   @Post('test-email/share-invitation')
