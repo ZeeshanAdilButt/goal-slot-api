@@ -20,6 +20,12 @@ const FULL_SYNC_WINDOW_DAYS = 90;
 export class CalendarSyncService {
   private readonly logger = new Logger(CalendarSyncService.name);
 
+  // Reentrancy guard: a sync pass can run longer than the 5-minute cadence on a
+  // large/slow account. Skip overlapping ticks so two passes don't race the same
+  // syncToken/ExternalEvent upserts or double-spend Google quota. Single-instance
+  // only; multi-instance would need a Postgres advisory lock (v2).
+  private syncing = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
@@ -33,16 +39,25 @@ export class CalendarSyncService {
   @Cron('*/5 * * * *')
   async syncAllActive(): Promise<void> {
     if (!this.googleApi.isConfigured) return;
-    const connections = await this.prisma.calendarConnection.findMany({
-      where: { status: 'active' },
-      select: { id: true },
-    });
-    for (const { id } of connections) {
-      try {
-        await this.syncConnection(id);
-      } catch (err) {
-        this.logger.error(`Cron sync failed for connection ${id}: ${errMessage(err)}`);
+    if (this.syncing) {
+      this.logger.debug('Sync already in progress, skipping this tick');
+      return;
+    }
+    this.syncing = true;
+    try {
+      const connections = await this.prisma.calendarConnection.findMany({
+        where: { status: 'active' },
+        select: { id: true },
+      });
+      for (const { id } of connections) {
+        try {
+          await this.syncConnection(id);
+        } catch (err) {
+          this.logger.error(`Cron sync failed for connection ${id}: ${errMessage(err)}`);
+        }
       }
+    } finally {
+      this.syncing = false;
     }
   }
 
