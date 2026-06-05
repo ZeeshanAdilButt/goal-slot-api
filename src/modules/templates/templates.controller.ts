@@ -51,6 +51,7 @@ export class TemplatesController {
       schedule: dto.schedule,
       goals: dto.goals,
       tasks: dto.tasks,
+      replaceExisting: dto.replaceExisting ?? false,
     });
   }
 }

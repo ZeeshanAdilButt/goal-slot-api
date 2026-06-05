@@ -34,12 +34,12 @@ const WEEKDAY_SHAPE: BlockShape[] = [
   { startTime: '05:00', endTime: '09:00', title: 'Deep Focus: DSA + Problem Solving (Intermittent Fasting)', goalRef: 'dsa' },
   { startTime: '09:00', endTime: '09:30', title: 'Breakfast + Mindset Talk', goalRef: 'mindset' },
   { startTime: '09:30', endTime: '13:00', title: 'Tech Learning Block 1 (Course / Track)', goalRef: 'tech' },
-  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'gratitude' },
+  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'writing' },
   { startTime: '13:15', endTime: '13:45', title: 'Lunch + Engineering Conversation', goalRef: 'engineering' },
   { startTime: '13:45', endTime: '17:00', title: 'Tech Learning Block 2 (Project Work)', goalRef: 'tech' },
   { startTime: '17:00', endTime: '18:00', title: 'Late Afternoon Pause + Family Time', goalRef: 'family' },
   { startTime: '18:00', endTime: '18:30', title: 'Dinner + Reflection Talk', goalRef: 'spiritual' },
-  { startTime: '18:30', endTime: '19:00', title: 'Evening Reflection + Writing Thoughts', goalRef: 'gratitude' },
+  { startTime: '18:30', endTime: '19:00', title: 'Evening Reflection + Writing Thoughts', goalRef: 'writing' },
   { startTime: '19:00', endTime: '19:30', title: 'Sleep Like a Baby (wind down)', goalRef: 'gratitude' },
 ];
 
@@ -49,12 +49,12 @@ const WEEKEND_SHAPE: BlockShape[] = [
   { startTime: '05:00', endTime: '08:00', title: 'Personal Time / DSA Revision', goalRef: 'dsa' },
   { startTime: '08:00', endTime: '08:30', title: 'Breakfast + Mindset Talk', goalRef: 'mindset' },
   { startTime: '08:30', endTime: '13:00', title: 'Tech Grind Block 1 (Course / Track)', goalRef: 'tech' },
-  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'gratitude' },
+  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'writing' },
   { startTime: '13:15', endTime: '13:45', title: 'Lunch + Engineering Conversation', goalRef: 'engineering' },
   { startTime: '13:45', endTime: '15:30', title: 'Tech Grind Block 2 (Project / Open Source)', goalRef: 'tech' },
   { startTime: '15:30', endTime: '17:00', title: 'Late Afternoon Pause + Family Time', goalRef: 'family' },
   { startTime: '17:00', endTime: '18:00', title: 'Dinner + Reflection Talk', goalRef: 'spiritual' },
-  { startTime: '18:00', endTime: '18:30', title: 'Evening Reflection + Writing Thoughts', goalRef: 'gratitude' },
+  { startTime: '18:00', endTime: '18:30', title: 'Evening Reflection + Writing Thoughts', goalRef: 'writing' },
   { startTime: '18:30', endTime: '19:00', title: 'Sleep Like a Baby (wind down)', goalRef: 'gratitude' },
 ];
 
@@ -73,15 +73,16 @@ This is the original Winner Study Schedule template shared inside the Dev Weeken
 - **Hard stop at 7 PM** for sleep so the early wake actually works.
 - **Weekends** swap the morning DSA block for personal time, then pivot to a longer Tech Grind with the rest of the day mirroring the weekday rhythm.
 
-When you import, you can pull in the full schedule plus **seven goals** sized for a four-month run:
+When you import, you can pull in the full schedule plus **eight goals** sized for a four-month run:
 
-- **Cracking Tech** — ship 4 mega projects.
-- **Cracking DSA** — 300+ problems solved.
-- **Cracking Mindset** — 50+ mindset talks watched (including the Talk of the Week, Talk of the Month, and the Book of the Month).
-- **Engineering Mastery** — 50+ engineering talks watched.
-- **Spiritual Growth** — 50+ spiritual talks watched, with daily sacred reading.
-- **Amazing Family Relationships** — sustained, intentional time with parents and siblings.
-- **100 Days of Gratitude & Writing** — daily gratitude entries, evening reflection writing, and the discipline streaks (cold shower, intermittent fasting, 7 PM bedtime) that make the rest of the schedule possible.
+- **Cracking Tech - 4+ Mega Projects**.
+- **Cracking DSA - 200+ Problems**.
+- **Cracking Mindset - 50+ Talks** (Talk of the Week, Talk of the Month, and the Book of the Month).
+- **Engineering Mastery - 100+ Engineering Talks**.
+- **Spiritual Growth - 100+ Spiritual Talks**, with daily sacred reading.
+- **Amazing Family Relationships** - sustained, intentional time with parents and siblings.
+- **100 Days of Gratitude** - cold shower, fasting, 7 PM bedtime, and the morning gratitude entry. The discipline streaks that make the rest of the schedule possible.
+- **100 Days of Writing** - midday walk thoughts and evening reflection writing.
 
 The tasks are sized weekly: **15 LeetCode this week, 5 mindset talks, 5 engineering talks, 5 spiritual talks**, plus the stepped Dev Weekends curriculum that walks you from HTML through a multi-vendor MERN e-commerce project.
 
@@ -93,25 +94,25 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
   goals: [
     {
       ref: 'tech',
-      title: 'Cracking Tech (4 Mega Projects)',
+      title: 'Cracking Tech - 4+ Mega Projects',
       description:
-        'Structured Dev Weekends curriculum across the afternoon blocks: HTML → CSS → JS → React → Node + Express + MongoDB → mega projects. Target for the next 4 months is 4 mega projects shipped, each ending in a written case study.',
+        'Structured Dev Weekends curriculum across the afternoon blocks: HTML → CSS → JS → React → Node + Express + MongoDB → mega projects. Target for the next 4 months is 4+ mega projects shipped, each ending in a written case study.',
       category: 'WORK',
       color: '#0ea5e9',
       targetHours: 320,
     },
     {
       ref: 'dsa',
-      title: 'Cracking DSA (300+ Problems)',
+      title: 'Cracking DSA - 200+ Problems',
       description:
-        'Daily DSA / problem solving in the deep-focus morning block. Target for the next 4 months is 300+ LeetCode-style problems solved, rotating across strings, arrays, hash maps, two pointers, dynamic programming, and graphs. Weekend contests count toward the total.',
+        'Daily DSA / problem solving in the deep-focus morning block. Target for the next 4 months is 200+ LeetCode-style problems solved, rotating across strings, arrays, hash maps, two pointers, dynamic programming, and graphs. Weekend contests count toward the total.',
       category: 'WORK',
       color: '#6366f1',
-      targetHours: 150,
+      targetHours: 100,
     },
     {
       ref: 'mindset',
-      title: 'Cracking Mindset (50+ Talks)',
+      title: 'Cracking Mindset - 50+ Talks',
       description:
         'One mindset talk over breakfast, every weekday. Target for the next 4 months is 50+ talks watched (Dan Pink, Atomic Habits, Power of Morning Routines, and the rotating Talk of the Week / Talk of the Month). Track one personal insight per talk in the journal.',
       category: 'PERSONAL',
@@ -120,21 +121,21 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     },
     {
       ref: 'engineering',
-      title: 'Engineering Mastery (50+ Talks)',
+      title: 'Engineering Mastery - 100+ Engineering Talks',
       description:
-        'One engineering talk at lunch, every weekday. Target for the next 4 months is 50+ talks watched across NDC, GOTO, Hussein Nasser, the Node.js Documentary, and "Day in life @ Google / Amazon" pieces. Write a one-paragraph takeaway after each.',
+        'One engineering talk at lunch, every weekday. Target for the next 4 months is 100+ talks watched across NDC, GOTO, Hussein Nasser, the Node.js Documentary, and "Day in life @ Google / Amazon" pieces. Write a one-paragraph takeaway after each.',
       category: 'WORK',
       color: '#06b6d4',
-      targetHours: 30,
+      targetHours: 60,
     },
     {
       ref: 'spiritual',
-      title: 'Spiritual Growth (50+ Talks)',
+      title: 'Spiritual Growth - 100+ Spiritual Talks',
       description:
-        'Daily sacred reading, the five rhythm pauses through the day, and a weekly reflection talk over dinner. Target for the next 4 months is 50+ spiritual talks watched across the Purpose of Life, Types of Hearts, Quranic Gems, the Sahaba Series, and the Dev Weekends evening picks.',
+        'Daily sacred reading, the five rhythm pauses through the day, and a reflection talk at dinner. Target for the next 4 months is 100+ spiritual talks watched across the Purpose of Life, Quranic Gems, the Sahaba Series, A Life of Khushu, and the Dev Weekends evening picks.',
       category: 'PERSONAL',
       color: '#8b5cf6',
-      targetHours: 30,
+      targetHours: 60,
     },
     {
       ref: 'family',
@@ -147,12 +148,21 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     },
     {
       ref: 'gratitude',
-      title: '100 Days of Gratitude & Writing',
+      title: '100 Days of Gratitude',
       description:
-        'Daily morning gratitude entry (three things). Daily evening reflection on wins, lessons, and intent for tomorrow. The discipline streaks that make the rest of the schedule possible: cold shower, intermittent fasting, 7 PM bedtime. Target: 100 consecutive days.',
+        'Daily morning gratitude entry (three things) right after waking up. The discipline streaks that make the rest of the schedule possible: cold shower, intermittent fasting, 7 PM bedtime. Target: 100 consecutive days.',
       category: 'PERSONAL',
       color: '#10b981',
-      targetHours: 25,
+      targetHours: 15,
+    },
+    {
+      ref: 'writing',
+      title: '100 Days of Writing',
+      description:
+        'Capture one thought during the midday walk in sunlight. Write evening reflection nightly: today\'s wins, lessons, and intent for tomorrow. Target: 100 consecutive days of writing.',
+      category: 'PERSONAL',
+      color: '#14b8a6',
+      targetHours: 15,
     },
   ],
 
@@ -166,8 +176,8 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     { goalRef: 'dsa', title: 'This week: 15 LeetCode problems (rotate string / array / hash map)' },
     { goalRef: 'dsa', title: 'Milestone 1: 50 problems solved (easy strings + arrays)' },
     { goalRef: 'dsa', title: 'Milestone 2: 100 problems solved (add hash maps + two pointers)' },
-    { goalRef: 'dsa', title: 'Milestone 3: 200 problems solved (add dynamic programming + graphs)' },
-    { goalRef: 'dsa', title: 'Milestone 4: 300+ problems solved (goal complete)' },
+    { goalRef: 'dsa', title: 'Milestone 3: 150 problems solved (add dynamic programming + graphs)' },
+    { goalRef: 'dsa', title: 'Milestone 4: 200+ problems solved (goal complete)' },
     { goalRef: 'dsa', title: 'Weekly weekend contest (AtCoder or Codeforces)' },
 
     // ----- Cracking Tech: 4 mega projects + curriculum stepping -----
@@ -241,14 +251,8 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
       description:
         'An easy and proven way to build good habits and break bad ones. Read one chapter per day, capture one applicable idea each time.',
     },
-    {
-      goalRef: 'mindset',
-      title: 'Talk of the Week: Build a Mind So Strong It Scares People',
-    },
-    {
-      goalRef: 'mindset',
-      title: 'Talk of the Month: Bodybuilding for the Brain',
-    },
+    { goalRef: 'mindset', title: 'Talk of the Week: Build a Mind So Strong It Scares People' },
+    { goalRef: 'mindset', title: 'Talk of the Month: Bodybuilding for the Brain' },
     {
       goalRef: 'mindset',
       title: 'Watch: Junior Developers are Dead!',
@@ -259,6 +263,8 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     { goalRef: 'mindset', title: 'Watch: One Hour a Day Can Change Your Life' },
     { goalRef: 'mindset', title: 'Watch: How to Achieve Your Most Ambitious Goals' },
     { goalRef: 'mindset', title: 'Watch: The Puzzle of Motivation (Dan Pink, TED)' },
+    { goalRef: 'mindset', title: 'Watch: The Purpose of Life' },
+    { goalRef: 'mindset', title: 'Watch: Types of Hearts' },
     { goalRef: 'mindset', title: 'Capture one applicable insight per talk in the journal' },
 
     // ----- Engineering Mastery: weekly cadence + featured shows -----
@@ -272,8 +278,6 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
 
     // ----- Spiritual Growth: weekly cadence + featured talks + daily practice -----
     { goalRef: 'spiritual', title: 'This week: 5 spiritual talks at dinner' },
-    { goalRef: 'spiritual', title: 'Watch: The Purpose of Life' },
-    { goalRef: 'spiritual', title: 'Watch: Types of Hearts' },
     { goalRef: 'spiritual', title: 'Watch: A Life of Khushu' },
     { goalRef: 'spiritual', title: 'Watch: Quranic Gems by Nouman Ali Khan (one episode per week)' },
     { goalRef: 'spiritual', title: 'Watch: Sahaba Series by Omar Suleiman' },
@@ -286,13 +290,16 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     { goalRef: 'family', title: 'Weekly: one small thing (chess, walk, side project) with a younger sibling' },
     { goalRef: 'family', title: 'Monthly: a thoughtful message or letter to a family member you do not see often' },
 
-    // ----- 100 Days of Gratitude & Writing -----
+    // ----- 100 Days of Gratitude (morning entry + discipline streaks) -----
     { goalRef: 'gratitude', title: 'Daily morning: write 3 things you are grateful for' },
-    { goalRef: 'gratitude', title: 'Daily evening: write today\'s wins, lessons, and intent for tomorrow' },
-    { goalRef: 'gratitude', title: 'Daily midday: capture one thought during the sunlight walk' },
     { goalRef: 'gratitude', title: '100-day streak: cold shower every morning' },
     { goalRef: 'gratitude', title: '100-day streak: intermittent fasting window (water + light snack until 9 AM)' },
     { goalRef: 'gratitude', title: '100-day streak: lights out by 7 PM, no exceptions' },
+
+    // ----- 100 Days of Writing (midday walk thoughts + evening reflection) -----
+    { goalRef: 'writing', title: 'Daily midday: capture one thought during the sunlight walk' },
+    { goalRef: 'writing', title: 'Daily evening: write today\'s wins, lessons, and intent for tomorrow' },
+    { goalRef: 'writing', title: 'Weekly: re-read the week\'s entries and pull out one pattern' },
   ],
 };
 

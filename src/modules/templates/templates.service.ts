@@ -46,6 +46,24 @@ export class TemplatesService {
       let scheduleBlocksCreated = 0;
       let tasksCreated = 0;
 
+      // "Replace existing" wipes the user's current rows for whichever
+      // sections are being imported. Order matters: tasks and schedule
+      // blocks reference goals, so delete them first so goals can be
+      // deleted without dangling foreign keys (the relation uses
+      // onDelete: SetNull, so the deletes would succeed either way, but
+      // doing them in this order is clearer).
+      if (opts.replaceExisting) {
+        if (opts.tasks) {
+          await tx.task.deleteMany({ where: { userId } });
+        }
+        if (opts.schedule) {
+          await tx.scheduleBlock.deleteMany({ where: { userId } });
+        }
+        if (opts.goals) {
+          await tx.goal.deleteMany({ where: { userId } });
+        }
+      }
+
       if (opts.goals && template.goals?.length) {
         // The template can pin targetHours explicitly per goal (preferred for
         // multi-month sized goals like "300 LeetCode in 4 months"). When it

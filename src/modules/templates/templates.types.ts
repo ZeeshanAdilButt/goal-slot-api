@@ -83,6 +83,11 @@ export interface TemplateImportOptions {
   schedule: boolean;
   goals: boolean;
   tasks: boolean;
+  // When true, the service deletes the user's existing schedule blocks,
+  // goals, and tasks for whichever sections are being imported, BEFORE
+  // creating the new rows. Used for the "I imported, do not like it, let
+  // me retry" flow. Destructive; the dialog confirms first.
+  replaceExisting?: boolean;
 }
 
 export interface TemplateImportResult {
