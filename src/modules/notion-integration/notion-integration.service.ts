@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, HttpException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../shared/services/encryption.service';
@@ -18,6 +18,7 @@ interface NotionOAuthTokenResponse {
   bot_id?: string;
 }
 
+
 @Injectable()
 export class NotionIntegrationService {
   private readonly clientId: string;
@@ -33,9 +34,9 @@ export class NotionIntegrationService {
     private readonly encryption: EncryptionService,
     private readonly config: ConfigService,
   ) {
-    this.clientId = this.config.getOrThrow<string>('NOTION_CLIENT_ID');
-    this.clientSecret = this.config.getOrThrow<string>('NOTION_CLIENT_SECRET');
-    this.redirectUri = this.config.getOrThrow<string>('NOTION_REDIRECT_URI');
+    this.clientId = this.config.get<string>('NOTION_CLIENT_ID') ?? '';
+    this.clientSecret = this.config.get<string>('NOTION_CLIENT_SECRET') ?? '';
+    this.redirectUri = this.config.get<string>('NOTION_REDIRECT_URI') ?? '';
     // Use a dedicated key for signing OAuth state tokens so JWT secret rotation
     // does not invalidate pending Notion connect flows. Falls back to JWT_SECRET
     // if INTEGRATION_STATE_SECRET is not set (keeps existing dev envs working).
@@ -94,7 +95,17 @@ export class NotionIntegrationService {
     }
   }
 
+  private isConfigured(): boolean {
+    return !!(this.clientId && this.clientSecret && this.redirectUri);
+  }
+
   getAuthorizationUrl(userId: string): string {
+    if (!this.isConfigured()) {
+      throw new HttpException(
+        'Notion integration is not configured on this server',
+        503,
+      );
+    }
     const stateToken = this.generateSignedState(userId);
     return `https://api.notion.com/v1/oauth/authorize?client_id=${this.clientId}&response_type=code&owner=user&redirect_uri=${encodeURIComponent(this.redirectUri)}&state=${stateToken}`;
   }
