@@ -7,10 +7,20 @@ import {
   TemplateImportOptions,
   TemplateImportResult,
   TemplateSummary,
+  TemplateTask,
 } from './templates.types';
 
 // Maps a template's local `goalRef` strings to the real Goal ids we created.
 type GoalRefMap = Map<string, string>;
+
+export interface TemplateSyncResult {
+  templateId: string;
+  tasksAdded: number;
+  skipped: number;
+  // True when the user has at least one goal whose templateId matches this
+  // template. False means they never imported it and have nothing to sync to.
+  matched: boolean;
+}
 
 @Injectable()
 export class TemplatesService {
@@ -85,20 +95,31 @@ export class TemplatesService {
               color: g.color,
               order: i,
               targetHours: g.targetHours ?? computed,
+              templateId: template.id,
+              templateGoalRef: g.ref,
             },
             select: { id: true },
           });
           goalRefMap.set(g.ref, created.id);
           goalsCreated++;
         }
+      } else if (opts.schedule || opts.tasks) {
+        // The user did not opt in to creating goals, but the schedule or
+        // tasks they ARE importing reference goalRefs. Pre-populate the map
+        // with their existing goals from a prior import of this same
+        // template (matched by templateGoalRef) so the new blocks and tasks
+        // wire up cleanly. Goals from other templates / hand-created goals
+        // do not match.
+        const existing = await tx.goal.findMany({
+          where: { userId, templateId: template.id },
+          select: { id: true, templateGoalRef: true },
+        });
+        for (const g of existing) {
+          if (g.templateGoalRef) goalRefMap.set(g.templateGoalRef, g.id);
+        }
       }
 
       if (opts.schedule && template.schedule?.length) {
-        // Generate a single seriesId per (goalRef, title, startTime, endTime,
-        // dayOfWeek-set) combo so blocks the user later wants to bulk-edit
-        // stay grouped. For simplicity v1 assigns one seriesId per template
-        // import per (title + startTime + endTime); blocks with the same
-        // shape across multiple days will share the series.
         const seriesIdByShape = new Map<string, string>();
         const inputs: Prisma.ScheduleBlockCreateManyInput[] = [];
         for (const b of template.schedule) {
@@ -134,6 +155,8 @@ export class TemplatesService {
             category: t.category ?? null,
             order: idx,
             goalId: t.goalRef ? goalRefMap.get(t.goalRef) ?? null : null,
+            templateId: template.id,
+            templateTaskKey: this.taskKey(t),
           }),
         );
         const result = await tx.task.createMany({ data: inputs });
@@ -145,6 +168,108 @@ export class TemplatesService {
         goalsCreated,
         scheduleBlocksCreated,
         tasksCreated,
+      };
+    });
+  }
+
+  // Sync flow: when the curator adds new tasks to a template, users who
+  // already imported it can run this to pull the new ones into their
+  // account. Dedupe by (userId, templateId, templateTaskKey). Goals are
+  // not touched, only tasks; schedule blocks are similarly untouched.
+  async syncTasks(
+    userId: string,
+    templateId: string,
+  ): Promise<TemplateSyncResult> {
+    const template = this.getOne(templateId);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // Map the user's existing goals for this template back to local refs
+      // so we know where new tasks should land.
+      const existingGoals = await tx.goal.findMany({
+        where: { userId, templateId: template.id },
+        select: { id: true, templateGoalRef: true },
+      });
+
+      if (existingGoals.length === 0) {
+        return {
+          templateId: template.id,
+          tasksAdded: 0,
+          skipped: 0,
+          matched: false,
+        };
+      }
+
+      const goalRefMap = new Map<string, string>();
+      for (const g of existingGoals) {
+        if (g.templateGoalRef) goalRefMap.set(g.templateGoalRef, g.id);
+      }
+
+      // Pull every task the user already has from this template (by key).
+      const existingKeys = new Set<string>(
+        (
+          await tx.task.findMany({
+            where: { userId, templateId: template.id },
+            select: { templateTaskKey: true },
+          })
+        )
+          .map((t) => t.templateTaskKey)
+          .filter((k): k is string => !!k),
+      );
+
+      // Find template tasks the user does not have yet. Skip tasks whose
+      // goalRef does not match any of the user's imported goals (they did
+      // not bring that goal in originally, so dropping the task there
+      // would be confusing).
+      const toAdd: { task: TemplateTask; key: string; goalId: string | null }[] = [];
+      let skipped = 0;
+      for (const t of template.tasks ?? []) {
+        const key = this.taskKey(t);
+        if (existingKeys.has(key)) {
+          skipped++;
+          continue;
+        }
+        const goalId = t.goalRef ? goalRefMap.get(t.goalRef) ?? null : null;
+        if (t.goalRef && !goalId) {
+          skipped++;
+          continue;
+        }
+        toAdd.push({ task: t, key, goalId });
+      }
+
+      if (toAdd.length === 0) {
+        return {
+          templateId: template.id,
+          tasksAdded: 0,
+          skipped,
+          matched: true,
+        };
+      }
+
+      // Append at the end of whatever the user has now.
+      const currentMaxOrder = await tx.task.aggregate({
+        where: { userId },
+        _max: { order: true },
+      });
+      const startOrder = (currentMaxOrder._max.order ?? -1) + 1;
+
+      await tx.task.createMany({
+        data: toAdd.map((entry, idx) => ({
+          userId,
+          title: entry.task.title,
+          description: entry.task.description ?? null,
+          category: entry.task.category ?? null,
+          order: startOrder + idx,
+          goalId: entry.goalId,
+          templateId: template.id,
+          templateTaskKey: entry.key,
+        })),
+      });
+
+      return {
+        templateId: template.id,
+        tasksAdded: toAdd.length,
+        skipped,
+        matched: true,
       };
     });
   }
@@ -190,5 +315,20 @@ export class TemplatesService {
     const [eh, em] = end.split(':').map(Number);
     const minutes = (eh - sh) * 60 + (em - sm);
     return Math.max(0, minutes / 60);
+  }
+
+  // Stable per-task key for dedup on sync. Either the curator-provided key
+  // (preferred) or a slug of the title. Slugs are safe enough as long as
+  // the curator avoids renaming an existing task (rename = a "new" task on
+  // next sync, which is acceptable for v1).
+  private taskKey(t: TemplateTask): string {
+    if (t.key && t.key.trim().length > 0) return t.key.trim();
+    return t.title
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'task';
   }
 }

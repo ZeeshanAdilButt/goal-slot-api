@@ -54,4 +54,18 @@ export class TemplatesController {
       replaceExisting: dto.replaceExisting ?? false,
     });
   }
+
+  // Pull any new tasks the curator has added to a template since the user
+  // last imported it. Dedupes by per-task key. Goals and schedule blocks
+  // are not touched.
+  @Post(':id/sync')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Sync new tasks from a curated template into the current user account',
+  })
+  sync(@Request() req: any, @Param('id') id: string) {
+    return this.templates.syncTasks(req.user.sub, id);
+  }
 }

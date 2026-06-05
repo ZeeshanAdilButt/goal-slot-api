@@ -171,93 +171,38 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     ...blocksForDays(WEEKEND_SHAPE, SAT_SUN),
   ],
 
+  // Tasks are intentionally vague seeds. They give the user a *sense* of
+  // what each goal expects, not a specific answer to follow. Every task
+  // title ends in "--placeholder" so the user knows to swap in their own
+  // version (their actual problem set, their actual book of the month,
+  // their actual project this week).
   tasks: [
-    // ----- Cracking DSA: weekly cadence + milestones -----
-    { goalRef: 'dsa', title: 'This week: 15 LeetCode problems (rotate string / array / hash map)' },
-    { goalRef: 'dsa', title: 'Milestone 1: 50 problems solved (easy strings + arrays)' },
-    { goalRef: 'dsa', title: 'Milestone 2: 100 problems solved (add hash maps + two pointers)' },
-    { goalRef: 'dsa', title: 'Milestone 3: 150 problems solved (add dynamic programming + graphs)' },
-    { goalRef: 'dsa', title: 'Milestone 4: 200+ problems solved (goal complete)' },
-    { goalRef: 'dsa', title: 'Weekly weekend contest (AtCoder or Codeforces)' },
+    // ----- Cracking DSA: weekly cadence only, two seeds is enough -----
+    { goalRef: 'dsa', title: 'This week: solve 15 DSA problems --placeholder' },
+    { goalRef: 'dsa', title: 'This week: enter one weekend contest --placeholder' },
 
-    // ----- Cracking Tech: 4 mega projects + curriculum stepping -----
-    {
-      goalRef: 'tech',
-      title: 'Mega Project 1 of 4: Real Estate Marketplace (Weeks 5-7)',
-      description:
-        'Modern MERN with JWT + Redux Toolkit. https://youtu.be/VAaUy_Moivw . End with a 1-page case study.',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Mega Project 2 of 4: Grocery Delivery or Hotel Booking (Weeks 8-10)',
-      description:
-        'Grocery: https://youtu.be/PaQX0pktLnw . Hotel: https://youtu.be/ubM9cX8G_gk . Pick one, ship it.',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Mega Project 3 of 4: School Management or Movie Ticket (Weeks 11-13)',
-      description:
-        'School Management is the recommended intermediate option. Movie Ticket: https://www.youtube.com/watch?v=Pez37wmUaQM .',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Mega Project 4 of 4: Multi-Vendor MERN E-commerce + case study (Weeks 14-17)',
-      description:
-        'The capstone. Reference: https://drive.google.com/drive/folders/1VMYrWmM_WZNsfjOiMBkNU1M-JKUPAidc . Case study template: https://docs.google.com/document/d/14rKVfuyAj6exQCTdvm_ioThmAbxAnpxNuDQ3oMlU6lY .',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Foundations Week 1-2: HTML + CSS (positioning, flexbox) + CSS Grid',
-      description:
-        'CSS: https://www.youtube.com/watch?v=K1naz9wBwKU . Grid: https://www.youtube.com/watch?v=9zBsdzdE4sM .',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Foundations Week 3-4: JavaScript basics through advanced (DW playlist videos 1-51)',
-      description:
-        'https://www.youtube.com/watch?v=Hr5iLG7sUa0&list=PLu71SKxNbfoBuX3f4EOACle2y-tRC5Q37 .',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Foundations Week 5: Git + GitHub fundamentals',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Foundations Week 6: freeCodeCamp JavaScript Algorithms + DSA certificate',
-      description: 'https://www.freecodecamp.org/learn/javascript-algorithms-and-data-structures (10-15 hours).',
-    },
-    {
-      goalRef: 'tech',
-      title: 'React Weeks 7-9: Master Class + first hooks projects (Tour site, Weather, Food Recipe)',
-      description:
-        'Master Class: https://www.youtube.com/playlist?list=PLSsAz5wf2lkKm0BG9wUWWSgYWBzDa-dFs . Projects: https://youtu.be/5ZdHfJVAY-s .',
-    },
-    {
-      goalRef: 'tech',
-      title: 'Node Weeks 10-12: freeCodeCamp Node + Express + MongoDB + MERN CRUD',
-      description:
-        'Node L0: https://www.youtube.com/watch?v=ohIAiuHMKMI . MERN CRUD: https://youtu.be/enOsPhp2Z6Q .',
-    },
-    { goalRef: 'tech', title: 'Stretch: DW DevOps series, pick 4-5 videos from L0 + L1' },
-    { goalRef: 'tech', title: 'Stretch: TypeScript foundations + apply to one existing project' },
-    { goalRef: 'tech', title: 'Stretch: Next.js (only after 4-5 multi-vendor-level projects)' },
-    { goalRef: 'tech', title: 'Stretch: Prisma in one MERN project' },
+    // ----- Cracking Tech -----
+    { goalRef: 'tech', title: 'Mega Project 1 of 4 --placeholder' },
+    { goalRef: 'tech', title: 'Mega Project 2 of 4 --placeholder' },
+    { goalRef: 'tech', title: 'Mega Project 3 of 4 --placeholder' },
+    { goalRef: 'tech', title: 'Mega Project 4 of 4 (capstone + case study) --placeholder' },
+    { goalRef: 'tech', title: 'Foundations: Frontend basics (HTML, CSS, JS) --placeholder' },
+    { goalRef: 'tech', title: 'Foundations: JavaScript deep dive --placeholder' },
+    { goalRef: 'tech', title: 'Foundations: Git + GitHub --placeholder' },
+    { goalRef: 'tech', title: 'Foundations: DSA certificate --placeholder' },
+    { goalRef: 'tech', title: 'React: master class + first hooks projects --placeholder' },
+    { goalRef: 'tech', title: 'Backend: Node + Express + MongoDB + MERN CRUD --placeholder' },
+    { goalRef: 'tech', title: 'Stretch: pick a DevOps mini-series --placeholder' },
+    { goalRef: 'tech', title: 'Stretch: TypeScript --placeholder' },
+    { goalRef: 'tech', title: 'Stretch: Next.js --placeholder' },
+    { goalRef: 'tech', title: 'Stretch: Prisma --placeholder' },
 
-    // ----- Cracking Mindset: weekly cadence + featured picks + Book of the Month -----
-    { goalRef: 'mindset', title: 'This week: 5 mindset talks over breakfast' },
-    {
-      goalRef: 'mindset',
-      title: 'Book of the Month: Atomic Habits by James Clear',
-      description:
-        'An easy and proven way to build good habits and break bad ones. Read one chapter per day, capture one applicable idea each time.',
-    },
+    // ----- Cracking Mindset (curator-picked talks; cadence + action are placeholders) -----
+    { goalRef: 'mindset', title: 'This week: 5 mindset talks at breakfast --placeholder' },
+    { goalRef: 'mindset', title: 'Book of the Month: Atomic Habits by James Clear' },
     { goalRef: 'mindset', title: 'Talk of the Week: Build a Mind So Strong It Scares People' },
     { goalRef: 'mindset', title: 'Talk of the Month: Bodybuilding for the Brain' },
-    {
-      goalRef: 'mindset',
-      title: 'Watch: Junior Developers are Dead!',
-      description: 'https://www.youtube.com/watch?v=H7-qkU1SC9M',
-    },
+    { goalRef: 'mindset', title: 'Watch: Junior Developers are Dead!' },
     { goalRef: 'mindset', title: 'Watch: The Power of Morning Routines' },
     { goalRef: 'mindset', title: 'Watch: Exploring Life, Faith and Self (MindMaster Fridays EP 01)' },
     { goalRef: 'mindset', title: 'Watch: One Hour a Day Can Change Your Life' },
@@ -265,41 +210,41 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     { goalRef: 'mindset', title: 'Watch: The Puzzle of Motivation (Dan Pink, TED)' },
     { goalRef: 'mindset', title: 'Watch: The Purpose of Life' },
     { goalRef: 'mindset', title: 'Watch: Types of Hearts' },
-    { goalRef: 'mindset', title: 'Capture one applicable insight per talk in the journal' },
+    { goalRef: 'mindset', title: 'Capture one insight per talk --placeholder' },
 
-    // ----- Engineering Mastery: weekly cadence + featured shows -----
-    { goalRef: 'engineering', title: 'This week: 5 engineering talks at lunch' },
+    // ----- Engineering Mastery (curator-picked shows; cadence + action are placeholders) -----
+    { goalRef: 'engineering', title: 'This week: 5 engineering talks at lunch --placeholder' },
     { goalRef: 'engineering', title: 'Watch: Node.js Documentary' },
     { goalRef: 'engineering', title: 'Watch: Hussein Nasser Backend Engineering Show (one episode per week)' },
     { goalRef: 'engineering', title: 'Watch: NDC Conferences (rotating picks)' },
     { goalRef: 'engineering', title: 'Watch: GOTO Conferences (rotating picks)' },
     { goalRef: 'engineering', title: 'Watch: Day in life @ Google / Amazon / Meta' },
-    { goalRef: 'engineering', title: 'Write a one-paragraph takeaway after each talk' },
+    { goalRef: 'engineering', title: 'Write a one-paragraph takeaway after each talk --placeholder' },
 
-    // ----- Spiritual Growth: weekly cadence + featured talks + daily practice -----
-    { goalRef: 'spiritual', title: 'This week: 5 spiritual talks at dinner' },
+    // ----- Spiritual Growth (curator-picked talks; cadence + daily practice are placeholders) -----
+    { goalRef: 'spiritual', title: 'This week: 5 spiritual talks at dinner --placeholder' },
     { goalRef: 'spiritual', title: 'Watch: A Life of Khushu' },
     { goalRef: 'spiritual', title: 'Watch: Quranic Gems by Nouman Ali Khan (one episode per week)' },
     { goalRef: 'spiritual', title: 'Watch: Sahaba Series by Omar Suleiman' },
-    { goalRef: 'spiritual', title: 'Daily sacred reading with translation' },
-    { goalRef: 'spiritual', title: 'Weekly tafseer / commentary study (90-day target)' },
+    { goalRef: 'spiritual', title: 'Daily sacred reading --placeholder' },
+    { goalRef: 'spiritual', title: 'Weekly deeper study / commentary --placeholder' },
 
     // ----- Amazing Family Relationships -----
-    { goalRef: 'family', title: 'Daily intentional conversation with a parent or sibling' },
-    { goalRef: 'family', title: 'Family dinner together with a life / reflection topic on the table' },
-    { goalRef: 'family', title: 'Weekly: one small thing (chess, walk, side project) with a younger sibling' },
-    { goalRef: 'family', title: 'Monthly: a thoughtful message or letter to a family member you do not see often' },
+    { goalRef: 'family', title: 'Daily: one intentional conversation --placeholder' },
+    { goalRef: 'family', title: 'Daily family dinner with a topic --placeholder' },
+    { goalRef: 'family', title: 'Weekly: a small thing with a younger sibling --placeholder' },
+    { goalRef: 'family', title: 'Monthly: a thoughtful message to a family member --placeholder' },
 
-    // ----- 100 Days of Gratitude (morning entry + discipline streaks) -----
-    { goalRef: 'gratitude', title: 'Daily morning: write 3 things you are grateful for' },
-    { goalRef: 'gratitude', title: '100-day streak: cold shower every morning' },
-    { goalRef: 'gratitude', title: '100-day streak: intermittent fasting window (water + light snack until 9 AM)' },
-    { goalRef: 'gratitude', title: '100-day streak: lights out by 7 PM, no exceptions' },
+    // ----- 100 Days of Gratitude -----
+    { goalRef: 'gratitude', title: 'Daily morning: 3 things grateful for --placeholder' },
+    { goalRef: 'gratitude', title: '100-day streak: cold shower --placeholder' },
+    { goalRef: 'gratitude', title: '100-day streak: intermittent fasting --placeholder' },
+    { goalRef: 'gratitude', title: '100-day streak: 7 PM bedtime --placeholder' },
 
-    // ----- 100 Days of Writing (midday walk thoughts + evening reflection) -----
-    { goalRef: 'writing', title: 'Daily midday: capture one thought during the sunlight walk' },
-    { goalRef: 'writing', title: 'Daily evening: write today\'s wins, lessons, and intent for tomorrow' },
-    { goalRef: 'writing', title: 'Weekly: re-read the week\'s entries and pull out one pattern' },
+    // ----- 100 Days of Writing -----
+    { goalRef: 'writing', title: 'Daily midday: capture a walk thought --placeholder' },
+    { goalRef: 'writing', title: 'Daily evening: reflection writing --placeholder' },
+    { goalRef: 'writing', title: 'Weekly: re-read the week\'s entries --placeholder' },
   ],
 };
 

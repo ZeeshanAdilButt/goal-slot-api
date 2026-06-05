@@ -138,6 +138,16 @@ export class ScheduleService {
     return { message: 'Schedule block deleted' };
   }
 
+  // Wipe every schedule block for the user. Returns the count so the UI can
+  // show "N blocks cleared". Used by the destructive "Clear all" button on
+  // the schedule page.
+  async clearAll(userId: string): Promise<{ deleted: number }> {
+    const result = await this.prisma.scheduleBlock.deleteMany({
+      where: { userId },
+    });
+    return { deleted: result.count };
+  }
+
   private async checkTimeConflict(
     userId: string,
     dayOfWeek: number,

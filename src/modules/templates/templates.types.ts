@@ -48,6 +48,11 @@ export interface TemplateTask {
   title: string;
   description?: string;
   category?: string;
+  // Optional stable per-task key used by the sync flow to dedupe. When
+  // omitted the service derives a slug from the title. Set explicitly if
+  // you plan to rename the task later but want existing imports to still
+  // consider it the same task.
+  key?: string;
 }
 
 export interface TemplateDefinition {

@@ -99,6 +99,13 @@ model Goal {
   color       String     @default("#FFD700")
   order       Int        @default(0)
 
+  // Template provenance. When a goal was created by importing a curated
+  // community template, these capture which template + which local goal
+  // ref within that template. Used by the "Sync from <curator>" flow to
+  // map newly added template tasks back to the user's existing goal.
+  templateId      String?
+  templateGoalRef String?
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -114,6 +121,7 @@ model Goal {
   @@index([userId])
   @@index([status])
   @@index([category])
+  @@index([userId, templateId])
 }
 
 // Time entries for logging work
@@ -195,6 +203,15 @@ model Task {
   completedAt      DateTime?
   notes            String? // Task-specific notes
 
+  // Template provenance. When a task was created by importing a curated
+  // community template, `templateId` is the template's id and
+  // `templateTaskKey` is a stable per-task key (slug of the title at
+  // import time). The Sync flow uses these to dedupe: a template task
+  // whose key is already present under one of the user's
+  // templateId-matched goals is skipped.
+  templateId      String?
+  templateTaskKey String?
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -211,6 +228,7 @@ model Task {
 
   @@index([userId])
   @@index([scheduleBlockId])
+  @@index([userId, templateId, templateTaskKey])
   @@index([goalId])
   @@index([status])
 }
