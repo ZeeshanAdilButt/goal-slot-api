@@ -82,6 +82,7 @@ model User {
   coachConversations CoachConversation[]
   coachInsights      CoachInsight[]
   integrationConnections IntegrationConnection[]
+  notionPageIndex NotionPageIndex[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -755,5 +756,19 @@ model NotionTarget {
   updatedAt     DateTime @updatedAt
 
   @@index([connectionId])
+}
+
+model NotionPageIndex {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notionPageId String
+  title        String
+  pageType     String   // "page" | "database"
+  indexedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([userId, notionPageId])
+  @@index([userId])
+  @@index([userId, indexedAt])
 }
 

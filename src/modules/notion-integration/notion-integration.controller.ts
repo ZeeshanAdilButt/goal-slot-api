@@ -1,9 +1,11 @@
-import { Controller, Get, Delete, Query, UseGuards, Request, Res } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Query, Param, UseGuards, Request, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NotionIntegrationService } from './notion-integration.service';
 import { NotionStatusDto } from './dto/notion-status.dto';
+import { NotionPageIndexDto } from './dto/notion-page-index.dto';
+import { NotionPageContentDto } from './dto/notion-page-content.dto';
 
 @ApiTags('notion-integration')
 @Controller('integrations/notion')
@@ -23,7 +25,7 @@ export class NotionIntegrationController {
   @ApiOperation({ summary: 'Notion OAuth callback redirect handler' })
   async callback(
     @Query('code') code: string,
-    @Query('state') state: string, // state is the short-lived secure token
+    @Query('state') state: string,
     @Query('error') error: string,
     @Res() res: Response,
   ) {
@@ -46,5 +48,36 @@ export class NotionIntegrationController {
   async disconnect(@Request() req: any): Promise<{ success: boolean }> {
     await this.service.disconnect(req.user.sub);
     return { success: true };
+  }
+
+  @Get('index')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Return cached Notion page index. Triggers a background refresh when stale (>15 min).',
+  })
+  async getIndex(@Request() req: any): Promise<NotionPageIndexDto> {
+    return this.service.getPageIndex(req.user.sub);
+  }
+
+  @Post('index/refresh')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Force a foreground rebuild of the Notion page index cache' })
+  async refreshIndex(@Request() req: any): Promise<{ success: boolean }> {
+    await this.service.refreshPageIndex(req.user.sub);
+    return { success: true };
+  }
+
+  @Get('pages/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Fetch block children of a Notion page by ID' })
+  async getPageContent(
+    @Request() req: any,
+    @Param('id') id: string,
+  ): Promise<NotionPageContentDto> {
+    return this.service.getPageContent(req.user.sub, id);
   }
 }
