@@ -1,11 +1,16 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Post, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { EmailService } from '../email/email.service';
+import { HealthService } from './health.service';
 
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly emailService: EmailService) {}
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly healthService: HealthService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Health check endpoint' })
@@ -16,6 +21,71 @@ export class HealthController {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     };
+  }
+
+  @Get('detailed')
+  @ApiOperation({ summary: 'Detailed health check endpoint' })
+  @ApiResponse({
+    status: 200,
+    description: 'Detailed health status with dependency checks',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['ok', 'degraded', 'down'],
+          description: 'Overall health status',
+        },
+        timestamp: {
+          type: 'string',
+          description: 'ISO timestamp of the check',
+        },
+        checks: {
+          type: 'object',
+          properties: {
+            database: {
+              type: 'object',
+              properties: {
+                ok: { type: 'boolean' },
+                latencyMs: { type: 'number' },
+              },
+            },
+            supabase: {
+              type: 'object',
+              properties: {
+                ok: { type: 'boolean' },
+                latencyMs: { type: 'number' },
+              },
+            },
+            resend: {
+              type: 'object',
+              properties: {
+                ok: { type: 'boolean' },
+                configured: { type: 'boolean' },
+              },
+            },
+            geminiShared: {
+              type: 'object',
+              properties: {
+                ok: { type: 'boolean' },
+                configured: { type: 'boolean' },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  async getDetailedHealth(@Res({ passthrough: true }) res: Response) {
+    const result = await this.healthService.getDetailedHealth();
+
+    res.status(
+      result.status === 'down'
+        ? HttpStatus.SERVICE_UNAVAILABLE
+        : HttpStatus.OK,
+    );
+
+    return result;
   }
 
   @Post('test-email/share-invitation')
