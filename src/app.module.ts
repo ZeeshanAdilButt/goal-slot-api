@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+// Aliased to avoid colliding with the app's own ScheduleModule (weekly blocks).
+import { ScheduleModule as NestScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -29,6 +31,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ReleaseNotesModule } from './modules/release-notes/release-notes.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { envValidationSchema } from './shared/configuration/env.validation';
+import { GoogleCalendarModule } from './modules/google-calendar/google-calendar.module';
 import { EncryptionModule } from './shared/modules/encryption.module';
 import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
@@ -41,6 +44,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
       envFilePath: '.env',
       validationSchema: envValidationSchema,
     }),
+    NestScheduleModule.forRoot(), // enables @Cron (Google Calendar sync)
     PostHogModule, // Add PostHog module early so it's available globally
     EncryptionModule,
     LlmModule,
@@ -71,6 +75,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
     FeedbackModule,
     NotificationsModule,
     ReleaseNotesModule,
+    GoogleCalendarModule,
     WhiteboardsModule,
     TemplatesModule,
   ],

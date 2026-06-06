@@ -53,6 +53,11 @@ export class RegisterDto {
   @Length(6, 6)
   @Matches(/^\d{6}$/, { message: 'OTP must be a 6-digit number' })
   otp: string;
+
+  @ApiPropertyOptional({ example: 'Asia/Karachi', description: 'IANA timezone from the browser' })
+  @IsOptional()
+  @IsString()
+  timezone?: string;
 }
 
 export class ForgotPasswordDto {

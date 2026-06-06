@@ -70,4 +70,10 @@ export const envValidationSchema = Joi.object({
   // per-user cap defaults to 20.
   GOOGLE_AI_SHARED_API_KEY: Joi.string().optional().allow(''),
   SHARED_COACH_DAILY_LIMIT: Joi.number().integer().min(1).max(1000).default(20),
+
+  // Google Calendar integration (OAuth). All optional — when unset the
+  // feature degrades gracefully and /integrations/google/connect returns 503.
+  GOOGLE_OAUTH_CLIENT_ID: Joi.string().optional().allow(''),
+  GOOGLE_OAUTH_CLIENT_SECRET: Joi.string().optional().allow(''),
+  GOOGLE_OAUTH_REDIRECT_URI: Joi.string().uri().optional().allow(''),
 });

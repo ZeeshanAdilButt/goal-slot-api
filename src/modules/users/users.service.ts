@@ -72,6 +72,7 @@ export class UsersService {
       data: {
         name: dto.name,
         avatar: dto.avatar,
+        timezone: dto.timezone,
       },
     });
 
