@@ -137,19 +137,33 @@ export class NotionIntegrationService {
       return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=error&message=${encodeURIComponent(error)}`;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
-      const response = await fetch('https://api.notion.com/v1/oauth/token', {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: this.redirectUri,
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch('https://api.notion.com/v1/oauth/token', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: this.redirectUri,
+          }),
+          signal: controller.signal,
+        });
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          throw new Error('Notion token exchange timed out after 10 seconds');
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
