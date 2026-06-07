@@ -188,6 +188,7 @@ export class NotionIntegrationService {
           accessTokenCiphertext: new Uint8Array(enc.ciphertext),
           accessTokenIv: new Uint8Array(enc.iv),
           accessTokenAuthTag: new Uint8Array(enc.authTag),
+          accessTokenKeyVersion: enc.keyVersion,
         },
         update: {
           workspaceName: workspace_name || 'Notion Workspace',
@@ -196,6 +197,7 @@ export class NotionIntegrationService {
           accessTokenCiphertext: new Uint8Array(enc.ciphertext),
           accessTokenIv: new Uint8Array(enc.iv),
           accessTokenAuthTag: new Uint8Array(enc.authTag),
+          accessTokenKeyVersion: enc.keyVersion,
         },
       });
 
