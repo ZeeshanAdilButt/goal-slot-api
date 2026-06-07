@@ -107,4 +107,18 @@ describe('NotionIntegrationService', () => {
       expect(service.refreshPageIndex).toHaveBeenCalledWith('user-1');
     });
   });
+
+  describe('disconnect', () => {
+    it('transactionally deletes notionPageIndex and integrationConnection entries', async () => {
+      await service.disconnect('user-1');
+
+      expect(prismaMock.$transaction).toHaveBeenCalled();
+      expect(prismaMock.notionPageIndex.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+      expect(prismaMock.integrationConnection.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', provider: 'notion' },
+      });
+    });
+  });
 });

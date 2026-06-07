@@ -224,10 +224,14 @@ export class NotionIntegrationService {
   }
 
   async disconnect(userId: string): Promise<void> {
-    // Cascades deletion via schema relations.
-    await this.prisma.integrationConnection.deleteMany({
-      where: { userId, provider: 'notion' },
-    });
+    await this.prisma.$transaction([
+      this.prisma.notionPageIndex.deleteMany({
+        where: { userId },
+      }),
+      this.prisma.integrationConnection.deleteMany({
+        where: { userId, provider: 'notion' },
+      }),
+    ]);
   }
 
   async getDecryptedToken(userId: string): Promise<string> {
