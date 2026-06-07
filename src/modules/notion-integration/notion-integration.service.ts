@@ -56,7 +56,9 @@ export class NotionIntegrationService {
       this.config.get<string>('INTEGRATION_STATE_SECRET') ??
       this.config.getOrThrow<string>('JWT_SECRET');
 
-    // Pick first origin from CORS_ORIGIN for redirect.
+    // Uses first origin from CORS_ORIGIN as the frontend redirect base URL.
+    // Single-origin assumption is acceptable for now — a dedicated FRONTEND_URL
+    // env var should be introduced if multiple origins are ever needed.
     const corsOrigin = this.config.getOrThrow<string>('CORS_ORIGIN');
     this.frontendUrl = corsOrigin.split(',')[0].trim();
   }
