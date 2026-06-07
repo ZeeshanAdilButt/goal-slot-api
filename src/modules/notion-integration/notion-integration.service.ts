@@ -87,7 +87,15 @@ export class NotionIntegrationService {
         .createHmac('sha256', this.integrationStateSecret)
         .update(payloadB64)
         .digest('base64url');
-      if (signature !== expectedSignature) return null;
+      const sigBuffer = Buffer.from(signature, 'base64url');
+      const expectedSigBuffer = Buffer.from(expectedSignature, 'base64url');
+
+      if (sigBuffer.length !== expectedSigBuffer.length) {
+        return null;
+      }
+      if (!crypto.timingSafeEqual(sigBuffer, expectedSigBuffer)) {
+        return null;
+      }
 
       const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
       const { userId, expiresAt } = JSON.parse(payloadStr);
