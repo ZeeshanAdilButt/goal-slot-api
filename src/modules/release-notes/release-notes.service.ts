@@ -98,6 +98,10 @@ export class ReleaseNotesService {
   }
 
   async findUnseen(userId: string) {
+    // Hard-cap to the 4 most recent unseen notes so a brand-new user who
+    // joins after we have shipped a long history of releases does not get
+    // a backlog of 20 "Got it" prompts to clear. Older unseen notes just
+    // stay marked-unseen in the DB; they are simply not surfaced.
     return this.prisma.releaseNote.findMany({
       where: {
         seenBy: {
@@ -107,6 +111,7 @@ export class ReleaseNotesService {
         },
       },
       orderBy: { publishedAt: 'desc' },
+      take: 4,
     })
   }
 }

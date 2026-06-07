@@ -166,20 +166,28 @@ export class SharingService {
       throw new ForbiddenException('You do not have access to this user\'s data');
     }
 
-    // Get owner's data
+    // Get owner's data. Private schedule blocks (and time entries
+    // linked to them) are hidden from the accessor; the owner controls
+    // which blocks count as private via the isPrivate flag on each block.
     const [goals, recentEntries, scheduleBlocks] = await Promise.all([
       this.prisma.goal.findMany({
         where: { userId: ownerId },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.timeEntry.findMany({
-        where: { userId: ownerId },
+        where: {
+          userId: ownerId,
+          OR: [
+            { scheduleBlockId: null },
+            { scheduleBlock: { isPrivate: false } },
+          ],
+        },
         orderBy: { date: 'desc' },
         take: 20,
         include: { goal: { select: { id: true, title: true, color: true } } },
       }),
       this.prisma.scheduleBlock.findMany({
-        where: { userId: ownerId },
+        where: { userId: ownerId, isPrivate: false },
         orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
       }),
     ]);
@@ -387,10 +395,16 @@ export class SharingService {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
+    // Drop entries linked to a private schedule block. Entries with no
+    // schedule block linkage stay visible (they were tracked manually).
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId: ownerId,
         date: { gte: start, lte: end },
+        OR: [
+          { scheduleBlockId: null },
+          { scheduleBlock: { isPrivate: false } },
+        ],
       },
       include: {
         goal: { select: { id: true, title: true, color: true, category: true } },
@@ -460,15 +474,20 @@ export class SharingService {
 
   async getPublicSharedTimeEntries(token: string, startDate: string, endDate: string) {
     const share = await this.verifyPublicToken(token);
-    
+
     const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
+    // Public-link viewers also do not see entries tied to private blocks.
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId: share.ownerId,
         date: { gte: start, lte: end },
+        OR: [
+          { scheduleBlockId: null },
+          { scheduleBlock: { isPrivate: false } },
+        ],
       },
       include: {
         goal: { select: { id: true, title: true, color: true, category: true } },

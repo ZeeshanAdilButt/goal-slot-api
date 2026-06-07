@@ -36,6 +36,15 @@ export class CreateScheduleBlockDto {
   @IsBoolean()
   isRecurring?: boolean;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'When true, hides this block (and its time entries) from anyone the owner has shared their workspace with. Owner always sees it.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+
   @ApiPropertyOptional({ description: 'Link to a goal' })
   @IsOptional()
   @IsUUID()

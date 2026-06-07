@@ -203,6 +203,9 @@ export class NotesService {
           permission: true,
           acceptedAt: true,
           createdAt: true,
+          recipientUser: {
+            select: { id: true, name: true, email: true, avatar: true },
+          },
         },
       }),
     ]);

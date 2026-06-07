@@ -46,4 +46,14 @@ export class ScheduleController {
   async delete(@Request() req: any, @Param('id') id: string) {
     return this.scheduleService.delete(req.user.sub, id);
   }
+
+  // Wipe every schedule block for the calling user. Used by the "Clear all"
+  // action on the schedule page, gated client-side by a typed-confirm modal.
+  // Time entries linked via scheduleBlockId have onDelete: SetNull on the
+  // relation, so this does not delete tracked time; it just unlinks it.
+  @Delete()
+  @ApiOperation({ summary: 'Delete ALL schedule blocks for the current user' })
+  async clearAll(@Request() req: any) {
+    return this.scheduleService.clearAll(req.user.sub);
+  }
 }

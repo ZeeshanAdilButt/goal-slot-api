@@ -56,33 +56,35 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  goals             Goal[]
-  timeEntries       TimeEntry[]
-  scheduleBlocks    ScheduleBlock[]
-  tasks             Task[]
-  categories        Category[]
-  labels            Label[]
-  notes             Note[]
-  noteSharesByMe    NoteShare[]        @relation("NoteShareOwner")
-  noteSharesWithMe  NoteShare[]        @relation("NoteShareRecipient")
-  sharedWithMe      SharedAccess[]     @relation("SharedWith")
-  sharedByMe        SharedAccess[]     @relation("SharedBy")
-  feedbacks         Feedback[]
-  feedbackResponses FeedbackResponse[]
-  notifications     Notification[]
-  releaseNotesSeen  ReleaseNoteSeen[]
-
+  goals                    Goal[]
+  timeEntries              TimeEntry[]
+  scheduleBlocks           ScheduleBlock[]
+  tasks                    Task[]
+  categories               Category[]
+  labels                   Label[]
+  notes                    Note[]
+  noteSharesByMe           NoteShare[]         @relation("NoteShareOwner")
+  noteSharesWithMe         NoteShare[]         @relation("NoteShareRecipient")
+  sharedWithMe             SharedAccess[]      @relation("SharedWith")
+  sharedByMe               SharedAccess[]      @relation("SharedBy")
+  feedbacks                Feedback[]
+  feedbackResponses        FeedbackResponse[]
+  notifications            Notification[]
+  releaseNotesSeen         ReleaseNoteSeen[]
+  whiteboards              Whiteboard[]
+  whiteboardShares         WhiteboardShare[]   @relation("WhiteboardShareOwner")
+  whiteboardSharesReceived WhiteboardShare[]   @relation("WhiteboardShareRecipient")
   // Coach feature relations
-  encryptedByokKey   EncryptedByokKey?
-  habitsProfile      HabitsProfile?
-  sharedCoachUsage   SharedCoachUsage[]
-  dailyCheckins      DailyCheckin[]
-  goalReflections    GoalReflection[]
-  journalEntries     JournalEntry[]
-  coachConversations CoachConversation[]
-  coachInsights      CoachInsight[]
-  integrationConnections IntegrationConnection[]
-  notionPageIndex NotionPageIndex[]
+  encryptedByokKey         EncryptedByokKey?
+  habitsProfile            HabitsProfile?
+  sharedCoachUsage         SharedCoachUsage[]
+  dailyCheckins            DailyCheckin[]
+  goalReflections          GoalReflection[]
+  journalEntries           JournalEntry[]
+  coachConversations       CoachConversation[]
+  coachInsights            CoachInsight[]
+  integrationConnections   IntegrationConnection[]
+  notionPageIndex          NotionPageIndex[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -101,6 +103,13 @@ model Goal {
   color       String     @default("#FFD700")
   order       Int        @default(0)
 
+  // Template provenance. When a goal was created by importing a curated
+  // community template, these capture which template + which local goal
+  // ref within that template. Used by the "Sync from <curator>" flow to
+  // map newly added template tasks back to the user's existing goal.
+  templateId      String?
+  templateGoalRef String?
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -116,6 +125,7 @@ model Goal {
   @@index([userId])
   @@index([status])
   @@index([category])
+  @@index([userId, templateId])
 }
 
 // Time entries for logging work
@@ -165,6 +175,10 @@ model ScheduleBlock {
   color       String  @default("#FFD700")
   isRecurring Boolean @default(true)
   seriesId    String  @default(uuid())
+  // When true, this block (and any time entries linked to it) is
+  // hidden from anyone the owner has shared their workspace with.
+  // Default is false so existing rows stay visible after migration.
+  isPrivate   Boolean @default(false)
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -197,6 +211,15 @@ model Task {
   completedAt      DateTime?
   notes            String? // Task-specific notes
 
+  // Template provenance. When a task was created by importing a curated
+  // community template, `templateId` is the template's id and
+  // `templateTaskKey` is a stable per-task key (slug of the title at
+  // import time). The Sync flow uses these to dedupe: a template task
+  // whose key is already present under one of the user's
+  // templateId-matched goals is skipped.
+  templateId      String?
+  templateTaskKey String?
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -213,6 +236,7 @@ model Task {
 
   @@index([userId])
   @@index([scheduleBlockId])
+  @@index([userId, templateId, templateTaskKey])
   @@index([goalId])
   @@index([status])
 }
@@ -457,6 +481,63 @@ model ReleaseNoteSeen {
 
   @@unique([noteId, userId])
   @@index([userId])
+}
+
+model Whiteboard {
+  id      String  @id @default(uuid())
+  title   String  @default("Untitled")
+  // Excalidraw scene JSON. Shape assumes @excalidraw/excalidraw ^0.17.x.
+  // Keys: { elements: ExcalidrawElement[], appState: AppState, files: BinaryFiles }
+  // If Excalidraw bumps its scene version, run a migration to backfill existing
+  // content through excalidraw's restoreElements() before deploying the new client.
+  content Json @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
+  icon    String?
+  color   String?
+
+  isFavorite Boolean @default(false)
+
+  // Public sharing. When non-null, /public/whiteboards/:token returns this
+  // whiteboard read-only without any auth. Rotated by toggling off and back on.
+  publicShareToken String? @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  shares WhiteboardShare[]
+
+  // Soft delete columns (required for data-integrity work)
+  deletedAt       DateTime?
+  deletedReason   String?
+  deletedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isFavorite])
+}
+
+model WhiteboardShare {
+  id           String     @id @default(uuid())
+  whiteboardId String
+  whiteboard   Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("WhiteboardShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  recipientEmail  String
+  recipientUserId String?
+  recipientUser   User?   @relation("WhiteboardShareRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+
+  permission String    @default("VIEW")
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([whiteboardId, recipientEmail])
+  @@index([recipientUserId])
+  @@index([recipientEmail])
+  @@index([ownerId])
 }
 
 // User roles and types
