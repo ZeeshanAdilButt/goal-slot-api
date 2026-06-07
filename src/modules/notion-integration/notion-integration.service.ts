@@ -202,7 +202,14 @@ export class NotionIntegrationService {
       });
 
       // Synchronously build hot page index before frontend redirect.
-      await this.refreshPageIndex(userId);
+      try {
+        await this.refreshPageIndex(userId);
+      } catch (err: any) {
+        this.logger.error(
+          `[NotionIntegration] handleCallback background index refresh failed for user ${userId}: ${err?.message}`,
+          err?.stack,
+        );
+      }
 
       return `${this.frontendUrl}/dashboard/settings?tab=integrations&notion=${status}`;
     } catch (err: any) {
