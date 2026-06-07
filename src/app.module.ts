@@ -18,6 +18,7 @@ import { CoachCheckinModule } from './modules/coach-checkin/coach-checkin.module
 import { CoachInsightsModule } from './modules/coach-insights/coach-insights.module';
 import { CoachJournalModule } from './modules/coach-journal/coach-journal.module';
 import { CoachProfileModule } from './modules/coach-profile/coach-profile.module';
+import { NotionIntegrationModule } from './modules/notion-integration/notion-integration.module';
 import { CoachProposalsModule } from './modules/coach-proposals/coach-proposals.module';
 import { CoachReflectionModule } from './modules/coach-reflection/coach-reflection.module';
 import { HealthModule } from './modules/health/health.module';
@@ -64,6 +65,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
     CoachInsightsModule,
     CoachJournalModule,
     CoachProfileModule,
+    NotionIntegrationModule,
     CoachProposalsModule,
     CoachReflectionModule,
     LabelsModule,

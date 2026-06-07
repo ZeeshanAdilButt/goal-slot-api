@@ -83,6 +83,8 @@ model User {
   journalEntries           JournalEntry[]
   coachConversations       CoachConversation[]
   coachInsights            CoachInsight[]
+  integrationConnections   IntegrationConnection[]
+  notionPageIndex          NotionPageIndex[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -797,3 +799,57 @@ model CoachInsight {
   @@index([userId, status])
   @@index([userId, scopeKey])
 }
+
+// ============================================================================
+// Integration Connection schemas
+// ============================================================================
+
+model IntegrationConnection {
+  id                    String         @id @default(cuid())
+  userId                String
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider              String         // "notion"
+  workspaceId           String
+  workspaceName         String
+  workspaceIcon         String?
+  accessTokenCiphertext Bytes
+  accessTokenIv         Bytes
+  accessTokenAuthTag    Bytes
+  accessTokenKeyVersion Int            @default(1)
+  botId                 String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  targets               NotionTarget[]
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model NotionTarget {
+  id            String   @id @default(cuid())
+  connectionId  String
+  connection    IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  notionPageId  String
+  pageType      String   // "database" | "page"
+  role          String   // "notes_destination" | "reference"
+  title         String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([connectionId])
+}
+
+model NotionPageIndex {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notionPageId String
+  title        String
+  pageType     String   // "page" | "database"
+  indexedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([userId, notionPageId])
+  @@index([userId])
+  @@index([userId, indexedAt])
+}
+
