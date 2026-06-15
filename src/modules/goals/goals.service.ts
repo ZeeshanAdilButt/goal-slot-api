@@ -294,18 +294,30 @@ export class GoalsService {
     return { message: 'Goal deleted successfully' };
   }
 
-  async updateProgress(goalId: string, additionalMinutes: number) {
-    const goal = await this.prisma.goal.findUnique({ where: { id: goalId } });
+  async updateProgress(goalId: string, _additionalMinutes?: number) {
+    // Recompute loggedHours from the SUM of TimeEntry rows linked to this goal
+    // instead of incrementing/decrementing. Incremental math drifted on float
+    // subtraction and lost sync on deletions that bypassed the recognized
+    // paths, surfacing as negative loggedHours on real production goals.
+    const [goal, agg] = await Promise.all([
+      this.prisma.goal.findUnique({ where: { id: goalId } }),
+      this.prisma.timeEntry.aggregate({
+        where: { goalId },
+        _sum: { duration: true },
+      }),
+    ]);
     if (!goal) return;
 
-    const additionalHours = additionalMinutes / 60;
-    const newLoggedHours = goal.loggedHours + additionalHours;
+    const loggedHours = (agg._sum.duration ?? 0) / 60;
 
     await this.prisma.goal.update({
       where: { id: goalId },
       data: {
-        loggedHours: newLoggedHours,
-        status: newLoggedHours >= goal.targetHours ? GoalStatus.COMPLETED : goal.status,
+        loggedHours,
+        status:
+          loggedHours >= goal.targetHours && goal.status === GoalStatus.ACTIVE
+            ? GoalStatus.COMPLETED
+            : goal.status,
       },
     });
   }

@@ -138,16 +138,13 @@ export class TimeEntriesService {
       include: { goal: true },
     });
 
-    // Update goal progress if duration or goal changed
-    if (dto.duration || dto.goalId) {
-      // Revert old goal progress
-      if (oldGoalId) {
-        await this.goalsService.updateProgress(oldGoalId, -oldDuration);
+    if (dto.duration !== undefined || dto.goalId !== undefined) {
+      const newGoalId = dto.goalId ?? oldGoalId;
+      if (oldGoalId && oldGoalId !== newGoalId) {
+        await this.goalsService.updateProgress(oldGoalId);
       }
-      // Add to new/current goal
-      const newGoalId = dto.goalId || entry.goalId;
       if (newGoalId) {
-        await this.goalsService.updateProgress(newGoalId, dto.duration || oldDuration);
+        await this.goalsService.updateProgress(newGoalId);
       }
     }
 
@@ -163,12 +160,11 @@ export class TimeEntriesService {
       throw new NotFoundException('Time entry not found');
     }
 
-    // Revert goal progress
-    if (entry.goalId) {
-      await this.goalsService.updateProgress(entry.goalId, -entry.duration);
-    }
-
     await this.prisma.timeEntry.delete({ where: { id: entryId } });
+
+    if (entry.goalId) {
+      await this.goalsService.updateProgress(entry.goalId);
+    }
     return { message: 'Time entry deleted' };
   }
 
