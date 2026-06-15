@@ -244,7 +244,6 @@ export class TasksService {
 
     // Transaction to ensure consistency
     await this.prisma.$transaction(async (tx) => {
-      // 1. Update Task
       await tx.task.update({
         where: { id: taskId },
         data: {
@@ -254,25 +253,22 @@ export class TasksService {
         },
       });
 
-      // 2. Handle Goal Progress
-      // Only subtract the completion entry duration if it exists
-      // (If no completion entry exists, all time was already tracked, so nothing was added to goal)
-      if (task.goalId && completionEntry) {
-        const minutesToSubtract = completionEntry.duration;
-        const hoursToSubtract = minutesToSubtract / 60;
-        
-        await tx.goal.update({
-            where: { id: task.goalId },
-            data: {
-                loggedHours: { decrement: hoursToSubtract }
-            }
-        });
-      }
-
-      // 3. Handle Time Entry
       if (completionEntry) {
         await tx.timeEntry.delete({
           where: { id: completionEntry.id },
+        });
+      }
+
+      // Recompute loggedHours from the live SUM after the deletion so the
+      // goal stays in sync regardless of which entries existed before.
+      if (task.goalId) {
+        const agg = await tx.timeEntry.aggregate({
+          where: { goalId: task.goalId },
+          _sum: { duration: true },
+        });
+        await tx.goal.update({
+          where: { id: task.goalId },
+          data: { loggedHours: (agg._sum.duration ?? 0) / 60 },
         });
       }
     });

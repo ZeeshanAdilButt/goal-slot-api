@@ -177,6 +177,11 @@ export class UsersService {
   async listUsers(adminId: string, page = 1, limit = 20, search?: string) {
     await this.verifyAdmin(adminId);
 
+    // Safety belt: clamp page size so a fat-fingered limit query can't
+    // pull the entire user table into memory. 1000 is comfortably above
+    // the admin UI's max selectable page size (500) but bounded.
+    limit = Math.max(1, Math.min(Number(limit) || 20, 1000));
+    page = Math.max(1, Number(page) || 1);
     const skip = (page - 1) * limit;
 
     const whereClause = search

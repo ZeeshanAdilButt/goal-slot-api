@@ -53,7 +53,7 @@ One of the most interesting open scopes right now is the [`goalslot` CLI ([#27](
 |---|---|
 | Framework | NestJS |
 | ORM | Prisma 7 |
-| Database | PostgreSQL (Supabase in production) |
+| Database | PostgreSQL (Neon in production) |
 | Language | TypeScript |
 | Auth | passport-jwt, passport-google-oauth20 (in progress), Supabase SSO |
 | Email | Resend |

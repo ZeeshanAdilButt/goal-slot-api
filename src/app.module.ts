@@ -27,11 +27,13 @@ import { EmailModule } from './modules/email/email.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReleaseNotesModule } from './modules/release-notes/release-notes.module';
+import { TemplatesModule } from './modules/templates/templates.module';
 import { envValidationSchema } from './shared/configuration/env.validation';
 import { EncryptionModule } from './shared/modules/encryption.module';
 import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
 import { IdempotencyModule } from './shared/idempotency/idempotency.module';
+import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
 
 @Module({
   imports: [
@@ -71,6 +73,8 @@ import { IdempotencyModule } from './shared/idempotency/idempotency.module';
     FeedbackModule,
     NotificationsModule,
     ReleaseNotesModule,
+    WhiteboardsModule,
+    TemplatesModule,
   ],
 })
 export class AppModule {}
