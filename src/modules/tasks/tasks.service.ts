@@ -18,6 +18,7 @@ export class TasksService {
 
     return this.prisma.task.create({
       data: {
+        id: dto.id ?? undefined,
         title: dto.title,
         description: dto.description,
         category: dto.category,
@@ -108,10 +109,12 @@ export class TasksService {
 
     await this.validateRelations(userId, dto.goalId, dto.scheduleBlockId);
 
+    const { id: _id, ...updateData } = dto;
+
     return this.prisma.task.update({
       where: { id: taskId },
       data: {
-        ...dto,
+        ...updateData,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
       include: {

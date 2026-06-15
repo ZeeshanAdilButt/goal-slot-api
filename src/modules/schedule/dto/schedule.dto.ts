@@ -2,6 +2,11 @@ import { IsString, IsNumber, IsOptional, IsBoolean, IsUUID, Min, Max, Matches, I
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateScheduleBlockDto {
+  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ example: 'Deep Work' })
   @IsString()
   title: string;

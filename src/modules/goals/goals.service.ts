@@ -144,6 +144,7 @@ export class GoalsService {
     const goal = await this.prisma.goal.create({
       data: {
         ...goalData,
+        id: goalData.id ?? undefined,
         color,
         userId,
         deadline: dto.deadline ? new Date(dto.deadline) : null,
@@ -243,7 +244,7 @@ export class GoalsService {
       throw new NotFoundException('Goal not found');
     }
 
-    const { labels, ...updateData } = dto;
+    const { id: _id, labels, ...updateData } = dto;
 
     await this.prisma.goal.update({
       where: { id: goalId },

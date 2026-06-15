@@ -1,6 +1,10 @@
-import { IsString, IsOptional, IsBoolean, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsUUID } from 'class-validator';
 
 export class CreateNoteDto {
+  @IsUUID()
+  @IsOptional()
+  id?: string;
+
   @IsString()
   title: string;
 

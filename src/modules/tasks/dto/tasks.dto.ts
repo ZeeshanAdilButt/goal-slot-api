@@ -3,6 +3,11 @@ import { IsString, IsOptional, IsUUID, IsEnum, IsNumber, Min, IsDateString } fro
 import { TaskStatus } from '@prisma/client';
 
 export class CreateTaskDto {
+  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ example: 'Write weekly report' })
   @IsString()
   title: string;

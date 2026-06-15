@@ -269,6 +269,22 @@ model AuditLog {
   @@index([createdAt])
 }
 
+// Idempotency records so retried offline writes don't double-apply
+model IdempotencyRecord {
+  key          String   @id
+  userId       String
+  method       String
+  routePattern String
+  requestHash  String
+  statusCode   Int
+  responseBody Json
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
 // Category for goals, schedule blocks, and tasks
 model Category {
   id        String   @id @default(uuid())
