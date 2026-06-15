@@ -2,6 +2,11 @@ import { IsString, IsNumber, IsOptional, IsDateString, IsUUID, Min } from 'class
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateTimeEntryDto {
+  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ example: 'Working on React components' })
   @IsString()
   taskName: string;

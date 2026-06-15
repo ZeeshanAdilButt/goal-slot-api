@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsEnum, IsDateString, Min, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEnum, IsDateString, Min, IsArray, ValidateNested, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { GoalStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -15,6 +15,11 @@ export class LabelInput {
 }
 
 export class CreateGoalDto {
+  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ example: 'Learn React' })
   @IsString()
   title: string;

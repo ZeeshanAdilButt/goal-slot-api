@@ -43,6 +43,7 @@ export class TimeEntriesService {
 
     const entry = await this.prisma.timeEntry.create({
       data: {
+        id: dto.id ?? undefined,
         taskName: dto.taskName,
         duration: dto.duration,
         date,
@@ -126,10 +127,12 @@ export class TimeEntriesService {
       taskTitle = task?.title;
     }
 
+    const { id: _id, ...updateData } = dto;
+
     const updated = await this.prisma.timeEntry.update({
       where: { id: entryId },
       data: {
-        ...dto,
+        ...updateData,
         date: dto.date ? new Date(dto.date) : undefined,
         dayOfWeek: dto.date ? new Date(dto.date).getDay() : undefined,
         startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,

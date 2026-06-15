@@ -24,6 +24,7 @@ export class ScheduleService {
     return this.prisma.scheduleBlock.create({
       data: {
         ...dto,
+        id: dto.id ?? undefined,
         userId,
       },
       include: { goal: true },
@@ -63,7 +64,7 @@ export class ScheduleService {
       throw new NotFoundException('Schedule block not found');
     }
 
-    const { updateScope = 'single', seriesId: _ignoredSeriesId, ...changes } = dto;
+    const { id: _id, updateScope = 'single', seriesId: _ignoredSeriesId, ...changes } = dto;
     const updateData = this.removeUndefined(changes);
 
     if (updateScope === 'series' && block.seriesId) {

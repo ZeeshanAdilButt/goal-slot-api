@@ -77,6 +77,7 @@ export class NotesService {
 
     return this.prisma.note.create({
       data: {
+        id: dto.id ?? undefined,
         title: dto.title,
         content: dto.content || '[]',
         icon: dto.icon,

@@ -32,6 +32,7 @@ import { envValidationSchema } from './shared/configuration/env.validation';
 import { EncryptionModule } from './shared/modules/encryption.module';
 import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
+import { IdempotencyModule } from './shared/idempotency/idempotency.module';
 import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
 
 @Module({
@@ -42,6 +43,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
       validationSchema: envValidationSchema,
     }),
     PostHogModule, // Add PostHog module early so it's available globally
+    IdempotencyModule,
     EncryptionModule,
     LlmModule,
     PrismaModule,
