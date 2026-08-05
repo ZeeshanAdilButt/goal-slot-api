@@ -353,6 +353,49 @@ function startOfUtcDay(d: Date): Date {
     Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
   );
 }
+
+/**
+ * Turn a raw LLM-provider exception into a short, user-facing sentence.
+ * The raw text is logged separately; this is what the user reads in-chat, so
+ * it must never leak keys/URLs and should say what to do next. Rate-limit
+ * (Gemini RESOURCE_EXHAUSTED / HTTP 429) is the common one on large multi-step
+ * requests, so it gets its own actionable message.
+ */
+function humanizeLlmError(err: any, raw: string): string {
+  const status =
+    (typeof err?.status === 'number' && err.status) ||
+    (typeof err?.code === 'number' && err.code) ||
+    undefined;
+  const code = typeof err?.code === 'string' ? err.code : '';
+  const text = `${code} ${raw}`.toLowerCase();
+
+  const isRateLimited =
+    status === 429 ||
+    code === 'RESOURCE_EXHAUSTED' ||
+    /\b429\b|too many requests|resource has been exhausted|rate limit|rate-limit|quota/.test(
+      text,
+    );
+  if (isRateLimited) {
+    return "The AI is getting more requests than the provider allows right now. Wait a few seconds and try again. Large multi-step changes are the most likely to hit this, so breaking the request into smaller pieces usually helps.";
+  }
+
+  const isAuth =
+    status === 401 ||
+    status === 403 ||
+    /api key|api_key|unauthenticated|permission denied|invalid.*key/.test(text);
+  if (isAuth) {
+    return 'The AI provider rejected the request. If you are using your own API key, reconnect it in Settings, Integrations.';
+  }
+
+  const isTimeout =
+    status === 504 ||
+    /timeout|timed out|deadline exceeded|econnreset|network/.test(text);
+  if (isTimeout) {
+    return 'The AI provider took too long to respond. Please try again.';
+  }
+
+  return 'The AI provider had an error while responding. Please try again in a moment.';
+}
 const MEMORY_BLOCK_CAP = 800;
 
 const ACTIVE_INSIGHT_STATUSES: CoachInsightStatus[] = ['ACCEPTED', 'DOING'];
@@ -739,15 +782,17 @@ export class CoachAiService {
         }
       }
     } catch (err: any) {
-      // SECURITY: do not leak the decrypted key. Only the high-level message.
-      const message =
+      // SECURITY: never surface the raw provider error to the client — it can
+      // carry the key, internal URLs, or noisy stack text. Log the raw message,
+      // send the user a clean, actionable one.
+      const raw =
         err?.message && typeof err.message === 'string'
           ? err.message
           : 'LLM provider error';
       this.logger.warn(
-        `LLM stream error scope=${args.scopeKey} user=${args.userId}: ${message}`,
+        `LLM stream error scope=${args.scopeKey} user=${args.userId}: ${raw}`,
       );
-      yield { delta: '', done: true, error: message };
+      yield { delta: '', done: true, error: humanizeLlmError(err, raw) };
       return;
     }
 
