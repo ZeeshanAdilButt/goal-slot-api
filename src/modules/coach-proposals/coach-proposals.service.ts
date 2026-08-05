@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { GoalsService } from '../goals/goals.service';
 import { ScheduleService } from '../schedule/schedule.service';
 import { TimeEntriesService } from '../time-entries/time-entries.service';
@@ -119,34 +125,53 @@ export class CoachProposalsService {
 
       // -------- Schedule blocks --------
       case 'CREATE_SCHEDULE_BLOCK': {
-        const p = payload as any;
-        // Idempotent create: if a block with the same day + time + title
-        // already exists, return it instead of creating a duplicate (or
-        // erroring on a time conflict). Makes a retry after a partial apply
-        // safe, which is exactly what the model does after a rate-limit — it
-        // re-proposes the whole week, and without this the already-created
-        // blocks either stack up as duplicates or fail the batch.
-        if (
-          p &&
-          typeof p.title === 'string' &&
-          typeof p.dayOfWeek === 'number' &&
-          typeof p.startTime === 'string' &&
-          typeof p.endTime === 'string'
-        ) {
-          const existing = await this.prisma.scheduleBlock.findFirst({
-            where: {
-              userId,
-              dayOfWeek: p.dayOfWeek,
-              startTime: p.startTime,
-              endTime: p.endTime,
-              title: p.title,
-            },
-            select: { id: true },
-          });
-          if (existing) return existing.id;
+        const p = { ...(payload as any) };
+        // Multi-day support: the model may pass daysOfWeek:number[] to create
+        // the same block across several days in ONE action, as a recurring
+        // series sharing a seriesId. This is how a whole week fits in ~13
+        // actions instead of ~90 — which is what keeps the model from
+        // truncating the proposal or tripping the provider's rate limit.
+        const rawDays: unknown = p.daysOfWeek;
+        delete p.daysOfWeek;
+        const days = Array.isArray(rawDays)
+          ? Array.from(
+              new Set(
+                rawDays.filter(
+                  (d): d is number =>
+                    Number.isInteger(d) && d >= 0 && d <= 6,
+                ),
+              ),
+            )
+          : typeof p.dayOfWeek === 'number'
+            ? [p.dayOfWeek]
+            : [];
+
+        if (days.length <= 1) {
+          if (days.length === 1) p.dayOfWeek = days[0];
+          return this.createBlockIdempotent(userId, p);
         }
-        const created = await this.schedule.create(userId, p);
-        return (created as any)?.id;
+
+        // One shared series across the requested days. Best-effort per day: a
+        // day that already has a genuinely conflicting (non-identical) block is
+        // skipped rather than failing the whole week. Return the first block id
+        // so a later $ref can still resolve.
+        const seriesId = randomUUID();
+        let firstId: string | undefined;
+        for (const d of days) {
+          try {
+            const id = await this.createBlockIdempotent(userId, {
+              ...p,
+              dayOfWeek: d,
+              seriesId,
+              isRecurring: true,
+            });
+            if (!firstId) firstId = id;
+          } catch (err) {
+            if (err instanceof BadRequestException) continue;
+            throw err;
+          }
+        }
+        return firstId;
       }
       case 'UPDATE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('UPDATE_SCHEDULE_BLOCK requires id');
@@ -212,6 +237,38 @@ export class CoachProposalsService {
       default:
         throw new Error(`Unknown action type: ${(action as any).type}`);
     }
+  }
+
+  /**
+   * Create a schedule block, or return an existing identical one (same day +
+   * start + end + title) so re-applying a proposal never duplicates or errors
+   * on a self-conflict. Shared by the single-day and multi-day create paths.
+   */
+  private async createBlockIdempotent(
+    userId: string,
+    p: any,
+  ): Promise<string | undefined> {
+    if (
+      p &&
+      typeof p.title === 'string' &&
+      typeof p.dayOfWeek === 'number' &&
+      typeof p.startTime === 'string' &&
+      typeof p.endTime === 'string'
+    ) {
+      const existing = await this.prisma.scheduleBlock.findFirst({
+        where: {
+          userId,
+          dayOfWeek: p.dayOfWeek,
+          startTime: p.startTime,
+          endTime: p.endTime,
+          title: p.title,
+        },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+    }
+    const created = await this.schedule.create(userId, p);
+    return (created as any)?.id;
   }
 
   /**
