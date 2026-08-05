@@ -53,10 +53,18 @@ export class CoachProposedAction {
 }
 
 export class ApplyProposalsDto {
-  @ApiProperty({ type: [CoachProposedAction] })
+  // Cap is generous (not 20) because a single coherent proposal — e.g. a
+  // full-week consolidation that deletes 14 blocks, adds 7, and updates 7 —
+  // legitimately runs to a few dozen actions. Chunking client-side is NOT a
+  // safe alternative: payloads use "$ref:N" tokens that resolve against
+  // earlier results in the SAME apply() call, so splitting a batch would
+  // break a schedule block that references a goal created in the same run.
+  // Actions dispatch sequentially against existing domain services, so a
+  // large batch is just N sequential ops, bounded here to prevent abuse.
+  @ApiProperty({ type: [CoachProposedAction], maxItems: 100 })
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(20)
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => CoachProposedAction)
   actions: CoachProposedAction[];
