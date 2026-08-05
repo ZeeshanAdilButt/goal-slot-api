@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { GoalsService } from '../goals/goals.service';
 import { ScheduleService } from '../schedule/schedule.service';
 import { TimeEntriesService } from '../time-entries/time-entries.service';
@@ -113,13 +113,39 @@ export class CoachProposalsService {
       }
       case 'DELETE_GOAL': {
         if (!action.id) throw new Error('DELETE_GOAL requires id');
-        await this.goals.delete(userId, action.id);
+        await this.deleteIdempotent(() => this.goals.delete(userId, action.id!));
         return action.id;
       }
 
       // -------- Schedule blocks --------
       case 'CREATE_SCHEDULE_BLOCK': {
-        const created = await this.schedule.create(userId, payload as any);
+        const p = payload as any;
+        // Idempotent create: if a block with the same day + time + title
+        // already exists, return it instead of creating a duplicate (or
+        // erroring on a time conflict). Makes a retry after a partial apply
+        // safe, which is exactly what the model does after a rate-limit — it
+        // re-proposes the whole week, and without this the already-created
+        // blocks either stack up as duplicates or fail the batch.
+        if (
+          p &&
+          typeof p.title === 'string' &&
+          typeof p.dayOfWeek === 'number' &&
+          typeof p.startTime === 'string' &&
+          typeof p.endTime === 'string'
+        ) {
+          const existing = await this.prisma.scheduleBlock.findFirst({
+            where: {
+              userId,
+              dayOfWeek: p.dayOfWeek,
+              startTime: p.startTime,
+              endTime: p.endTime,
+              title: p.title,
+            },
+            select: { id: true },
+          });
+          if (existing) return existing.id;
+        }
+        const created = await this.schedule.create(userId, p);
         return (created as any)?.id;
       }
       case 'UPDATE_SCHEDULE_BLOCK': {
@@ -129,7 +155,13 @@ export class CoachProposalsService {
       }
       case 'DELETE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('DELETE_SCHEDULE_BLOCK requires id');
-        await this.schedule.delete(userId, action.id);
+        // Idempotent delete: a block that's already gone is the desired end
+        // state, not a failure. The model sometimes proposes deletes for
+        // blocks that never existed (hallucinated ids on a fresh schedule);
+        // swallowing not-found keeps those from failing the whole batch.
+        await this.deleteIdempotent(() =>
+          this.schedule.delete(userId, action.id!),
+        );
         return action.id;
       }
 
@@ -149,7 +181,9 @@ export class CoachProposalsService {
       }
       case 'DELETE_TIME_ENTRY': {
         if (!action.id) throw new Error('DELETE_TIME_ENTRY requires id');
-        await this.timeEntries.delete(userId, action.id);
+        await this.deleteIdempotent(() =>
+          this.timeEntries.delete(userId, action.id!),
+        );
         return action.id;
       }
 
@@ -165,7 +199,7 @@ export class CoachProposalsService {
       }
       case 'DELETE_TASK': {
         if (!action.id) throw new Error('DELETE_TASK requires id');
-        await this.tasks.delete(userId, action.id);
+        await this.deleteIdempotent(() => this.tasks.delete(userId, action.id!));
         return action.id;
       }
 
@@ -177,6 +211,22 @@ export class CoachProposalsService {
 
       default:
         throw new Error(`Unknown action type: ${(action as any).type}`);
+    }
+  }
+
+  /**
+   * Run a delete, treating "not found" as success. Deleting something that is
+   * already gone reaches the same end state the user approved, so it should not
+   * fail the action (and take the rest of a batch's reporting down with noise).
+   */
+  private async deleteIdempotent(fn: () => Promise<unknown>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof NotFoundException) return;
+      // Prisma "record to delete does not exist" also means already-gone.
+      if ((err as { code?: string })?.code === 'P2025') return;
+      throw err;
     }
   }
 }
