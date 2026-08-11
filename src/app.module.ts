@@ -34,6 +34,7 @@ import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
 import { IdempotencyModule } from './shared/idempotency/idempotency.module';
 import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
+import { InstructionsModule } from './modules/instructions/instructions.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
     ReleaseNotesModule,
     WhiteboardsModule,
     TemplatesModule,
+    InstructionsModule,
   ],
 })
 export class AppModule {}
