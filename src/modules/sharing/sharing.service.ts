@@ -557,6 +557,27 @@ export class SharingService {
     }));
   }
 
+  async markViewed(sharedAccessId: string, callerId: string) {
+    const share = await this.prisma.sharedAccess.findUnique({
+      where: { id: sharedAccessId },
+    });
+
+    if (!share) {
+      throw new NotFoundException('Share not found');
+    }
+
+    // Only the mentor holding access can mark a view - not the mentee who
+    // owns the data, not an unrelated user.
+    if (share.sharedWithId !== callerId) {
+      throw new ForbiddenException('You do not have access to this share');
+    }
+
+    return this.prisma.sharedAccess.update({
+      where: { id: sharedAccessId },
+      data: { lastViewedAt: new Date() },
+    });
+  }
+
   async deletePublicLink(ownerId: string, shareId: string) {
     const link = await this.prisma.sharedAccess.findFirst({
       where: {
