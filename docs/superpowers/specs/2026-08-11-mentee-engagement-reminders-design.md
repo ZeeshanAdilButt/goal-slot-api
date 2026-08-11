@@ -162,12 +162,15 @@ report staleness, the mentee for instructions) across:
 - **Web push** — via the `web-push` package and VAPID keys, using any
   `WEB` kind `PushSubscription` rows for that user. Only attempted if the
   user has at least one registered subscription.
-- **In-app banner** — not a dispatched event. The web app queries live
-  state directly (a mentor's own stale shares, a mentee's own pending
-  instructions) and renders a banner from that, so there is nothing to
-  fire, retry, or mark read for this channel. This keeps the banner
-  always correct against current state rather than needing its own
-  read/dismiss tracking separate from the underlying data.
+- **In-app** — a real `Notification` model and service already exist
+  (`notifications.service.ts`, consumed by `NotificationsButton` in
+  `dw-time-web`), with a `NotificationType` enum, cursor pagination, an
+  unread count, and mark-read. This was not known when the shared
+  mechanism above was first drafted; reusing it is a better fit than
+  inventing a live-state query, and the existing bell UI picks up the two
+  new types automatically since it renders `title`/`body` generically.
+  Two new `NotificationType` values are added:
+  `SHARED_REPORT_UNVIEWED` and `INSTRUCTION_ASSIGNED`.
 
 There is no per-channel opt-in in this version — every channel with data
 to reach the user on is used. A preference system is a reasonable future
@@ -227,5 +230,3 @@ independently testable `ReminderDispatchService`).
 - A notification preference/opt-out system.
 - Mobile UI for instructions or report viewing (API supports it; no
   mobile screens are part of this spec).
-- A stored, dismissable notification inbox — the in-app banner is
-  derived from live state, not an event log.
