@@ -631,4 +631,51 @@ GoalSlot`;
       `Share accepted notification sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
     );
   }
+
+  // Generic transactional email for the reminder dispatch mechanism
+  // (report-staleness nudges, instruction reminders). Unlike the
+  // templated methods above, callers supply the title/body directly
+  // since the source data varies per reminder type.
+  async sendReminderEmail(params: { toEmail: string; title: string; body: string }) {
+    const { toEmail, title, body } = params;
+
+    const html = this.renderLayout({
+      preheader: body,
+      bodyHtml: `
+        <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">${title}</h1>
+        <p style="margin:0 0 12px;color:#3f3f46;">${body}</p>
+        ${this.renderButton(`${this.appUrl}/dashboard`, "Open GoalSlot", "left")}
+      `,
+    });
+
+    const text = `${title}
+
+${body}
+
+Open GoalSlot: ${this.appUrl}/dashboard
+
+GoalSlot`;
+
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: title,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      this.logger.error(
+        `Resend API error for reminder email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `Failed to send reminder email: ${result.error.message}`,
+      );
+    }
+
+    this.logger.log(
+      `Reminder email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
+    return { success: true, id: result.data?.id };
+  }
 }
