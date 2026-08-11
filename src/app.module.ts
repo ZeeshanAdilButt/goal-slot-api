@@ -35,6 +35,7 @@ import { PostHogModule } from './shared/modules/posthog.module';
 import { IdempotencyModule } from './shared/idempotency/idempotency.module';
 import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
 import { InstructionsModule } from './modules/instructions/instructions.module';
+import { PushSubscriptionsModule } from './modules/push-subscriptions/push-subscriptions.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { InstructionsModule } from './modules/instructions/instructions.module';
     WhiteboardsModule,
     TemplatesModule,
     InstructionsModule,
+    PushSubscriptionsModule,
   ],
 })
 export class AppModule {}

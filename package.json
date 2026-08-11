@@ -58,7 +58,8 @@
     "resend": "^6.6.0",
     "rxjs": "^7.8.1",
     "stripe": "^14.11.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
@@ -70,6 +71,7 @@
     "@types/node": "^20.10.6",
     "@types/passport-jwt": "^4.0.0",
     "@types/uuid": "^9.0.7",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^6.18.0",
     "@typescript-eslint/parser": "^6.18.0",
     "eslint": "^8.56.0",
