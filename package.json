@@ -46,6 +46,7 @@
     "cache-manager": "^7.2.7",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "expo-server-sdk": "^7.1.0",
     "express": "^5.2.1",
     "joi": "^18.0.2",
     "openai": "^4.104.0",
