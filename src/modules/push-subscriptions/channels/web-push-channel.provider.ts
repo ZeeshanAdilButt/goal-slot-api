@@ -2,26 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as webpush from 'web-push';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PushSubscriptionsService } from '../push-subscriptions.service';
-
-// Canonical version of this interface is owned elsewhere in the reminders
-// feature (ReminderDispatchService's channel fan-out); this local copy must
-// stay structurally compatible so the two can be wired together later.
-export interface ReminderChannel {
-  readonly name: string;
-  send(input: ReminderChannelInput): Promise<ReminderChannelResult>;
-}
-
-export interface ReminderChannelInput {
-  userId: string;
-  title: string;
-  body: string;
-  data?: Record<string, unknown>;
-}
-
-export interface ReminderChannelResult {
-  ok: boolean;
-  subscriptionGone?: boolean;
-}
+import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from '../../reminders/reminder-channel.interface';
 
 @Injectable()
 export class WebPushReminderChannel implements ReminderChannel {

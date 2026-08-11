@@ -2,31 +2,13 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REMINDER_CHANNELS, ReminderChannel } from './reminder-channel.interface';
-
-// Report staleness is a weekly nudge; pending instructions repeat every two
-// days. Both thresholds come straight from the design spec's dispatch rules.
-const REPORT_STALE_THRESHOLD_DAYS = 7;
-const INSTRUCTION_REMINDER_THRESHOLD_DAYS = 2;
+import { isInstructionReminderDue, isReportViewReminderDue } from './reminder-staleness';
 
 export interface ReminderDispatchContent {
   title: string;
   body: string;
   data: Record<string, unknown>;
   notificationType: NotificationType;
-}
-
-/**
- * True when `lastAt` has never happened, or happened long enough ago
- * (relative to `now`) to be due again. Kept as a standalone pure function so
- * the staleness rule can be tested against fixed dates without touching the
- * database or mocking the system clock.
- */
-export function isReminderDue(lastAt: Date | null | undefined, thresholdDays: number, now: Date): boolean {
-  if (!lastAt) {
-    return true;
-  }
-  const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
-  return now.getTime() - lastAt.getTime() >= thresholdMs;
 }
 
 @Injectable()
@@ -70,10 +52,8 @@ export class ReminderDispatchService {
       include: { owner: { select: { name: true } } },
     });
 
-    const dueShares = shares.filter(
-      (share) =>
-        isReminderDue(share.lastViewedAt, REPORT_STALE_THRESHOLD_DAYS, now) &&
-        isReminderDue(share.lastViewReminderAt, REPORT_STALE_THRESHOLD_DAYS, now),
+    const dueShares = shares.filter((share) =>
+      isReportViewReminderDue(now, share.lastViewedAt, share.lastViewReminderAt),
     );
 
     for (const share of dueShares) {
@@ -108,7 +88,7 @@ export class ReminderDispatchService {
     });
 
     const dueInstructions = instructions.filter((instruction) =>
-      isReminderDue(instruction.lastReminderAt, INSTRUCTION_REMINDER_THRESHOLD_DAYS, now),
+      isInstructionReminderDue(now, instruction.lastReminderAt),
     );
 
     for (const instruction of dueInstructions) {

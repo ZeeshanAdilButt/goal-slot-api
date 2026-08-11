@@ -1,4 +1,4 @@
-import { ReminderDispatchService, isReminderDue } from './reminder-dispatch.service';
+import { ReminderDispatchService } from './reminder-dispatch.service';
 import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from './reminder-channel.interface';
 
 class FakePrisma {
@@ -59,27 +59,6 @@ function buildService(channels: ReminderChannel[]) {
 
 const NOW = new Date('2026-08-11T09:00:00.000Z');
 const days = (n: number) => n * 24 * 60 * 60 * 1000;
-
-describe('isReminderDue', () => {
-  it('is due when there is no prior timestamp', () => {
-    expect(isReminderDue(null, 7, NOW)).toBe(true);
-  });
-
-  it('is not due before the threshold has elapsed', () => {
-    const recent = new Date(NOW.getTime() - days(3));
-    expect(isReminderDue(recent, 7, NOW)).toBe(false);
-  });
-
-  it('is due once the threshold has elapsed', () => {
-    const old = new Date(NOW.getTime() - days(8));
-    expect(isReminderDue(old, 7, NOW)).toBe(true);
-  });
-
-  it('is due exactly at the threshold boundary', () => {
-    const boundary = new Date(NOW.getTime() - days(7));
-    expect(isReminderDue(boundary, 7, NOW)).toBe(true);
-  });
-});
 
 describe('ReminderDispatchService.runDailySweep - report staleness', () => {
   afterEach(() => {

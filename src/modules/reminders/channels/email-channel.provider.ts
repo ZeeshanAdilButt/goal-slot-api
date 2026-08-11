@@ -2,28 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 
 import { PrismaService } from "../../../prisma/prisma.service";
 import { EmailService } from "../../email/email.service";
-
-// Local structural copy of the shared reminder-channel contract. The real
-// `reminder-channel.interface.ts` is owned by another agent and may not
-// exist yet in this worktree; this shape must stay byte-for-byte
-// compatible with it so the later integration pass can swap this for a
-// real import without touching the implementation below.
-export interface ReminderChannel {
-  readonly name: string;
-  send(input: ReminderChannelInput): Promise<ReminderChannelResult>;
-}
-
-export interface ReminderChannelInput {
-  userId: string;
-  title: string;
-  body: string;
-  data?: Record<string, unknown>;
-}
-
-export interface ReminderChannelResult {
-  ok: boolean;
-  subscriptionGone?: boolean;
-}
+import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from "../reminder-channel.interface";
 
 @Injectable()
 export class EmailReminderChannel implements ReminderChannel {
