@@ -4,6 +4,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { GoalsModule } from './modules/goals/goals.module';
 import { TimeEntriesModule } from './modules/time-entries/time-entries.module';
+import { ActiveTimerModule } from './modules/active-timer/active-timer.module';
 import { ScheduleModule } from './modules/schedule/schedule.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SharingModule } from './modules/sharing/sharing.module';
@@ -54,6 +55,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
     UsersModule,
     GoalsModule,
     TimeEntriesModule,
+    ActiveTimerModule,
     ScheduleModule,
     ReportsModule,
     SharingModule,

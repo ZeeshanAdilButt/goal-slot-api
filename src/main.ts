@@ -53,6 +53,7 @@ async function bootstrap() {
     .addTag('users', 'User management')
     .addTag('goals', 'Goals management')
     .addTag('time-entries', 'Time tracking')
+    .addTag('active-timer', 'Cross-device active timer session')
     .addTag('schedule', 'Schedule planning')
     .addTag('reports', 'Analytics and reports')
     .addTag('sharing', 'Access sharing')
