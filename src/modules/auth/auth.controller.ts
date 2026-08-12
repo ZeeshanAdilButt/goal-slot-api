@@ -1,8 +1,17 @@
 import { Controller, Post, Body, Get, UseGuards, Request, HttpCode, HttpStatus, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+
+// check-email is unauthenticated by design (it runs before the user has any
+// token) and its {exists} response is a direct account-existence oracle, so
+// it's throttled per-IP to make mass enumeration impractical. The signup
+// page still needs it for its "email already registered, please log in"
+// inline check, so it can't simply be removed.
+export const CHECK_EMAIL_THROTTLE_TTL_MS = 60_000; // 1 minute
+export const CHECK_EMAIL_THROTTLE_LIMIT = 10;
 
 @ApiTags('auth')
 @Controller('auth')
@@ -10,6 +19,8 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Get('check-email')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ 'check-email': { limit: CHECK_EMAIL_THROTTLE_LIMIT, ttl: CHECK_EMAIL_THROTTLE_TTL_MS } })
   @ApiOperation({ summary: 'Check if email is already registered' })
   @ApiQuery({ name: 'email', type: String })
   @ApiResponse({ status: 200, description: 'Email existence check result' })

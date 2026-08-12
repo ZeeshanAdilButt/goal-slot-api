@@ -3,11 +3,13 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { EmailService } from '../email/email.service';
+import { OtpAttemptTrackerService } from './otp-attempt-tracker.service';
 import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, OTPPurpose, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
 import { UserRole, UserType, PlanType } from '@prisma/client';
 import { PLAN_LIMITS, resolvePlanLimits } from './plan-limits';
@@ -29,11 +31,15 @@ export class AuthService {
     private usersService: UsersService,
     private emailService: EmailService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private otpAttemptTracker: OtpAttemptTrackerService,
   ) {}
 
   // OTP Helper Methods
   private generateOTP(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    // crypto.randomInt is CSPRNG-backed, unlike Math.random() (CWE-338),
+    // and rejection-samples internally so the output stays uniform over
+    // [100000, 999999].
+    return randomInt(100000, 1000000).toString();
   }
 
   private getRateLimitKey(email: string, purpose: OTPPurpose): string {
@@ -69,44 +75,35 @@ export class AuthService {
     }
   }
 
-  private getVerificationAttemptsKey(email: string, purpose: OTPPurpose): string {
-    return `otp:attempts:${email}:${purpose}`;
-  }
+  // Verification attempt counting and lockout state live in
+  // OtpAttemptTrackerService, a dedicated in-memory store, rather than the
+  // shared cacheManager LRU used above for OTP codes/rate limits/cooldowns.
+  // See that service for why: the shared cache is capped at 1000 entries
+  // (eviction lets unrelated traffic wipe a victim's lockout) and its
+  // get-then-set is not atomic (concurrent attempts could race past the cap).
 
-  private getVerificationLockoutKey(email: string, purpose: OTPPurpose): string {
-    return `otp:lockout:${email}:${purpose}`;
-  }
-
-  private async checkVerificationLockout(email: string, purpose: OTPPurpose): Promise<void> {
-    const key = this.getVerificationLockoutKey(email, purpose);
-    const isLockedOut = await this.cacheManager.get<boolean>(key);
-    
-    if (isLockedOut) {
+  private checkVerificationLockout(email: string, purpose: OTPPurpose): void {
+    if (this.otpAttemptTracker.isLockedOut(email, purpose)) {
       throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
     }
   }
 
-  private async incrementVerificationAttempts(email: string, purpose: OTPPurpose): Promise<void> {
-    const attemptsKey = this.getVerificationAttemptsKey(email, purpose);
-    const attempts = await this.cacheManager.get<number>(attemptsKey) || 0;
-    const newAttempts = attempts + 1;
+  private incrementVerificationAttempts(email: string, purpose: OTPPurpose): void {
+    const { lockedOut } = this.otpAttemptTracker.recordFailedAttempt(
+      email,
+      purpose,
+      MAX_OTP_VERIFICATION_ATTEMPTS,
+      OTP_VERIFICATION_LOCKOUT_DURATION,
+      OTP_VERIFICATION_LOCKOUT_DURATION,
+    );
 
-    if (newAttempts >= MAX_OTP_VERIFICATION_ATTEMPTS) {
-      // Lock out the user
-      const lockoutKey = this.getVerificationLockoutKey(email, purpose);
-      await this.cacheManager.set(lockoutKey, true, OTP_VERIFICATION_LOCKOUT_DURATION);
-      // Clear attempts counter
-      await this.cacheManager.del(attemptsKey);
+    if (lockedOut) {
       throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
     }
-
-    // Increment attempts with 15 minute TTL
-    await this.cacheManager.set(attemptsKey, newAttempts, OTP_VERIFICATION_LOCKOUT_DURATION);
   }
 
-  private async resetVerificationAttempts(email: string, purpose: OTPPurpose): Promise<void> {
-    const attemptsKey = this.getVerificationAttemptsKey(email, purpose);
-    await this.cacheManager.del(attemptsKey);
+  private resetVerificationAttempts(email: string, purpose: OTPPurpose): void {
+    this.otpAttemptTracker.reset(email, purpose);
   }
 
   // Public OTP Methods
@@ -121,9 +118,14 @@ export class AuthService {
       const existingUser = await this.prisma.user.findUnique({
         where: { email },
       });
-      
+
       if (existingUser) {
-        throw new ConflictException('Email already registered');
+        // Same generic response as the "OTP actually sent" path below, and
+        // no OTP is generated or emailed. A distinct response here (the old
+        // 409) let anyone enumerate registered emails by calling send-otp
+        // directly; register() still independently rejects a duplicate
+        // email as a final defense-in-depth.
+        return { success: true, message: 'Verification code sent to your email.' };
       }
     }
 
@@ -197,20 +199,30 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto) {
     const { email, otp, newPassword } = dto;
 
-    // Verify user exists
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
+    // Verify the OTP before checking whether the account exists. Doing the
+    // existence check first meant a wrong OTP against a nonexistent email
+    // (401 "User not found") behaved differently from a wrong OTP against a
+    // real one (401/400 from verifyOTP) -- an email-enumeration oracle.
+    // sendForgotPasswordOTP never stores an OTP for an email with no
+    // account, so verifyOTP already fails identically (no stored OTP) in
+    // both cases.
     await this.verifyOTP({
       email,
       otp,
       purpose: OTPPurpose.FORGOT_PASSWORD,
     });
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      // Should not normally be reachable -- verifyOTP above would already
+      // have thrown for an email with no account, since no OTP was ever
+      // stored for it. Guarded anyway (e.g. account deleted mid-flow).
+      throw new UnauthorizedException('User not found');
+    }
+
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await this.prisma.user.update({
@@ -394,6 +406,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.isDisabled) {
+      throw new UnauthorizedException('This account has been disabled');
+    }
+
     const tokens = await this.generateTokens(user.id, user.email, user.role);
 
     return {
@@ -406,16 +422,27 @@ export class AuthService {
     // Verify SSO token from platform
     const ssoResult = await this.supabaseService.verifySSOToken(dto.token);
 
-    if (!ssoResult.valid) {
+    if (!ssoResult.valid || !ssoResult.user?.email) {
       throw new UnauthorizedException('Invalid SSO token');
     }
 
-    // Find or create user
+    // The verified token is the only source of truth for identity. dto.email
+    // is client-supplied and must never influence which account gets found,
+    // created, or linked. Trusting it let anyone holding a valid Supabase
+    // access token for this project log in as an arbitrary victim, silently
+    // upgrade a victim's existing password account to INTERNAL/PRO by
+    // linking it to their own SSO identity, or create a new elevated-access
+    // account on a victim's email -- just by putting that email in the
+    // request body.
+    const verifiedEmail = ssoResult.user.email;
+    const verifiedSsoId = ssoResult.user.id;
+
+    // Find or create user, matched only on server-verified data.
     let user = await this.prisma.user.findFirst({
       where: {
         OR: [
-          { email: dto.email },
-          { ssoId: ssoResult.user?.id, ssoProvider: 'sso' },
+          { email: verifiedEmail },
+          { ssoId: verifiedSsoId, ssoProvider: 'sso' },
         ],
       },
     });
@@ -424,10 +451,10 @@ export class AuthService {
       // Create new user from SSO
       user = await this.prisma.user.create({
         data: {
-          email: dto.email,
-          name: dto.name || dto.email.split('@')[0],
+          email: verifiedEmail,
+          name: dto.name || ssoResult.user.name || verifiedEmail.split('@')[0],
           ssoProvider: 'sso',
-          ssoId: ssoResult.user?.id,
+          ssoId: verifiedSsoId,
           userType: UserType.INTERNAL,
           plan: PlanType.PRO,
           unlimitedAccess: true,
@@ -440,17 +467,23 @@ export class AuthService {
       // Seed default labels for new user
       await this.seedDefaultLabels(user.id);
     } else if (!user.ssoId) {
-      // Link existing account to SSO
+      // Link existing account to SSO. Safe because `user` was matched above
+      // on the verified email (or an already-linked verified ssoId), never
+      // on the client-supplied dto.email.
       user = await this.prisma.user.update({
         where: { id: user.id },
         data: {
           ssoProvider: 'sso',
-          ssoId: ssoResult.user?.id,
+          ssoId: verifiedSsoId,
           userType: UserType.INTERNAL,
           plan: PlanType.PRO,
           unlimitedAccess: true,
         },
       });
+    }
+
+    if (user.isDisabled) {
+      throw new UnauthorizedException('This account has been disabled');
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -480,6 +513,10 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('User not found');
+    }
+
+    if (user.isDisabled) {
+      throw new UnauthorizedException('This account has been disabled');
     }
 
     return this.generateTokens(user.id, user.email, user.role);

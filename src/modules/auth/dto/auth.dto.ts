@@ -118,9 +118,15 @@ export class SSOLoginDto {
   @IsString()
   token: string;
 
-  @ApiProperty({ example: 'user@example.com' })
+  // Retained for backward compatibility with existing callers (the web app
+  // still sends it) but it is never trusted for identity: the server always
+  // derives the account email from the verified SSO token itself
+  // (see AuthService.ssoLogin), never from this field. Do not wire this
+  // value into any lookup, creation, or account-linking logic.
+  @ApiPropertyOptional({ example: 'user@example.com', description: 'Ignored for authentication; the verified SSO token email is used instead.' })
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
   @ApiPropertyOptional({ example: 'John Doe' })
   @IsOptional()
