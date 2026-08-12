@@ -16,6 +16,7 @@ import { ByokStateDto } from './dto/byok-state.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
 import { UpdateTokenBudgetDto } from './dto/update-token-budget.dto';
 import { UsageDto } from './dto/usage.dto';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('coach-byok')
 @Controller('coach/byok-key')
@@ -26,14 +27,16 @@ export class CoachByokController {
 
   @Get()
   @ApiOperation({ summary: 'Get current BYOK key state for the user' })
-  async getState(@Request() req: any): Promise<ByokStateDto> {
+  async getState(@Request() req: AuthenticatedRequest): Promise<ByokStateDto> {
     return this.byokService.getState(req.user.sub);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Save or rotate the user BYOK key (encrypted at rest)' })
+  @ApiOperation({
+    summary: 'Save or rotate the user BYOK key (encrypted at rest)',
+  })
   async saveKey(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Body() dto: SaveByokKeyDto,
   ): Promise<ByokStateDto> {
     return this.byokService.saveKey(req.user.sub, dto);
@@ -41,13 +44,15 @@ export class CoachByokController {
 
   @Delete()
   @ApiOperation({ summary: 'Delete the user BYOK key' })
-  async deleteKey(@Request() req: any): Promise<{ success: true }> {
+  async deleteKey(
+    @Request() req: AuthenticatedRequest,
+  ): Promise<{ success: true }> {
     return this.byokService.deleteKey(req.user.sub);
   }
 
   @Get('usage')
   @ApiOperation({ summary: 'Get token usage for the current BYOK window' })
-  async getUsage(@Request() req: any): Promise<UsageDto> {
+  async getUsage(@Request() req: AuthenticatedRequest): Promise<UsageDto> {
     return this.byokService.getUsage(req.user.sub);
   }
 
@@ -57,7 +62,7 @@ export class CoachByokController {
       'Update the monthly token budget for the user BYOK key. Soft cap enforced server-side so the user controls their own spend on the underlying provider account.',
   })
   async updateBudget(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Body() dto: UpdateTokenBudgetDto,
   ): Promise<ByokStateDto> {
     return this.byokService.updateTokenBudget(req.user.sub, dto.tokensLimit);
@@ -69,7 +74,7 @@ export class CoachByokController {
       'Update the specific provider model Coach will call. Must be on the whitelist for the current provider; otherwise the call is rejected.',
   })
   async updateModel(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Body() dto: UpdateModelDto,
   ): Promise<ByokStateDto> {
     return this.byokService.updateModel(req.user.sub, dto.model);

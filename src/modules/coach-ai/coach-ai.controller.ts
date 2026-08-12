@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoachAiService } from './coach-ai.service';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { UserThrottlerGuard } from './user-throttler.guard';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 // 30 calls per rolling 24 hours, per user.
 const COACH_TTL_MS = 86_400_000;
@@ -39,7 +40,7 @@ export class CoachAiController {
   @Get('narrative/:scopeKey')
   @ApiOperation({ summary: 'Get the cached weekly narrative or 404' })
   async getNarrative(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
   ) {
     return this.coachAi.getLatestNarrative(req.user.sub, scopeKey);
@@ -54,7 +55,7 @@ export class CoachAiController {
   @Header('Connection', 'keep-alive')
   @ApiOperation({ summary: 'Stream the weekly narrative via SSE' })
   streamNarrative(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
     @Query('force') force?: string,
   ): Observable<MessageEvent> {
@@ -70,7 +71,7 @@ export class CoachAiController {
   @Get('chat/:scopeKey')
   @ApiOperation({ summary: 'Get chat history for the scope' })
   async getChatHistory(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
   ) {
     return this.coachAi.getChatHistory(req.user.sub, scopeKey);
@@ -85,7 +86,7 @@ export class CoachAiController {
   @Header('Connection', 'keep-alive')
   @ApiOperation({ summary: 'Stream a chat reply via SSE' })
   streamChat(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
     @Body() body: ChatMessageDto,
   ): Observable<MessageEvent> {
@@ -103,7 +104,7 @@ export class CoachAiController {
       'Clear the chat history for this scope so the next message starts fresh. Accepted insights + narrative stay; only chat messages + the chat conversation row are removed.',
   })
   async clearChat(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
   ): Promise<{ success: true }> {
     await this.coachAi.clearChat(req.user.sub, scopeKey);
@@ -116,7 +117,7 @@ export class CoachAiController {
       'Delete the given chat message and every later message in the same conversation. Used by the edit-and-resend flow so editing an old message clears the now-stale Coach reply and any back-and-forth that followed.',
   })
   async truncateChatFrom(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
     @Param('messageId') messageId: string,
   ): Promise<{ deleted: number }> {
@@ -129,7 +130,7 @@ export class CoachAiController {
       'Save an ASSISTANT chat reply as a CoachInsight reminder. Lands directly in ACCEPTED status so it appears in the user’s Active practice immediately.',
   })
   async saveChatMessageAsInsight(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
     @Param('messageId') messageId: string,
     @Body() body: { title?: string },
@@ -163,7 +164,7 @@ function asSseObservable(
           if (payload.done) break;
         }
         subscriber.complete();
-      } catch (err: any) {
+      } catch (err) {
         const message =
           err?.response?.message ??
           err?.message ??

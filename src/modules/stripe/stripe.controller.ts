@@ -1,8 +1,20 @@
-import { Controller, Get, Post, Body, UseGuards, Request, Headers, RawBodyRequest, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  Headers,
+  RawBodyRequest,
+  Req,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StripeService } from './stripe.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Request as ExpressRequest } from 'express';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
+import { PlanType } from '@prisma/client';
 
 @ApiTags('stripe')
 @Controller('stripe')
@@ -12,17 +24,25 @@ export class StripeController {
   @Post('create-checkout-session')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a Stripe checkout session for Pro subscription' })
-  async createCheckoutSession(@Request() req: any, @Body('plan') plan?: 'BASIC' | 'PRO') {
-    const normalizedPlan = plan === 'PRO' ? 'PRO' : 'BASIC';
-    return this.stripeService.createCheckoutSession(req.user.sub, normalizedPlan as any);
+  @ApiOperation({
+    summary: 'Create a Stripe checkout session for Pro subscription',
+  })
+  async createCheckoutSession(
+    @Request() req: AuthenticatedRequest,
+    @Body('plan') plan?: 'BASIC' | 'PRO',
+  ) {
+    const normalizedPlan = plan === 'PRO' ? PlanType.PRO : PlanType.BASIC;
+    return this.stripeService.createCheckoutSession(
+      req.user.sub,
+      normalizedPlan,
+    );
   }
 
   @Post('create-portal-session')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a Stripe customer portal session' })
-  async createPortalSession(@Request() req: any) {
+  async createPortalSession(@Request() req: AuthenticatedRequest) {
     return this.stripeService.createCustomerPortalSession(req.user.sub);
   }
 
@@ -30,7 +50,7 @@ export class StripeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current subscription status' })
-  async getSubscriptionStatus(@Request() req: any) {
+  async getSubscriptionStatus(@Request() req: AuthenticatedRequest) {
     return this.stripeService.getSubscriptionStatus(req.user.sub);
   }
 
@@ -38,7 +58,7 @@ export class StripeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get detailed billing history and invoices' })
-  async getBillingDetails(@Request() req: any) {
+  async getBillingDetails(@Request() req: AuthenticatedRequest) {
     return this.stripeService.getBillingDetails(req.user.sub);
   }
 
@@ -56,7 +76,7 @@ export class StripeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mock activate subscription (dev only)' })
-  async mockActivate(@Request() req: any) {
+  async mockActivate(@Request() req: AuthenticatedRequest) {
     return this.stripeService.mockActivateSubscription(req.user.sub);
   }
 
@@ -64,7 +84,7 @@ export class StripeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mock cancel subscription (dev only)' })
-  async mockCancel(@Request() req: any) {
+  async mockCancel(@Request() req: AuthenticatedRequest) {
     return this.stripeService.mockCancelSubscription(req.user.sub);
   }
 }

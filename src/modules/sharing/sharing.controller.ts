@@ -1,8 +1,24 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { SharingService } from './sharing.service';
 import { InviteUserDto, CreatePublicLinkDto } from './dto/sharing.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('sharing')
 @Controller('sharing')
@@ -13,14 +29,20 @@ export class SharingController {
 
   @Post('invite')
   @ApiOperation({ summary: 'Invite a user to access your data' })
-  async inviteUser(@Request() req: any, @Body() dto: InviteUserDto) {
+  async inviteUser(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: InviteUserDto,
+  ) {
     return this.sharingService.inviteUser(req.user.sub, dto);
   }
 
   @Post('accept')
   @ApiOperation({ summary: 'Accept a share invitation' })
   @ApiQuery({ name: 'token', required: true, description: 'Invitation token' })
-  async acceptInvitation(@Request() req: any, @Query('token') token: string) {
+  async acceptInvitation(
+    @Request() req: AuthenticatedRequest,
+    @Query('token') token: string,
+  ) {
     if (!token) {
       throw new Error('Token is required');
     }
@@ -29,55 +51,70 @@ export class SharingController {
 
   @Get()
   @ApiOperation({ summary: 'Get all shared access (shared with me and by me)' })
-  async getMySharedAccess(@Request() req: any) {
+  async getMySharedAccess(@Request() req: AuthenticatedRequest) {
     return this.sharingService.getMySharedAccess(req.user.sub);
   }
 
   @Get('my-shares')
   @ApiOperation({ summary: 'Get shares I created' })
-  async getMyShares(@Request() req: any) {
+  async getMyShares(@Request() req: AuthenticatedRequest) {
     return this.sharingService.getMyShares(req.user.sub);
   }
 
   @Get('pending-invites')
   @ApiOperation({ summary: 'Get pending invites for me' })
-  async getPendingInvites(@Request() req: any) {
+  async getPendingInvites(@Request() req: AuthenticatedRequest) {
     return this.sharingService.getPendingInvites(req.user.sub);
   }
 
   @Post('accept/:inviteId')
   @ApiOperation({ summary: 'Accept a pending invite' })
-  async acceptInvite(@Request() req: any, @Param('inviteId') inviteId: string) {
+  async acceptInvite(
+    @Request() req: AuthenticatedRequest,
+    @Param('inviteId') inviteId: string,
+  ) {
     return this.sharingService.acceptInvite(req.user.sub, inviteId);
   }
 
   @Post('decline/:inviteId')
   @ApiOperation({ summary: 'Decline a pending invite' })
-  async declineInvite(@Request() req: any, @Param('inviteId') inviteId: string) {
+  async declineInvite(
+    @Request() req: AuthenticatedRequest,
+    @Param('inviteId') inviteId: string,
+  ) {
     return this.sharingService.declineInvite(req.user.sub, inviteId);
   }
 
   @Get('shared-with-me')
   @ApiOperation({ summary: 'Get all users who have shared their data with me' })
-  async getSharedWithMe(@Request() req: any) {
+  async getSharedWithMe(@Request() req: AuthenticatedRequest) {
     return this.sharingService.getSharedWithMe(req.user.sub);
   }
 
   @Get('user/:ownerId')
   @ApiOperation({ summary: 'Get shared user data' })
-  async getSharedUserData(@Request() req: any, @Param('ownerId') ownerId: string) {
+  async getSharedUserData(
+    @Request() req: AuthenticatedRequest,
+    @Param('ownerId') ownerId: string,
+  ) {
     return this.sharingService.getSharedUserData(req.user.sub, ownerId);
   }
 
   @Delete('revoke/:shareId')
   @ApiOperation({ summary: 'Revoke access you granted' })
-  async revokeAccess(@Request() req: any, @Param('shareId') shareId: string) {
+  async revokeAccess(
+    @Request() req: AuthenticatedRequest,
+    @Param('shareId') shareId: string,
+  ) {
     return this.sharingService.revokeAccess(req.user.sub, shareId);
   }
 
   @Delete('remove/:shareId')
   @ApiOperation({ summary: 'Remove access granted to you' })
-  async removeMyAccess(@Request() req: any, @Param('shareId') shareId: string) {
+  async removeMyAccess(
+    @Request() req: AuthenticatedRequest,
+    @Param('shareId') shareId: string,
+  ) {
     return this.sharingService.removeMyAccess(req.user.sub, shareId);
   }
 
@@ -86,18 +123,23 @@ export class SharingController {
   @ApiQuery({ name: 'startDate', required: true, example: '2025-12-01' })
   @ApiQuery({ name: 'endDate', required: true, example: '2025-12-31' })
   async getSharedUserTimeEntries(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('ownerId') ownerId: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
-    return this.sharingService.getSharedUserTimeEntries(req.user.sub, ownerId, startDate, endDate);
+    return this.sharingService.getSharedUserTimeEntries(
+      req.user.sub,
+      ownerId,
+      startDate,
+      endDate,
+    );
   }
 
   @Get('user/:ownerId/goals')
   @ApiOperation({ summary: 'Get goals for a shared user' })
   async getSharedUserGoals(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('ownerId') ownerId: string,
   ) {
     return this.sharingService.getSharedUserGoals(req.user.sub, ownerId);
@@ -110,20 +152,28 @@ export class SharingController {
   }
 
   @Post('public-link')
-  @ApiOperation({ summary: 'Create a public shareable link (no email required)' })
-  async createPublicLink(@Request() req: any, @Body() dto: CreatePublicLinkDto) {
+  @ApiOperation({
+    summary: 'Create a public shareable link (no email required)',
+  })
+  async createPublicLink(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: CreatePublicLinkDto,
+  ) {
     return this.sharingService.createPublicLink(req.user.sub, dto);
   }
 
   @Get('my-public-links')
   @ApiOperation({ summary: 'Get all public links I created' })
-  async getMyPublicLinks(@Request() req: any) {
+  async getMyPublicLinks(@Request() req: AuthenticatedRequest) {
     return this.sharingService.getMyPublicLinks(req.user.sub);
   }
 
   @Delete('public-link/:shareId')
   @ApiOperation({ summary: 'Delete a public link' })
-  async deletePublicLink(@Request() req: any, @Param('shareId') shareId: string) {
+  async deletePublicLink(
+    @Request() req: AuthenticatedRequest,
+    @Param('shareId') shareId: string,
+  ) {
     return this.sharingService.deletePublicLink(req.user.sub, shareId);
   }
 }

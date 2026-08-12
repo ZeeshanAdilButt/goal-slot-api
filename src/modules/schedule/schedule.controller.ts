@@ -1,8 +1,22 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ScheduleService } from './schedule.service';
-import { CreateScheduleBlockDto, UpdateScheduleBlockDto } from './dto/schedule.dto';
+import {
+  CreateScheduleBlockDto,
+  UpdateScheduleBlockDto,
+} from './dto/schedule.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('schedule')
 @Controller('schedule')
@@ -13,37 +27,47 @@ export class ScheduleController {
 
   @Post()
   @ApiOperation({ summary: 'Create a schedule block' })
-  async create(@Request() req: any, @Body() dto: CreateScheduleBlockDto) {
+  async create(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: CreateScheduleBlockDto,
+  ) {
     return this.scheduleService.create(req.user.sub, dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all schedule blocks' })
-  async findAll(@Request() req: any) {
+  async findAll(@Request() req: AuthenticatedRequest) {
     return this.scheduleService.findAll(req.user.sub);
   }
 
   @Get('week')
   @ApiOperation({ summary: 'Get weekly schedule grouped by day' })
-  async getWeeklySchedule(@Request() req: any) {
+  async getWeeklySchedule(@Request() req: AuthenticatedRequest) {
     return this.scheduleService.getWeeklySchedule(req.user.sub);
   }
 
   @Get('day/:dayOfWeek')
   @ApiOperation({ summary: 'Get schedule blocks for a specific day' })
-  async findByDay(@Request() req: any, @Param('dayOfWeek') dayOfWeek: number) {
+  async findByDay(
+    @Request() req: AuthenticatedRequest,
+    @Param('dayOfWeek') dayOfWeek: number,
+  ) {
     return this.scheduleService.findByDay(req.user.sub, dayOfWeek);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update a schedule block' })
-  async update(@Request() req: any, @Param('id') id: string, @Body() dto: UpdateScheduleBlockDto) {
+  async update(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateScheduleBlockDto,
+  ) {
     return this.scheduleService.update(req.user.sub, id, dto);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a schedule block' })
-  async delete(@Request() req: any, @Param('id') id: string) {
+  async delete(@Request() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.scheduleService.delete(req.user.sub, id);
   }
 
@@ -53,7 +77,7 @@ export class ScheduleController {
   // relation, so this does not delete tracked time; it just unlinks it.
   @Delete()
   @ApiOperation({ summary: 'Delete ALL schedule blocks for the current user' })
-  async clearAll(@Request() req: any) {
+  async clearAll(@Request() req: AuthenticatedRequest) {
     return this.scheduleService.clearAll(req.user.sub);
   }
 }

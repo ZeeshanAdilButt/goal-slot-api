@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthenticatedUser } from '../../../shared/types/authenticated-request.interface';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -17,7 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
+  async validate(payload: { sub: string }): Promise<AuthenticatedUser> {
     // Look the user up on every authenticated request instead of trusting
     // the JWT payload blindly. Without this, disabling a user
     // (POST /users/admin/toggle-status/:userId) has no effect on tokens
