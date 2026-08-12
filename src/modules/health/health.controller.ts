@@ -54,7 +54,7 @@ export class HealthController {
               type: 'object',
               properties: {
                 ok: { type: 'boolean' },
-                latencyMs: { type: 'number' },
+                configured: { type: 'boolean' },
               },
             },
             resend: {

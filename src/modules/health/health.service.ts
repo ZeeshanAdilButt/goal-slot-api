@@ -8,7 +8,7 @@ export interface HealthCheckResult {
   timestamp: string;
   checks: {
     database: { ok: boolean; latencyMs: number };
-    supabase: { ok: boolean; latencyMs: number };
+    supabase: { ok: boolean; configured: boolean };
     resend: { ok: boolean; configured: boolean };
     geminiShared: { ok: boolean; configured: boolean };
   };
@@ -69,8 +69,8 @@ export class HealthService {
           latencyMs: 0,
         }),
         this.safeCheck('supabase', () => this.checkSupabase(), {
-          ok: false,
-          latencyMs: 0,
+          ok: true,
+          configured: false,
         }),
         this.safeCheck('resend', () => this.checkResend(), {
           ok: true,
@@ -148,13 +148,34 @@ export class HealthService {
   }
 
   /**
-   * Check Supabase API connectivity without depending on application tables.
-   * Measures latency in milliseconds.
+   * Check Supabase configuration and, only if it looks like a real project,
+   * API connectivity without depending on application tables.
+   *
+   * Production runs on Neon now; SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are
+   * still required at boot (see env.validation.ts) purely because
+   * SupabaseService.verifySSOToken backs SSO login, but the deployed .env
+   * carries a localhost placeholder for them until a real Supabase project
+   * is wired up for SSO. Dialing that placeholder hits our own reverse
+   * proxy and always fails, so treat it the same way checkResend/
+   * checkGeminiShared treat a missing key: not configured, not a failure.
    */
   private async checkSupabase(): Promise<{
     ok: boolean;
-    latencyMs: number;
+    configured: boolean;
   }> {
+    const url = this.configService.get<string>('SUPABASE_URL');
+    const serviceRoleKey = this.configService.get<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
+    const configured = this.isSupabaseConfigured(url, serviceRoleKey);
+
+    if (!configured) {
+      this.logger.debug(
+        'Supabase is not configured with real project credentials (placeholder), skipping connectivity check',
+      );
+      return { ok: true, configured: false };
+    }
+
     const result = await this.supabase.checkConnectivity();
 
     if (result.ok) {
@@ -163,7 +184,34 @@ export class HealthService {
       this.logger.warn(`Supabase check failed after ${result.latencyMs}ms`);
     }
 
-    return result;
+    return { ok: result.ok, configured: true };
+  }
+
+  /**
+   * Mirrors the configured-detection pattern used by checkResend/
+   * checkGeminiShared (non-empty value = configured), plus a check for the
+   * known localhost placeholder that satisfies Joi's required() validation
+   * without pointing at a real Supabase project.
+   */
+  private isSupabaseConfigured(
+    url: string | undefined,
+    serviceRoleKey: string | undefined,
+  ): boolean {
+    if (!url || !serviceRoleKey) {
+      return false;
+    }
+
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      return false;
+    }
+
+    const isPlaceholderHost =
+      hostname === 'localhost' || hostname === '127.0.0.1';
+
+    return !isPlaceholderHost;
   }
 
   /**
@@ -206,22 +254,28 @@ export class HealthService {
 
   /**
    * Calculate overall status based on health checks
-   * - 'ok': database and supabase pass, AND email (Resend) is configured
-   * - 'degraded': database and supabase pass, BUT email is missing
-   * - 'down': database or supabase failed
+   * - 'ok': database passes, AND Supabase and email (Resend) are configured/reachable
+   * - 'degraded': database passes, BUT Supabase and/or email is missing/unreachable
+   * - 'down': database failed
+   *
+   * Database is the only dependency that can take the whole report down.
+   * Supabase currently only backs SSO login (see SupabaseService.verifySSOToken)
+   * and production doesn't have a real project wired up for it yet, so an
+   * unconfigured or unreachable Supabase degrades the report instead of
+   * paging anyone.
    */
   private calculateStatus(
     databaseCheck: { ok: boolean },
-    supabaseCheck: { ok: boolean },
+    supabaseCheck: { ok: boolean; configured: boolean },
     resendCheck: { ok: boolean; configured: boolean },
   ): 'ok' | 'degraded' | 'down' {
-    // If critical dependencies fail, status is 'down'
-    if (!databaseCheck.ok || !supabaseCheck.ok) {
+    // If the critical dependency fails, status is 'down'
+    if (!databaseCheck.ok) {
       return 'down';
     }
 
-    // If critical dependencies pass but email is not configured, status is 'degraded'
-    if (!resendCheck.configured) {
+    // Non-critical dependencies missing or unreachable degrade the report
+    if (!supabaseCheck.configured || !supabaseCheck.ok || !resendCheck.configured) {
       return 'degraded';
     }
 
