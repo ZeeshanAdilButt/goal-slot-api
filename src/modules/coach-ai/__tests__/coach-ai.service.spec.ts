@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { HttpException, HttpStatus } from '@nestjs/common';
 import {
   CoachInsightStatus,
@@ -89,6 +92,27 @@ interface FakeHabits {
   additionalContext?: string;
 }
 
+interface FakeTimeEntry {
+  id: string;
+  userId: string;
+  date: Date;
+  duration: number;
+  taskName: string | null;
+  taskId: string | null;
+  goalId: string | null;
+  notes: string | null;
+  goal: { title: string } | null;
+}
+
+interface FakeSharedUsage {
+  userId: string;
+  day: Date;
+  messageCount: number;
+}
+
+const sharedUsageKey = (userId: string, day: Date) =>
+  `${userId}:${day.toISOString()}`;
+
 class FakePrisma {
   byok = new Map<string, FakeByok>();
   conversations: FakeConv[] = [];
@@ -96,6 +120,8 @@ class FakePrisma {
   insights: FakeInsight[] = [];
   habits: Map<string, FakeHabits> = new Map();
   scheduleBlocksRows: any[] = [];
+  timeEntries: FakeTimeEntry[] = [];
+  sharedUsage: Map<string, FakeSharedUsage> = new Map();
 
   // Call log for assertions about ordering.
   calls: Array<{ op: string; meta?: any }> = [];
@@ -124,6 +150,35 @@ class FakePrisma {
     },
   };
 
+  sharedCoachUsage = {
+    findUnique: async ({ where }: any) => {
+      this.calls.push({ op: 'sharedCoachUsage.findUnique' });
+      const { userId, day } = where.userId_day;
+      return this.sharedUsage.get(sharedUsageKey(userId, day)) ?? null;
+    },
+    upsert: async ({ where, create, update }: any) => {
+      this.calls.push({ op: 'sharedCoachUsage.upsert' });
+      const { userId, day } = where.userId_day;
+      const key = sharedUsageKey(userId, day);
+      const existing = this.sharedUsage.get(key);
+      if (existing) {
+        if (update?.messageCount?.increment !== undefined) {
+          existing.messageCount += update.messageCount.increment;
+        } else if (typeof update?.messageCount === 'number') {
+          existing.messageCount = update.messageCount;
+        }
+        return existing;
+      }
+      const row: FakeSharedUsage = {
+        userId: create.userId,
+        day: create.day,
+        messageCount: create.messageCount ?? 1,
+      };
+      this.sharedUsage.set(key, row);
+      return row;
+    },
+  };
+
   coachConversation = {
     findUnique: async ({ where }: any) => {
       this.calls.push({ op: 'conv.findUnique' });
@@ -136,6 +191,24 @@ class FakePrisma {
             c.scopeKey === k.scopeKey,
         ) ?? null
       );
+    },
+    deleteMany: async ({ where }: any) => {
+      this.calls.push({ op: 'conv.deleteMany' });
+      const doomed = this.conversations.filter(
+        (c) =>
+          c.userId === where.userId &&
+          c.scope === where.scope &&
+          c.scopeKey === where.scopeKey,
+      );
+      const doomedIds = new Set(doomed.map((c) => c.id));
+      this.conversations = this.conversations.filter(
+        (c) => !doomedIds.has(c.id),
+      );
+      // Prisma cascades the delete to the conversation's messages.
+      this.messages = this.messages.filter(
+        (m) => !doomedIds.has(m.conversationId),
+      );
+      return { count: doomed.length };
     },
     create: async ({ data }: any) => {
       this.calls.push({ op: 'conv.create' });
@@ -166,6 +239,31 @@ class FakePrisma {
       return this.messages
         .filter((m) => m.conversationId === where.conversationId)
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    },
+    findUnique: async ({ where, include }: any) => {
+      this.calls.push({ op: 'msg.findUnique' });
+      const row = this.messages.find((m) => m.id === where.id) ?? null;
+      if (!row) return null;
+      if (include?.conversation) {
+        return {
+          ...row,
+          conversation:
+            this.conversations.find((c) => c.id === row.conversationId) ?? null,
+        };
+      }
+      return row;
+    },
+    deleteMany: async ({ where }: any) => {
+      this.calls.push({ op: 'msg.deleteMany' });
+      const gte: Date | undefined = where.createdAt?.gte;
+      const doomed = this.messages.filter(
+        (m) =>
+          m.conversationId === where.conversationId &&
+          (!gte || m.createdAt.getTime() >= gte.getTime()),
+      );
+      const doomedIds = new Set(doomed.map((m) => m.id));
+      this.messages = this.messages.filter((m) => !doomedIds.has(m.id));
+      return { count: doomed.length };
     },
     create: async ({ data }: any) => {
       this.calls.push({ op: 'msg.create', meta: { role: data.role } });
@@ -242,7 +340,21 @@ class FakePrisma {
   journalEntry = { findMany: async () => [] };
   goal = { findMany: async () => [] };
   goalReflection = { findMany: async () => [] };
-  timeEntry = { groupBy: async () => [] };
+  timeEntry = {
+    // Mirrors buildContextBundle's query: userId match, `date >= gte`,
+    // newest-first, capped by `take`. Rows keep `date` as a Date because the
+    // service calls `.toISOString()` on it.
+    findMany: async ({ where, orderBy: _ob, take }: any) => {
+      this.calls.push({ op: 'timeEntry.findMany' });
+      const gte: Date | undefined = where?.date?.gte;
+      const rows = this.timeEntries
+        .filter((e) => e.userId === where?.userId)
+        .filter((e) => !gte || e.date.getTime() >= gte.getTime())
+        .sort((a, b) => b.date.getTime() - a.date.getTime());
+      return typeof take === 'number' ? rows.slice(0, take) : rows;
+    },
+    groupBy: async () => [],
+  };
   scheduleBlock = {
     findMany: async () => {
       this.calls.push({ op: 'scheduleBlock.findMany' });
@@ -332,7 +444,13 @@ describe('CoachAiService', () => {
   let createSpy: jest.SpyInstance;
   let extractStructuredFn: jest.Mock;
 
+  const savedSharedKey = process.env.GOOGLE_AI_SHARED_API_KEY;
+
   beforeEach(() => {
+    // resolveCoachKey() falls back to the operator's shared Gemini key when
+    // the user has no BYOK row. Unset it so "no key configured" really means
+    // no key, regardless of the developer's local environment.
+    delete process.env.GOOGLE_AI_SHARED_API_KEY;
     prisma = new FakePrisma();
     encryption = new FakeEncryption();
     factory = new LlmFactory();
@@ -360,6 +478,11 @@ describe('CoachAiService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    if (savedSharedKey === undefined) {
+      delete process.env.GOOGLE_AI_SHARED_API_KEY;
+    } else {
+      process.env.GOOGLE_AI_SHARED_API_KEY = savedSharedKey;
+    }
   });
 
   it('throws 412 when no BYOK key is configured', async () => {
@@ -715,6 +838,94 @@ describe('CoachAiService', () => {
       expect(msg).toContain('60-min Deep Work block');
       expect(msg).toMatch(/status=DOING/);
     }
+  });
+
+  it('puts recent time entries (with IDs) in the prompt and leaves out entries older than 14 days', async () => {
+    prisma.byok.set('user_1', freshByok());
+    const daysAgo = (n: number) =>
+      new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+    prisma.timeEntries.push(
+      {
+        id: 'te_recent',
+        userId: 'user_1',
+        date: daysAgo(2),
+        duration: 45,
+        taskName: 'Deep work on API',
+        taskId: null,
+        goalId: 'goal_1',
+        notes: null,
+        goal: { title: 'Ship the coach' },
+      },
+      {
+        id: 'te_stale',
+        userId: 'user_1',
+        date: daysAgo(30),
+        duration: 60,
+        taskName: 'Ancient history',
+        taskId: null,
+        goalId: null,
+        notes: null,
+        goal: null,
+      },
+    );
+
+    let capturedUserMessage = '';
+    createSpy.mockImplementation((..._args: any[]) => ({
+      async *streamCompletion(messages: LlmChatMessage[], _model: string) {
+        const u = messages.find((m) => m.role === 'user');
+        if (u) capturedUserMessage = u.content;
+        yield { delta: 'ok', done: false };
+        yield {
+          delta: '',
+          done: true,
+          usage: { promptTokens: 1, completionTokens: 1 },
+        };
+      },
+      extractStructured: extractStructuredFn,
+    }));
+
+    await drain(service.streamNarrative('user_1', '2026-W22', false));
+
+    expect(capturedUserMessage).toContain('id=te_recent');
+    expect(capturedUserMessage).toContain('Deep work on API');
+    expect(capturedUserMessage).toContain('goal="Ship the coach"');
+    // Outside the 14-day window the service asks for.
+    expect(capturedUserMessage).not.toContain('te_stale');
+    expect(capturedUserMessage).not.toContain('Ancient history');
+  });
+});
+
+// ---------- Mock-completeness guard ----------
+
+// FakePrisma is hand-written, so it silently drifts whenever the service
+// starts calling a delegate method nobody remembered to stub — the suite then
+// dies with an opaque "x.y is not a function" at runtime. This test turns that
+// drift into an explicit, named failure at the point the service changes.
+describe('FakePrisma completeness', () => {
+  it('stubs every Prisma delegate method CoachAiService calls', () => {
+    const source = readFileSync(
+      join(__dirname, '..', 'coach-ai.service.ts'),
+      'utf8',
+    );
+
+    const used = new Set<string>();
+    const re = /this\.prisma\.(\w+)\.(\w+)\s*\(/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(source)) !== null) {
+      used.add(`${match[1]}.${match[2]}`);
+    }
+
+    const fake = new FakePrisma() as any;
+    const missing = [...used]
+      .filter((path) => {
+        const [delegate, method] = path.split('.');
+        return typeof fake[delegate]?.[method] !== 'function';
+      })
+      .sort();
+
+    expect(used.size).toBeGreaterThan(0);
+    expect(missing).toEqual([]);
+    expect(typeof fake.$transaction).toBe('function');
   });
 });
 
