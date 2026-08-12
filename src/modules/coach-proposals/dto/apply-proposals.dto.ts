@@ -107,4 +107,13 @@ export interface CoachActionResult {
   ok: boolean;
   resultId?: string;
   error?: string;
+  /**
+   * Set on an action that succeeded (`ok: true`) but did something other
+   * than exactly what was asked — e.g. STOP_TIMER saving less time than was
+   * actually tracked because the session hit MAX_SESSION_MS. Distinct from
+   * `error`, which is reserved for actions that did NOT apply: a warning
+   * means the write happened and the user should still see why the result
+   * isn't the full picture.
+   */
+  warning?: string;
 }

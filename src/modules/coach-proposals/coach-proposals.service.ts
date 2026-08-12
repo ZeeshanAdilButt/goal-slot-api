@@ -63,8 +63,14 @@ export class CoachProposalsService {
         payload: resolveRefs(raw.payload, results),
       };
       try {
-        const resultId = await this.dispatch(userId, action);
-        results.push({ index: i, type: action.type, ok: true, resultId });
+        const { resultId, warning } = await this.dispatch(userId, action);
+        results.push({
+          index: i,
+          type: action.type,
+          ok: true,
+          resultId,
+          ...(warning ? { warning } : {}),
+        });
       } catch (err: any) {
         const message =
           err?.response?.message ??
@@ -85,10 +91,17 @@ export class CoachProposalsService {
     return results;
   }
 
+  /**
+   * `warning` is set on an otherwise-successful action whose effect isn't
+   * exactly what was asked for — currently just STOP_TIMER hitting the
+   * 12-hour session cap. `resultId` stays optional/undefined for actions
+   * that don't produce one, matching the previous `string | undefined`
+   * contract this replaces.
+   */
   private async dispatch(
     userId: string,
     action: CoachProposedAction,
-  ): Promise<string | undefined> {
+  ): Promise<{ resultId?: string; warning?: string }> {
     const payload = action.payload ?? {};
 
     switch (action.type) {
@@ -101,12 +114,12 @@ export class CoachProposalsService {
         const updated = await this.goals.update(userId, action.id, {
           title: payload.title.trim(),
         } as any);
-        return updated?.id;
+        return { resultId: updated?.id };
       }
       case 'UPDATE_GOAL': {
         if (!action.id) throw new Error('UPDATE_GOAL requires id');
         const updated = await this.goals.update(userId, action.id, payload as any);
-        return updated?.id;
+        return { resultId: updated?.id };
       }
       case 'CREATE_GOAL': {
         if (typeof payload.title !== 'string' || !payload.title.trim()) {
@@ -119,12 +132,12 @@ export class CoachProposalsService {
           throw new Error('CREATE_GOAL requires numeric payload.targetHours');
         }
         const created = await this.goals.create(userId, payload as any);
-        return created?.id;
+        return { resultId: created?.id };
       }
       case 'DELETE_GOAL': {
         if (!action.id) throw new Error('DELETE_GOAL requires id');
         await this.deleteIdempotent(() => this.goals.delete(userId, action.id!));
-        return action.id;
+        return { resultId: action.id };
       }
 
       // -------- Schedule blocks --------
@@ -152,7 +165,7 @@ export class CoachProposalsService {
 
         if (days.length <= 1) {
           if (days.length === 1) p.dayOfWeek = days[0];
-          return this.createBlockIdempotent(userId, p);
+          return { resultId: await this.createBlockIdempotent(userId, p) };
         }
 
         // One shared series across the requested days. Best-effort per day: a
@@ -175,12 +188,12 @@ export class CoachProposalsService {
             throw err;
           }
         }
-        return firstId;
+        return { resultId: firstId };
       }
       case 'UPDATE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('UPDATE_SCHEDULE_BLOCK requires id');
         const updated = await this.schedule.update(userId, action.id, payload as any);
-        return (updated as any)?.id ?? action.id;
+        return { resultId: (updated as any)?.id ?? action.id };
       }
       case 'DELETE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('DELETE_SCHEDULE_BLOCK requires id');
@@ -191,13 +204,13 @@ export class CoachProposalsService {
         await this.deleteIdempotent(() =>
           this.schedule.delete(userId, action.id!),
         );
-        return action.id;
+        return { resultId: action.id };
       }
 
       // -------- Time entries --------
       case 'CREATE_TIME_ENTRY': {
         const created = await this.timeEntries.create(userId, payload as any);
-        return (created as any)?.id;
+        return { resultId: (created as any)?.id };
       }
       case 'UPDATE_TIME_ENTRY': {
         if (!action.id) throw new Error('UPDATE_TIME_ENTRY requires id');
@@ -206,36 +219,36 @@ export class CoachProposalsService {
           action.id,
           payload as any,
         );
-        return (updated as any)?.id ?? action.id;
+        return { resultId: (updated as any)?.id ?? action.id };
       }
       case 'DELETE_TIME_ENTRY': {
         if (!action.id) throw new Error('DELETE_TIME_ENTRY requires id');
         await this.deleteIdempotent(() =>
           this.timeEntries.delete(userId, action.id!),
         );
-        return action.id;
+        return { resultId: action.id };
       }
 
       // -------- Tasks --------
       case 'CREATE_TASK': {
         const created = await this.tasks.create(userId, payload as any);
-        return (created as any)?.id;
+        return { resultId: (created as any)?.id };
       }
       case 'UPDATE_TASK': {
         if (!action.id) throw new Error('UPDATE_TASK requires id');
         const updated = await this.tasks.update(userId, action.id, payload as any);
-        return (updated as any)?.id ?? action.id;
+        return { resultId: (updated as any)?.id ?? action.id };
       }
       case 'DELETE_TASK': {
         if (!action.id) throw new Error('DELETE_TASK requires id');
         await this.deleteIdempotent(() => this.tasks.delete(userId, action.id!));
-        return action.id;
+        return { resultId: action.id };
       }
 
       // -------- Active practice (CoachInsight in ACCEPTED) --------
       case 'CREATE_PRACTICE': {
         const created = await this.insights.createAccepted(userId, payload as any);
-        return created.id;
+        return { resultId: created.id };
       }
 
       // -------- Live timer (ActiveTimerSession) --------
@@ -280,7 +293,7 @@ export class CoachProposalsService {
         } catch (err) {
           throw this.humanizeStartConflict(err);
         }
-        return session.id;
+        return { resultId: session.id };
       }
       case 'STOP_TIMER': {
         // Attribution here is an override applied at stop time — this is the
@@ -318,7 +331,21 @@ export class CoachProposalsService {
           }
           throw err;
         }
-        return (stopped as any)?.timeEntry?.id;
+
+        const resultId = (stopped as any)?.timeEntry?.id;
+        // A 14-hour tracked session stopped via the Coach must not silently
+        // write 12 hours and report plain success — see MAX_SESSION_MS in
+        // active-timer.constants.ts. `capped`/`maxSessionMs` are already on
+        // stop()'s return shape; this is the one caller that previously
+        // discarded both.
+        if ((stopped as any)?.capped) {
+          const maxHours = Math.round((stopped as any).maxSessionMs / 3_600_000);
+          return {
+            resultId,
+            warning: `Session exceeded the ${maxHours} hour tracking limit; only the first ${maxHours} hours were saved.`,
+          };
+        }
+        return { resultId };
       }
 
       default:

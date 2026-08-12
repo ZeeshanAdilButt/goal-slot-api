@@ -603,8 +603,12 @@ describe('CoachProposalsService — timer actions', () => {
       expect(entry.goalId).toBe(goalId);
       expect(entry.taskName).toBe('Tafsir');
       expect(entry.source).toBe('TRACKER');
-      // The entry is dated from when the work began, not when it stopped.
-      expect(entry.date).toEqual(new Date('2026-08-12T09:00:00.000Z'));
+      // The entry is dated from the LOCAL CALENDAR DATE the work began on,
+      // not the moment it stopped and not the raw startedAt instant -- see
+      // ActiveTimerService.toLocalDateOnly. Asserting only the date-key
+      // (not the full instant) keeps this test agnostic to which TZ the
+      // machine running the suite is in.
+      expect(entry.date.toISOString().split('T')[0]).toBe('2026-08-12');
       expect(goalsService.progressCalls).toEqual([goalId]);
     });
 
@@ -697,6 +701,46 @@ describe('CoachProposalsService — timer actions', () => {
       expect(prisma.timeEntries).toHaveLength(1);
       expect(prisma.timeEntries[0].duration).toBe(90);
       expect(prisma.timeEntries[0].goalId).toBe('goal-amp');
+    });
+
+    // -----------------------------------------------------------------
+    // the 12-hour session cap
+    //
+    // ActiveTimerService.stop() caps what it writes at MAX_SESSION_MS and
+    // reports `capped: true`, but that flag used to be discarded the moment
+    // it reached the Coach: `dispatch()` for STOP_TIMER returned only
+    // `(stopped as any)?.timeEntry?.id`, so a genuine 14-hour session
+    // stopped via the Coach silently wrote 12 hours and reported plain
+    // success. These tests are the regression coverage for surfacing that
+    // through `warning` instead.
+    // -----------------------------------------------------------------
+    it('reports a warning, not silent success, when the stopped session exceeded the 12-hour cap', async () => {
+      const { prisma, service } = build();
+      await service.apply(USER, [
+        { type: 'START_TIMER', payload: { taskName: 'Forgot to stop' } },
+      ]);
+
+      at('2026-08-12T23:30:00.000Z'); // 14.5 hours later
+      const [result] = await service.apply(USER, [{ type: 'STOP_TIMER', payload: {} }]);
+
+      expect(result.ok).toBe(true);
+      expect(result.warning).toMatch(/12 hour/i);
+      expect(result.resultId).toBe(prisma.timeEntries[0].id);
+      // The write itself is still capped at 12h (720 minutes), same as the
+      // manual stop path -- the warning is additive, not a substitute for
+      // ActiveTimerService's own cap.
+      expect(prisma.timeEntries[0].duration).toBe(720);
+    });
+
+    it('carries no warning on a normal-length session', async () => {
+      const { service } = build();
+      await service.apply(USER, [{ type: 'START_TIMER', payload: {} }]);
+
+      at('2026-08-12T17:00:00.000Z'); // 8 hours
+      const [result] = await service.apply(USER, [{ type: 'STOP_TIMER', payload: {} }]);
+
+      expect(result.ok).toBe(true);
+      expect(result.warning).toBeUndefined();
     });
   });
 });
