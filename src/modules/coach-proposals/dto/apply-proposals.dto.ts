@@ -32,7 +32,29 @@ export const COACH_ACTION_TYPES = [
   'UPDATE_TASK',
   'DELETE_TASK',
   'CREATE_PRACTICE',
+  // Live stopwatch, distinct from CREATE_TIME_ENTRY: those two verbs are not
+  // interchangeable. CREATE_TIME_ENTRY logs work that is already finished and
+  // whose duration is known; START_TIMER/STOP_TIMER drive the shared
+  // ActiveTimerSession, where the duration is not known until the user stops.
+  // Without these, "start tracking time for my deen goal" has no action the
+  // model can express and the ask silently produces prose instead.
+  'START_TIMER',
+  'STOP_TIMER',
 ] as const;
+
+/**
+ * MIRRORED CLIENT-SIDE. Both clients keep their own copy of this list and
+ * DROP any action whose type is not on it (see `normalizeCoachActionType`),
+ * so a type added here but not there is emitted by the model and then
+ * silently discarded before it ever reaches /apply:
+ *
+ *   dw-time-mobile  packages/shared/src/api/coach.ts        (union + array)
+ *                   apps/mobile/app/(app)/coach.tsx         (ACTION_LABELS)
+ *   dw-time-web     src/lib/api.ts                          (union + array)
+ *                   src/features/coach/components/coach-proposal-card.tsx
+ *
+ * Adding a type is therefore a three-repo change, in that order.
+ */
 
 export type CoachActionType = (typeof COACH_ACTION_TYPES)[number];
 
