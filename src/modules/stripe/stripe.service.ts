@@ -22,11 +22,19 @@ export class StripeService {
     }
   }
 
+  /**
+   * Resolves the Stripe price for a tier.
+   *
+   * There is deliberately no fallback to the legacy single STRIPE_PRICE_ID.
+   * Falling back meant a missing per-tier price silently billed that tier at
+   * whatever STRIPE_PRICE_ID happened to be, so every plan charged the same
+   * amount and nothing anywhere said so. Both per-tier variables are now
+   * required at startup (see env.validation.ts), and this check is the second
+   * line of defence.
+   */
   private getPriceId(plan: PlanType) {
     if (plan === PlanType.PRO) {
-      const priceId =
-        this.configService.get<string>('STRIPE_PRICE_ID_PRO') ||
-        this.configService.get<string>('STRIPE_PRICE_ID');
+      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_PRO');
       if (!priceId) {
         throw new BadRequestException(
           'Stripe price for Max plan is not configured',
@@ -36,9 +44,7 @@ export class StripeService {
     }
 
     if (plan === PlanType.BASIC) {
-      const priceId =
-        this.configService.get<string>('STRIPE_PRICE_ID_BASIC') ||
-        this.configService.get<string>('STRIPE_PRICE_ID');
+      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_BASIC');
       if (!priceId) {
         throw new BadRequestException(
           'Stripe price for Pro plan is not configured',
