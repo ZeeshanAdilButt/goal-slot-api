@@ -225,6 +225,48 @@ etc.). Close the browser tab and `Ctrl+C` to exit Studio.
 
 ---
 
+## Step 7.5: Generate the Prisma Client
+
+Even after running migrations, you should explicitly generate the Prisma Client. This step compiles your `schema.prisma` file into the type-safe JavaScript/TypeScript code used throughout the application.
+
+```bash
+pnpm prisma generate
+```
+
+### Why is this necessary?
+
+This project uses a custom Prisma adapter (`@prisma/adapter-pg`). In some environments, running migrations alone may not refresh the generated Prisma Client. As a result, contributors may encounter type-related compilation errors when starting the development server.
+
+Common symptoms include:
+
+```text
+Module '"@prisma/client"' has no exported member ...
+```
+
+or
+
+```text
+Property '$connect' does not exist on type ...
+```
+
+If you encounter errors like these, run:
+
+```bash
+pnpm prisma generate
+```
+
+to regenerate the Prisma Client and ensure the generated types match your local schema and environment.
+
+### Verify generation succeeded
+
+You should see output similar to:
+
+```text
+✔ Generated Prisma Client to ./node_modules/@prisma/client
+```
+
+Once the client has been generated successfully, continue to the next step and start the development server.
+
 ## Step 8: Start the dev server
 
 ```bash
