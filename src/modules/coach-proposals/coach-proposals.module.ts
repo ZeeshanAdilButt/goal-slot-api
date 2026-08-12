@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ActiveTimerModule } from '../active-timer/active-timer.module';
 import { AuthModule } from '../auth/auth.module';
 import { CoachInsightsModule } from '../coach-insights/coach-insights.module';
 import { GoalsModule } from '../goals/goals.module';
@@ -10,6 +11,11 @@ import { CoachProposalsService } from './coach-proposals.service';
 
 @Module({
   imports: [
+    // START_TIMER / STOP_TIMER dispatch onto ActiveTimerService rather than
+    // re-implementing the session lifecycle, so the Coach path and the
+    // clients' own timer buttons share one set of conflict, cap and rounding
+    // rules. ActiveTimerModule already exports the service.
+    ActiveTimerModule,
     AuthModule,
     CoachInsightsModule,
     GoalsModule,
