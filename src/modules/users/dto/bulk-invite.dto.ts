@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { UserRole } from '@prisma/client';
+import { ASSIGNABLE_USER_ROLES } from './users.dto';
 
 export class BulkInviteDto {
   @ApiProperty({
@@ -13,13 +14,13 @@ export class BulkInviteDto {
   text: string;
 
   @ApiPropertyOptional({
-    enum: UserRole,
+    enum: ASSIGNABLE_USER_ROLES,
     default: UserRole.USER,
     description:
-      'Role applied to every invitee in this batch. Defaults to USER. Admins added through here still need a separate promote action if you want SUPER_ADMIN.',
+      'Role applied to every invitee in this batch. Defaults to USER. SUPER_ADMIN cannot be assigned here.',
   })
   @IsOptional()
-  @IsEnum(UserRole)
+  @IsIn(ASSIGNABLE_USER_ROLES as readonly UserRole[])
   role?: UserRole;
 }
 

@@ -5,17 +5,76 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { plainToInstance } from 'class-transformer';
+import { validate, ValidationError } from 'class-validator';
 import { GoalsService } from '../goals/goals.service';
 import { ScheduleService } from '../schedule/schedule.service';
 import { TimeEntriesService } from '../time-entries/time-entries.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CoachInsightsService } from '../coach-insights/coach-insights.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CreateGoalDto, UpdateGoalDto } from '../goals/dto/goals.dto';
+import {
+  CreateScheduleBlockDto,
+  UpdateScheduleBlockDto,
+} from '../schedule/dto/schedule.dto';
+import {
+  CreateTimeEntryDto,
+  UpdateTimeEntryDto,
+} from '../time-entries/dto/time-entries.dto';
+import { CreateTaskDto, UpdateTaskDto } from '../tasks/dto/tasks.dto';
 import {
   CoachActionResult,
+  CoachActionType,
   CoachProposedAction,
 } from './dto/apply-proposals.dto';
 import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
+
+/**
+ * The DTO each action's payload must satisfy before it is handed to a domain
+ * service.
+ *
+ * The global ValidationPipe runs with `whitelist: true`, but that does NOT
+ * recurse into `CoachProposedAction.payload` because the property is typed
+ * `Record<string, any>` with a bare `@IsObject()`. Without the check below the
+ * raw JSON body reached Prisma verbatim (`goals.update` spreads
+ * `{ ...updateData }`), so a caller could set any column the DTO never
+ * exposes — most damagingly `userId`, which re-parents the row onto another
+ * account.
+ *
+ * Action types absent from this map do not forward the payload to a service
+ * verbatim: RENAME_GOAL builds a literal `{ title }`, the DELETE_* cases only
+ * use `action.id`, and CREATE_PRACTICE goes to
+ * `CoachInsightsService.createAccepted`, which copies named fields one by one.
+ * They still get the forbidden-key strip below.
+ */
+const PAYLOAD_DTO_BY_ACTION: Partial<
+  Record<CoachActionType, new (...args: any[]) => object>
+> = {
+  UPDATE_GOAL: UpdateGoalDto,
+  CREATE_GOAL: CreateGoalDto,
+  CREATE_SCHEDULE_BLOCK: CreateScheduleBlockDto,
+  UPDATE_SCHEDULE_BLOCK: UpdateScheduleBlockDto,
+  CREATE_TIME_ENTRY: CreateTimeEntryDto,
+  UPDATE_TIME_ENTRY: UpdateTimeEntryDto,
+  CREATE_TASK: CreateTaskDto,
+  UPDATE_TASK: UpdateTaskDto,
+};
+
+/**
+ * Keys that are never legitimate in a proposal payload, whatever the action,
+ * including the action types that have no DTO above. `userId` is the
+ * dangerous one: it transfers ownership of the row. Row ids come from
+ * `action.id`, never from the payload, and the timestamps are managed by
+ * Prisma.
+ */
+const FORBIDDEN_PAYLOAD_KEYS = [
+  'id',
+  'userId',
+  'user',
+  'createdAt',
+  'updatedAt',
+];
 
 /**
  * Dispatches Coach-proposed actions onto the existing domain services.
@@ -26,6 +85,10 @@ import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
  *   - We never trust ids in the payload to bypass that check. If the Coach
  *     hallucinates an id that doesn't belong to the user, the underlying
  *     service throws NotFoundException and we mark the action failed.
+ *   - Every payload is validated against the action's own DTO before it
+ *     reaches a service (see PAYLOAD_DTO_BY_ACTION). The services take `any`
+ *     and spread straight into Prisma, so this is the only layer that stops a
+ *     caller from setting columns the DTO does not expose.
  *   - Actions are dispatched sequentially (not in a $transaction) so a single
  *     bad action doesn't roll back the user-approved good ones. Each result
  *     is reported back per-action so the UI can show what succeeded/failed.
@@ -89,11 +152,58 @@ export class CoachProposalsService {
     return results;
   }
 
+  /**
+   * Reject the always-forbidden keys, then validate what is left against the
+   * action's real DTO with `forbidNonWhitelisted` so anything the DTO does not
+   * declare fails the action loudly instead of being written to the row.
+   * Returns the validated instance, which is what gets handed to the service.
+   *
+   * Failing the action beats quietly dropping the offending key: the caller
+   * sees exactly which field was refused, and an action whose whole payload
+   * was an attempted ownership transfer is not reported as a success.
+   */
+  private async validatePayload(
+    type: CoachActionType,
+    payload: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    const forbidden = Object.keys(payload).filter((key) =>
+      FORBIDDEN_PAYLOAD_KEYS.includes(key),
+    );
+    if (forbidden.length > 0) {
+      throw new BadRequestException(
+        `${type} payload rejected: property ${forbidden.join(', ')} should not exist`,
+      );
+    }
+
+    const Dto = PAYLOAD_DTO_BY_ACTION[type];
+    if (!Dto) return payload;
+
+    const instance = plainToInstance(Dto, payload) as Record<string, any>;
+    const errors = await validate(instance, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    if (errors.length > 0) {
+      throw new BadRequestException(
+        `${type} payload rejected: ${flattenValidationErrors(errors)}`,
+      );
+    }
+
+    return instance;
+  }
+
   private async dispatch(
     userId: string,
     action: CoachProposedAction,
   ): Promise<string | undefined> {
-    const payload = action.payload ?? {};
+    const rawPayload = action.payload ?? {};
+    // CREATE_SCHEDULE_BLOCK carries `daysOfWeek`, a Coach-only fan-out field
+    // that is not part of CreateScheduleBlockDto, so that case validates its
+    // own payload once the fan-out has been resolved to a single dayOfWeek.
+    const payload =
+      action.type === 'CREATE_SCHEDULE_BLOCK'
+        ? rawPayload
+        : await this.validatePayload(action.type, rawPayload);
 
     switch (action.type) {
       // -------- Goals --------
@@ -154,9 +264,14 @@ export class CoachProposalsService {
             ? [p.dayOfWeek]
             : [];
 
+        // Validate the single-block shape once, with a concrete dayOfWeek in
+        // place. The multi-day loop below only varies dayOfWeek/seriesId, and
+        // both come from values we produced ourselves.
+        if (days.length >= 1) p.dayOfWeek = days[0];
+        const block = await this.validatePayload('CREATE_SCHEDULE_BLOCK', p);
+
         if (days.length <= 1) {
-          if (days.length === 1) p.dayOfWeek = days[0];
-          return this.createBlockIdempotent(userId, p);
+          return this.createBlockIdempotent(userId, block);
         }
 
         // One shared series across the requested days. Best-effort per day: a
@@ -168,7 +283,7 @@ export class CoachProposalsService {
         for (const d of days) {
           try {
             const id = await this.createBlockIdempotent(userId, {
-              ...p,
+              ...block,
               dayOfWeek: d,
               seriesId,
               isRecurring: true,
@@ -294,6 +409,20 @@ export class CoachProposalsService {
       throw err;
     }
   }
+}
+
+/**
+ * Collapse class-validator errors into one line for the per-action error
+ * string the UI shows. Constraint messages already name the offending
+ * property (e.g. "property userId should not exist").
+ */
+function flattenValidationErrors(errors: ValidationError[]): string {
+  const out: string[] = [];
+  for (const error of errors) {
+    if (error.constraints) out.push(...Object.values(error.constraints));
+    if (error.children?.length) out.push(flattenValidationErrors(error.children));
+  }
+  return out.join('; ');
 }
 
 /**

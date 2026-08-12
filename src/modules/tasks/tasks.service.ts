@@ -211,7 +211,7 @@ export class TasksService {
     // Update goal progress with only the remaining time
     // Note: Tracked time entries already updated the goal, so we only add remaining time
     if (task.goalId && remainingMinutes > 0) {
-      await this.goalsService.updateProgress(task.goalId, remainingMinutes);
+      await this.goalsService.updateProgress(task.goalId, userId);
     }
 
     return { 

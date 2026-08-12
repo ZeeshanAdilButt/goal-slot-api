@@ -1,6 +1,15 @@
-import { IsString, IsOptional, IsEmail, MinLength, IsEnum, IsBoolean, IsArray, ArrayMinSize } from 'class-validator';
+import { IsString, IsOptional, IsEmail, MinLength, IsEnum, IsBoolean, IsArray, ArrayMinSize, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, PlanType } from '@prisma/client';
+
+/**
+ * Roles an admin may hand out through the user-creation endpoints.
+ * SUPER_ADMIN is deliberately excluded: `admin/internal` and
+ * `admin/bulk-invite` are open to ADMIN, so accepting the full UserRole enum
+ * let any admin mint a SUPER_ADMIN account and escalate through it.
+ * Promotion to SUPER_ADMIN has no self-service path by design.
+ */
+export const ASSIGNABLE_USER_ROLES = [UserRole.USER, UserRole.ADMIN] as const;
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'John Doe' })
@@ -29,9 +38,9 @@ export class CreateInternalUserDto {
   @MinLength(2)
   name: string;
 
-  @ApiPropertyOptional({ enum: UserRole, example: UserRole.USER })
+  @ApiPropertyOptional({ enum: ASSIGNABLE_USER_ROLES, example: UserRole.USER })
   @IsOptional()
-  @IsEnum(UserRole)
+  @IsIn(ASSIGNABLE_USER_ROLES as readonly UserRole[])
   role?: UserRole;
 }
 
