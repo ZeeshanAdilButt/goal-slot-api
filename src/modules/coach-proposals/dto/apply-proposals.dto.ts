@@ -77,6 +77,30 @@ export class ApplyProposalsDto {
   @IsOptional()
   @IsString()
   sourceMessageId?: string;
+
+  /**
+   * Per-item confirmation for destructive actions. A delete is unrecoverable
+   * and, before this existed, one could ride along inside a batch the user
+   * approved for some other reason (create a goal, link some blocks, and by
+   * the way delete these four things).
+   *
+   * Semantics are opt-in-and-then-strict: send the field and EVERY DELETE_* in
+   * the batch must have its target id listed, or the whole batch is refused.
+   * Omit it and the batch still has to pass the destructive-count caps in
+   * coach-ai/safety/action-safety.ts. Omitting it becomes fatal once the
+   * operator sets COACH_REQUIRE_DELETE_CONFIRMATION=true, which is the switch
+   * to flip after the web and mobile clients ship the confirmation UI.
+   */
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Ids of every DELETE_* action the user explicitly confirmed. When present, any delete whose id is missing from this list fails the batch.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  confirmDeletions?: string[];
 }
 
 export interface CoachActionResult {

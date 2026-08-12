@@ -22,6 +22,14 @@ import {
   LlmChatMessage,
   LlmStreamChunk,
 } from '../../shared/services/llm/llm.interface';
+import {
+  injectionGuardPrompt,
+  newUntrustedNonce,
+  sanitizeDeep,
+  sanitizeSingleLine,
+  sanitizeUntrusted,
+  wrapUntrusted,
+} from './safety/prompt-safety';
 
 /**
  * Coach AI service — orchestrates BYOK lookup, token-budget enforcement,
@@ -401,6 +409,24 @@ function humanizeLlmError(err: any, raw: string): string {
 }
 const MEMORY_BLOCK_CAP = 800;
 
+/**
+ * Ceilings on how much stored content may enter a single prompt.
+ *
+ * Two reasons these exist. Cost: on the operator's shared key the only limit
+ * used to be a daily message count, so one account with a very large schedule
+ * or very long check-ins could make each of those messages arbitrarily
+ * expensive. Blast radius: every one of these fields is user-authored free
+ * text, and a smaller surface is a smaller place to hide injected instructions.
+ *
+ * All are set well above what a normal, fully-used account produces.
+ */
+const CHECKIN_FIELD_CAP = 500;
+const REFLECTION_CAP = 40;
+const REFLECTION_FIELD_CAP = 500;
+const SCHEDULE_BLOCK_CAP = 300;
+/** Hard ceiling on the serialized JSON blob at the end of the context message. */
+const CONTEXT_JSON_CAP = 120_000;
+
 const ACTIVE_INSIGHT_STATUSES: CoachInsightStatus[] = ['ACCEPTED', 'DOING'];
 
 const MEDIA_SLOTS = new Set([
@@ -598,7 +624,7 @@ export class CoachAiService {
     if (resolved.kind === 'byok') {
       await this.assertWithinBudget(resolved.byok);
     } else {
-      await this.assertSharedQuota(userId);
+      await this.reserveSharedQuotaSlot(userId);
     }
 
     const conversation = await this.findOrCreateConversation(
@@ -692,7 +718,7 @@ export class CoachAiService {
     if (resolved.kind === 'byok') {
       await this.assertWithinBudget(resolved.byok);
     } else {
-      await this.assertSharedQuota(userId);
+      await this.reserveSharedQuotaSlot(userId);
     }
 
     const conversation = await this.findOrCreateConversation(
@@ -795,6 +821,9 @@ export class CoachAiService {
       this.logger.warn(
         `LLM stream error scope=${args.scopeKey} user=${args.userId}: ${raw}`,
       );
+      // The shared-key slot was reserved before the call. The provider gave us
+      // nothing, so hand it back rather than charging the user for an outage.
+      if (args.isShared) await this.releaseSharedQuotaSlot(args.userId);
       yield { delta: '', done: true, error: humanizeLlmError(err, raw) };
       return;
     }
@@ -819,16 +848,11 @@ export class CoachAiService {
         }),
       ];
       if (args.isShared) {
-        // Shared-fallback path: increment the per-user daily message
-        // counter so the next request is gated by the quota helper.
-        const day = startOfUtcDay(new Date());
-        ops.push(
-          this.prisma.sharedCoachUsage.upsert({
-            where: { userId_day: { userId: args.userId, day } },
-            update: { messageCount: { increment: 1 } },
-            create: { userId: args.userId, day, messageCount: 1 },
-          }),
-        );
+        // Nothing to charge here any more. The shared-key daily counter is
+        // incremented by reserveSharedQuotaSlot() BEFORE the provider call, so
+        // that the check and the increment are one atomic statement and
+        // concurrent streams cannot all pass a stale read. Incrementing again
+        // on the way out would double-count.
       } else {
         ops.push(
           this.prisma.encryptedByokKey.update({
@@ -926,19 +950,38 @@ export class CoachAiService {
   }
 
   /**
-   * Enforce the per-user daily cap on shared-key Coach calls. Reads
-   * SHARED_COACH_DAILY_LIMIT from env (default 20). Throws 429 when
-   * the user has hit it, with a message that nudges them to add their
-   * own key for unlimited usage.
+   * Reserve one slot against the per-user daily cap on shared-key Coach calls,
+   * atomically, BEFORE the provider is called. Reads SHARED_COACH_DAILY_LIMIT
+   * at call time (default 20). Throws 429 when the user is already at the cap.
+   *
+   * This used to be a read-then-write: `assertSharedQuota` read the counter and
+   * the increment happened in `runAndPersist` only after the stream finished.
+   * Two things were wrong with that. Concurrent requests all read the same
+   * pre-increment value and all passed the check, so N parallel SSE streams
+   * cost N times the quota and charged one; and because the increment came
+   * after a successful stream, a user could spend the operator's shared key
+   * without the counter ever moving.
+   *
+   * The fix is to make the check and the increment the same statement. `upsert`
+   * with `increment` compiles to a single atomic INSERT ... ON CONFLICT DO
+   * UPDATE, so concurrent callers serialise on the unique (userId, day) index
+   * and each gets a distinct post-increment count back. Whoever gets a count
+   * above the limit is the one refused, and hands the slot straight back.
    */
-  private async assertSharedQuota(userId: string): Promise<void> {
+  private async reserveSharedQuotaSlot(userId: string): Promise<void> {
     const limit = parseInt(process.env.SHARED_COACH_DAILY_LIMIT ?? '20', 10);
     const day = startOfUtcDay(new Date());
-    const usage = await this.prisma.sharedCoachUsage.findUnique({
+
+    const row = await this.prisma.sharedCoachUsage.upsert({
       where: { userId_day: { userId, day } },
+      update: { messageCount: { increment: 1 } },
+      create: { userId, day, messageCount: 1 },
     });
-    const used = usage?.messageCount ?? 0;
-    if (used >= limit) {
+
+    if (row.messageCount > limit) {
+      // Over the line: give the slot back so the counter reflects reality and
+      // repeated refused attempts don't inflate it without bound.
+      await this.releaseSharedQuotaSlot(userId, day);
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -946,10 +989,33 @@ export class CoachAiService {
             'Shared Coach daily limit reached. Add your own free Gemini or OpenRouter key in Settings to keep going.',
           error: 'TooManyRequests',
           shared: true,
-          messagesUsedToday: used,
+          messagesUsedToday: limit,
           dailyLimit: limit,
         },
         HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * Hand a reserved slot back. Used when the request is refused for being over
+   * quota, and when the provider call fails before producing anything, so a
+   * provider outage does not silently eat the user's daily allowance.
+   */
+  private async releaseSharedQuotaSlot(
+    userId: string,
+    day: Date = startOfUtcDay(new Date()),
+  ): Promise<void> {
+    try {
+      await this.prisma.sharedCoachUsage.update({
+        where: { userId_day: { userId, day } },
+        data: { messageCount: { decrement: 1 } },
+      });
+    } catch (err: any) {
+      // Best effort. Losing a refund costs the user one message off today's
+      // allowance; failing the request over it would be worse.
+      this.logger.warn(
+        `failed to release shared quota slot user=${userId}: ${err?.message ?? err}`,
       );
     }
   }
@@ -1053,11 +1119,31 @@ export class CoachAiService {
       where: { userId },
     });
 
-    const recentCheckins = await this.prisma.dailyCheckin.findMany({
+    // Explicit `select` rather than the whole row. `findMany` with no select
+    // shipped id, userId, and the createdAt/updatedAt/submittedAt timestamps to
+    // a third-party LLM on every call. None of it helps the coach reason, and
+    // the internal ids are the sort of thing that should not leave the system
+    // for no reason. The free-text fields are capped for the same reason the
+    // journal is: one enormous check-in should not be able to crowd out the
+    // rest of the prompt, or the operator's shared-key spend.
+    const recentCheckinRows = await this.prisma.dailyCheckin.findMany({
       where: { userId },
       orderBy: { date: 'desc' },
       take: 7,
+      select: {
+        date: true,
+        mood: true,
+        energy: true,
+        focus: true,
+        blocked: true,
+        worked: true,
+      },
     });
+    const recentCheckins = recentCheckinRows.map((c) => ({
+      ...c,
+      blocked: capText(c.blocked, CHECKIN_FIELD_CAP),
+      worked: capText(c.worked, CHECKIN_FIELD_CAP),
+    }));
 
     const recentJournalRaw = await this.prisma.journalEntry.findMany({
       where: { userId },
@@ -1082,9 +1168,24 @@ export class CoachAiService {
       },
     });
 
-    const weekReflections = await this.prisma.goalReflection.findMany({
+    const weekReflectionRows = await this.prisma.goalReflection.findMany({
       where: { userId, weekKey: scopeKey },
+      take: REFLECTION_CAP,
+      select: {
+        goalId: true,
+        weekKey: true,
+        feel: true,
+        worked: true,
+        blocked: true,
+        nextWeekFocus: true,
+      },
     });
+    const weekReflections = weekReflectionRows.map((r) => ({
+      ...r,
+      worked: capText(r.worked, REFLECTION_FIELD_CAP),
+      blocked: capText(r.blocked, REFLECTION_FIELD_CAP),
+      nextWeekFocus: capText(r.nextWeekFocus, REFLECTION_FIELD_CAP),
+    }));
 
     const { from, to } = isoWeekRange(scopeKey);
     const hoursByGoalThisWeek = await this.aggregateHoursByGoal(
@@ -1124,8 +1225,15 @@ export class CoachAiService {
       notes: e.notes,
     }));
 
+    // `take` added: this query had no bound at all, so prompt size (and, on the
+    // operator's shared key, prompt cost) scaled with however many blocks the
+    // account happened to hold. An account with thousands of blocks could
+    // drive an enormous single request. A full 7-day schedule is well under
+    // this ceiling.
     const scheduleBlocksRaw = await this.prisma.scheduleBlock.findMany({
       where: { userId },
+      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      take: SCHEDULE_BLOCK_CAP,
       select: {
         id: true,
         title: true,
@@ -1182,10 +1290,23 @@ export class CoachAiService {
 
   // ----- Prompt rendering -----
 
+  /**
+   * A fresh nonce per request. The untrusted-data markers in the context
+   * message carry it, and the system prompt tells the model that only markers
+   * bearing this id close a region, so stored user content cannot write its own
+   * END marker and escape into the instruction channel.
+   */
   private buildNarrativeMessages(ctx: ContextBundle): LlmChatMessage[] {
+    const nonce = newUntrustedNonce();
     return [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: buildUserContextMessage(ctx, 'narrative') },
+      {
+        role: 'system',
+        content: `${SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+      },
+      {
+        role: 'user',
+        content: buildUserContextMessage(ctx, 'narrative', nonce),
+      },
     ];
   }
 
@@ -1193,15 +1314,24 @@ export class CoachAiService {
     ctx: ContextBundle,
     history: Array<{ role: CoachRole; content: string }>,
   ): LlmChatMessage[] {
+    const nonce = newUntrustedNonce();
     const messages: LlmChatMessage[] = [
-      { role: 'system', content: CHAT_SYSTEM_PROMPT },
-      { role: 'user', content: buildUserContextMessage(ctx, 'chat') },
+      {
+        role: 'system',
+        content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+      },
+      { role: 'user', content: buildUserContextMessage(ctx, 'chat', nonce) },
       // The user-context message above plays the role of "Context" the chat
       // system prompt references; subsequent turns are the chat itself.
     ];
     for (const m of history) {
       if (m.role === CoachRole.USER) {
-        messages.push({ role: 'user', content: m.content });
+        // The user's own turns ARE the legitimate instruction channel, so they
+        // are not fenced as untrusted data. The one thing defanged is the
+        // `coach-proposal` fence token: users paste whole schedules in here
+        // from elsewhere, and a pasted fence that the model echoes would be
+        // parsed by the client as a real approval card.
+        messages.push({ role: 'user', content: sanitizeUntrusted(m.content) });
       } else if (m.role === CoachRole.ASSISTANT) {
         messages.push({ role: 'assistant', content: m.content });
       }
@@ -1230,13 +1360,28 @@ export class CoachAiService {
       );
       const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
 
+      // The extraction call reads the same user-authored content as the
+      // narrative, so it gets the same boundary. Its output is schema-bound
+      // and lands as CoachInsight rows rather than actions, but a poisoned
+      // insight is still text the user is shown and that replays into the
+      // memory block of every later prompt.
+      const nonce = newUntrustedNonce();
       const contextJson = JSON.stringify(
-        serializeContextForExtraction(args.contextBundle),
+        sanitizeDeep(serializeContextForExtraction(args.contextBundle)),
       );
-      const userMessage = `CONTEXT:\n${contextJson}\n\nNARRATIVE:\n${args.narrativeText}`;
+      const userMessage = [
+        'CONTEXT:',
+        wrapUntrusted(nonce, contextJson),
+        '',
+        'NARRATIVE:',
+        args.narrativeText,
+      ].join('\n');
 
       const messages: LlmChatMessage[] = [
-        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+        {
+          role: 'system',
+          content: `${EXTRACTION_SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+        },
         { role: 'user', content: userMessage },
       ];
 
@@ -1464,27 +1609,34 @@ export function formatMemoryBlock(
 function buildUserContextMessage(
   ctx: ContextBundle,
   mode: 'narrative' | 'chat',
+  nonce: string,
 ): string {
   const h = ctx.habitsProfile;
   const religiousContext =
     (h?.religiousContext as ReligiousContext | undefined) ??
     ReligiousContext.NONE;
 
+  // Every value below is user-authored free text. `why` and `spiritualNotes`
+  // in particular are long-form fields the user controls completely, so they
+  // are the most attractive place to park an injection. Sanitised here and
+  // fenced as untrusted data at the bottom of this function.
   const opLines: string[] = [];
-  opLines.push(`why: ${h?.why?.trim() ? h.why.trim() : '(not set)'}`);
+  const why = sanitizeUntrusted(h?.why ?? '').trim();
+  opLines.push(`why: ${why.length ? why : '(not set)'}`);
   opLines.push(`religiousContext: ${religiousContext}`);
   if (religiousContext !== ReligiousContext.NONE) {
-    const notes = (h?.spiritualNotes ?? '').trim();
+    const notes = sanitizeUntrusted(h?.spiritualNotes ?? '').trim();
     opLines.push(`spiritualNotes: ${notes.length ? notes : '(none)'}`);
   }
   opLines.push(
-    `sleepTarget: ${h?.sleepTargetHours ?? 8}h, bedtime ${h?.bedtime ?? '23:00'}, wake ${h?.wakeTime ?? '07:00'}`,
+    `sleepTarget: ${h?.sleepTargetHours ?? 8}h, bedtime ${sanitizeSingleLine(h?.bedtime ?? '23:00', 20)}, wake ${sanitizeSingleLine(h?.wakeTime ?? '07:00', 20)}`,
   );
-  opLines.push(
-    `work env: ${h?.workEnvironment?.trim() ? h.workEnvironment.trim() : '(unspecified)'}`,
-  );
+  const workEnv = sanitizeSingleLine(h?.workEnvironment ?? '');
+  opLines.push(`work env: ${workEnv.length ? workEnv : '(unspecified)'}`);
 
-  const memory = formatMemoryBlock(ctx.acceptedInsights);
+  // Insight titles were written by the model but are stored, editable, and
+  // replayed into a later prompt, so they are untrusted on the way back in.
+  const memory = sanitizeUntrusted(formatMemoryBlock(ctx.acceptedInsights));
   const memorySection = memory.length ? memory : '(none yet)';
 
   // The "rest of bundle" sent as JSON — exclude habitsProfile (already
@@ -1514,18 +1666,24 @@ function buildUserContextMessage(
     const dh = h === 0 ? 12 : h > 12 ? h - 12 : h;
     return `${dh}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
+  // Titles go through sanitizeSingleLine so a title containing a newline, a
+  // `|`, or a quote cannot forge extra rows in these lists. A fabricated row
+  // is how injected text would hand the model an id that isn't the user's.
   const unlinkedBlocks = (ctx.scheduleBlocks ?? []).filter((b) => !b.goalId);
   const unlinkedSection = unlinkedBlocks.length
     ? unlinkedBlocks
         .map(
           (b) =>
-            `  - id=${b.id} | "${b.title}" | ${dayNames[b.dayOfWeek] ?? '?'} ${fmt12h(b.startTime)} to ${fmt12h(b.endTime)} | category=${b.category ?? 'none'}`,
+            `  - id=${b.id} | "${sanitizeSingleLine(b.title)}" | ${dayNames[b.dayOfWeek] ?? '?'} ${fmt12h(b.startTime)} to ${fmt12h(b.endTime)} | category=${sanitizeSingleLine(b.category ?? 'none', 40)}`,
         )
         .join('\n')
     : '  (none, all blocks are linked to goals)';
   const goalsListSection = (ctx.activeGoals ?? []).length
     ? (ctx.activeGoals ?? [])
-        .map((g: { id: string; title: string }) => `  - id=${g.id} | "${g.title}"`)
+        .map(
+          (g: { id: string; title: string }) =>
+            `  - id=${g.id} | "${sanitizeSingleLine(g.title)}"`,
+        )
         .join('\n')
     : '  (no active goals)';
 
@@ -1537,8 +1695,10 @@ function buildUserContextMessage(
     ? (ctx.recentTimeEntries ?? [])
         .slice(0, 30)
         .map((e) => {
-          const goal = e.goalTitle ? `goal="${e.goalTitle}"` : 'goal=(none)';
-          const task = e.taskName ? `"${e.taskName}"` : '(no task title)';
+          const goalTitle = sanitizeSingleLine(e.goalTitle);
+          const taskName = sanitizeSingleLine(e.taskName);
+          const goal = goalTitle ? `goal="${goalTitle}"` : 'goal=(none)';
+          const task = taskName ? `"${taskName}"` : '(no task title)';
           return `  - id=${e.id} | ${e.date} | ${e.duration}m | ${task} | ${goal}`;
         })
         .join('\n')
@@ -1549,26 +1709,32 @@ function buildUserContextMessage(
       ? "Write this week's narrative for me. Reference specific data points. Close with one Socratic question."
       : 'Reply to my next message using the context below.';
 
+  // Section HEADINGS stay outside the markers — they are the operator's
+  // instructions and the model must keep following them. Only the stored data
+  // under each heading is fenced. Mixing the two would mean telling the model
+  // to ignore our own "use these IDs" guidance.
+  const fence = (body: string) => wrapUntrusted(nonce, body);
+
   return [
     intro,
     '',
     '## Operator profile',
-    opLines.join('\n'),
+    fence(opLines.join('\n')),
     '',
     "## What you've already suggested (and the user accepted)",
-    memorySection,
+    fence(memorySection),
     '',
     '## UNLINKED schedule blocks (no goalId, user cannot log time against them)',
-    unlinkedSection,
+    fence(unlinkedSection),
     '',
     '## Active goals you can link blocks to',
-    goalsListSection,
+    fence(goalsListSection),
     '',
     '## Recent time entries (use these IDs for UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposals — never invent an id)',
-    recentEntriesSection,
+    fence(recentEntriesSection),
     '',
     "## This week's context (full JSON)",
-    JSON.stringify(rest),
+    fence(capText(JSON.stringify(sanitizeDeep(rest)), CONTEXT_JSON_CAP)),
   ].join('\n');
 }
 
