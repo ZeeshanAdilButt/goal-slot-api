@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
+// Load environment variables from .env file for CLI scripts
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+require('dotenv').config();
+
 type CreatePrismaClientOptions = {
   accelerateUrl?: string;
 };

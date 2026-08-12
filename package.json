@@ -19,9 +19,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "seed": "ts-node prisma/seed.ts",
-    "generate-data": "ts-node prisma/generate-data.ts",
-    "update-user-id": "ts-node prisma/update-user-id.ts"
+    "seed": "ts-node -r dotenv/config prisma/seed.ts",
+    "generate-data": "ts-node -r dotenv/config prisma/generate-data.ts",
+    "update-user-id": "ts-node -r dotenv/config prisma/update-user-id.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
