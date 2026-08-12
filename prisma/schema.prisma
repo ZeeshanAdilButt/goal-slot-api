@@ -71,6 +71,9 @@ model User {
   feedbackResponses        FeedbackResponse[]
   notifications            Notification[]
   releaseNotesSeen         ReleaseNoteSeen[]
+  instructionsAssigned     Instruction[]       @relation("InstructionsAssigned")
+  instructionsReceived     Instruction[]       @relation("InstructionsReceived")
+  pushSubscriptions        PushSubscription[]
   whiteboards              Whiteboard[]
   whiteboardShares         WhiteboardShare[]   @relation("WhiteboardShareOwner")
   whiteboardSharesReceived WhiteboardShare[]   @relation("WhiteboardShareRecipient")
@@ -341,6 +344,15 @@ model SharedAccess {
 
   isAccepted Boolean @default(false)
 
+  // Set the moment the sharedWith user opens this owner's report view.
+  // Any view counts, there is no minimum dwell time.
+  lastViewedAt DateTime?
+
+  // When a report-staleness reminder last fired for this share. Read
+  // alongside lastViewedAt so the reminder sweep nudges once per week of
+  // staleness rather than once per day.
+  lastViewReminderAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -351,6 +363,64 @@ model SharedAccess {
   @@index([ownerId])
   @@index([sharedWithId])
   @@index([inviteEmail])
+}
+
+// A directive a mentor assigns to a mentee, separate from the mentee's own
+// tasks. Assigning one does not modify the mentee's existing data, so it is
+// its own record rather than a flagged row in Task.
+model Instruction {
+  id String @id @default(uuid())
+
+  assignerId String
+  assigner   User   @relation("InstructionsAssigned", fields: [assignerId], references: [id], onDelete: Cascade)
+
+  assigneeId String
+  assignee   User   @relation("InstructionsReceived", fields: [assigneeId], references: [id], onDelete: Cascade)
+
+  title String
+  note  String?
+
+  status      String    @default("PENDING") // PENDING | DONE
+  completedAt DateTime?
+
+  // When a reminder last fired for this instruction, so the sweep nudges
+  // every 2 days while pending rather than daily.
+  lastReminderAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assigneeId, status])
+  @@index([assignerId])
+}
+
+// One row per device or browser a user can be reached on. A user may have
+// any number of WEB rows (distinct endpoint, null expoToken) alongside any
+// number of EXPO rows (distinct expoToken, null endpoint) — Postgres treats
+// NULL as distinct in a unique index, so the two kinds never collide with
+// each other.
+model PushSubscription {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind String // "WEB" | "EXPO"
+
+  // WEB
+  endpoint String?
+  p256dh   String?
+  auth     String?
+
+  // EXPO
+  expoToken String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, endpoint])
+  @@unique([userId, expoToken])
+  @@index([userId])
 }
 
 // Audit log for tracking changes
@@ -664,6 +734,8 @@ enum TaskStatus {
 
 enum NotificationType {
   FEEDBACK_REPLY
+  SHARED_REPORT_UNVIEWED
+  INSTRUCTION_ASSIGNED
 }
 
 enum TimeEntrySource {

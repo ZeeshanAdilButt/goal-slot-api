@@ -103,6 +103,12 @@ export class SharingController {
     return this.sharingService.getSharedUserGoals(req.user.sub, ownerId);
   }
 
+  @Post(':id/mark-viewed')
+  @ApiOperation({ summary: "Mark a mentee's shared report as viewed" })
+  async markViewed(@Request() req: any, @Param('id') id: string) {
+    return this.sharingService.markViewed(id, req.user.sub);
+  }
+
   @Post('public-link')
   @ApiOperation({ summary: 'Create a public shareable link (no email required)' })
   async createPublicLink(@Request() req: any, @Body() dto: CreatePublicLinkDto) {

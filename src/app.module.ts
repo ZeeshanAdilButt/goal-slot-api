@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule as NestScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -35,6 +36,9 @@ import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
 import { IdempotencyModule } from './shared/idempotency/idempotency.module';
 import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
+import { PushSubscriptionsModule } from './modules/push-subscriptions/push-subscriptions.module';
+import { InstructionsModule } from './modules/instructions/instructions.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
 
 @Module({
   imports: [
@@ -44,6 +48,7 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
       validationSchema: envValidationSchema,
     }),
     PostHogModule, // Add PostHog module early so it's available globally
+    NestScheduleModule.forRoot(),
     IdempotencyModule,
     EncryptionModule,
     LlmModule,
@@ -77,6 +82,9 @@ import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
     ReleaseNotesModule,
     WhiteboardsModule,
     TemplatesModule,
+    InstructionsModule,
+    PushSubscriptionsModule,
+    RemindersModule,
   ],
 })
 export class AppModule {}

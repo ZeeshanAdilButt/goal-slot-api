@@ -15,6 +15,21 @@ export class EmailService {
     if (!local || !domain) return "***";
     return `${local.slice(0, 2)}***@${domain}`;
   }
+
+  // Escapes the characters that matter for interpolating untrusted text
+  // into an HTML document: &, <, >, ", '. Anything sourced from another
+  // user (note/whiteboard titles, reminder titles/bodies pulled from
+  // instruction text, etc) must go through this before landing in
+  // bodyHtml — this file sends real GoalSlot-branded email, so unescaped
+  // input becomes a live phishing vector delivered by a trusted sender.
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
   private resend: Resend;
   private onboardingEmail: string;
   private notificationEmail: string;
@@ -238,7 +253,7 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/notes?shared=${noteId}`;
-    const safeTitle = (noteTitle || "Untitled").replace(/</g, "&lt;");
+    const safeTitle = this.escapeHtml(noteTitle || "Untitled");
 
     const html = this.renderLayout({
       preheader: `${inviterName} shared a note with you on GoalSlot.`,
@@ -307,7 +322,7 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/whiteboards?shared=${whiteboardId}`;
-    const safeTitle = (whiteboardTitle || "Untitled").replace(/</g, "&lt;");
+    const safeTitle = this.escapeHtml(whiteboardTitle || "Untitled");
 
     const html = this.renderLayout({
       preheader: `${inviterName} shared a whiteboard with you on GoalSlot.`,
@@ -630,5 +645,58 @@ GoalSlot`;
     this.logger.log(
       `Share accepted notification sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
     );
+  }
+
+  // Generic transactional email for the reminder dispatch mechanism
+  // (report-staleness nudges, instruction reminders). Unlike the
+  // templated methods above, callers supply the title/body directly
+  // since the source data varies per reminder type.
+  async sendReminderEmail(params: { toEmail: string; title: string; body: string }) {
+    const { toEmail, title, body } = params;
+    // title/body originate from user-controlled data (e.g. an
+    // AssignInstructionDto.title set by another user's mentor/mentee) and
+    // are rendered live into HTML below — must be escaped the same as the
+    // note/whiteboard share titles above.
+    const safeTitle = this.escapeHtml(title);
+    const safeBody = this.escapeHtml(body);
+
+    const html = this.renderLayout({
+      preheader: safeBody,
+      bodyHtml: `
+        <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">${safeTitle}</h1>
+        <p style="margin:0 0 12px;color:#3f3f46;">${safeBody}</p>
+        ${this.renderButton(`${this.appUrl}/dashboard`, "Open GoalSlot", "left")}
+      `,
+    });
+
+    const text = `${title}
+
+${body}
+
+Open GoalSlot: ${this.appUrl}/dashboard
+
+GoalSlot`;
+
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: title,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      this.logger.error(
+        `Resend API error for reminder email to ${this.maskEmail(toEmail)}: ${result.error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `Failed to send reminder email: ${result.error.message}`,
+      );
+    }
+
+    this.logger.log(
+      `Reminder email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
+    return { success: true, id: result.data?.id };
   }
 }
