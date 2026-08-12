@@ -14,7 +14,13 @@ export const envValidationSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION: Joi.string().default('7d'),
 
-  // Supabase
+  // Supabase — still backs SSO login (SupabaseService.verifySSOToken /
+  // AuthService.ssoLogin), so this stays required rather than optional:
+  // booting without it would silently take SSO down with no signal.
+  // Production doesn't have a real Supabase project wired up yet and runs
+  // on a localhost placeholder here (see .env.example); GET /api/health/detailed
+  // detects that placeholder and skips the live connectivity check instead
+  // of reporting the whole service down.
   SUPABASE_URL: Joi.string().uri().required(),
   SUPABASE_SERVICE_ROLE_KEY: Joi.string().required(),
 
