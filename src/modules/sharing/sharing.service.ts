@@ -447,8 +447,14 @@ export class SharingService {
   // ============ PUBLIC ACCESS METHODS (No auth required) ============
 
   private async verifyPublicToken(token: string) {
+    // inviteToken is also set on personal email invitations (see
+    // inviteUser above), not just genuine public share links. Without the
+    // isPublicLink filter, a personal invite token would resolve through
+    // this unauthenticated path before the invite was ever accepted -
+    // exposing the owner's goals/time entries to anyone holding the
+    // token (forwarded mail, mail-scanning proxies, browser history).
     const share = await this.prisma.sharedAccess.findUnique({
-      where: { inviteToken: token },
+      where: { inviteToken: token, isPublicLink: true },
       include: {
         owner: { select: { id: true, email: true, name: true, avatar: true } },
       },

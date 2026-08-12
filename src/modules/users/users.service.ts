@@ -95,7 +95,11 @@ export class UsersService {
 
   // Admin: Create internal user
   async createInternalUser(adminId: string, dto: CreateInternalUserDto) {
-    await this.verifyAdmin(adminId);
+    const requestedRole = dto.role || UserRole.USER;
+    // Creating a SUPER_ADMIN account is itself a SUPER_ADMIN-only action.
+    // A plain ADMIN caller is hard-rejected with a 403 rather than being
+    // allowed to mint a peer/superior account for themselves.
+    await this.verifyAdmin(adminId, requestedRole === UserRole.SUPER_ADMIN);
 
     const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existingUser) {
@@ -109,7 +113,7 @@ export class UsersService {
         email: dto.email,
         password: hashedPassword,
         name: dto.name,
-        role: dto.role || UserRole.USER,
+        role: requestedRole,
         userType: UserType.INTERNAL,
         plan: PlanType.PRO,
         unlimitedAccess: true,
@@ -557,7 +561,11 @@ export class UsersService {
   }
 
   async bulkInvite(adminId: string, dto: BulkInviteDto): Promise<BulkInviteResponse> {
-    await this.verifyAdmin(adminId);
+    const targetRole = dto.role || UserRole.USER;
+    // Same rule as createInternalUser: only a genuine SUPER_ADMIN can hand
+    // out SUPER_ADMIN through this path. A plain ADMIN batch-inviting a
+    // cohort at SUPER_ADMIN gets a 403 for the whole request.
+    await this.verifyAdmin(adminId, targetRole === UserRole.SUPER_ADMIN);
 
     const inviter = await this.prisma.user.findUnique({
       where: { id: adminId },
@@ -568,7 +576,6 @@ export class UsersService {
     }
 
     const { valid, invalid } = this.parseEmails(dto.text);
-    const targetRole = dto.role || UserRole.USER;
 
     const rows: BulkInviteRow[] = invalid.map((email) => ({
       email,
