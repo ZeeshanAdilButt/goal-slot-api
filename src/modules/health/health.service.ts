@@ -110,8 +110,12 @@ export class HealthService {
   /**
    * Check database connectivity with 2-second timeout
    * Measures latency in milliseconds
+   *
+   * Public so the readiness endpoint can call it directly. Readiness must not
+   * go through getDetailedHealth(), whose 10-second cache would let a probe
+   * pass on a result gathered before the process under test even started.
    */
-  private async checkDatabase(): Promise<{
+  async checkDatabase(): Promise<{
     ok: boolean;
     latencyMs: number;
   }> {

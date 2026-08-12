@@ -14,6 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Fix up PATH, which a non-interactive SSH session does not inherit,
+      # record the commit currently deployed so the script can put it back,
+      # fast forward to origin/main, and hand over to the script that the
+      # reset just updated.
+      #
+      # git fetch and git reset are checked individually: without the check a
+      # failed reset used to run the deploy script against unchanged code and
+      # report success. `exit $LASTEXITCODE` is what carries a failed deploy
+      # back out to the workflow.
       - name: SSH and run deploy script
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -23,4 +32,4 @@ jobs:
           port: 22
           command_timeout: 12m
           script: |
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); Set-Location C:\app\goal-slot-api; git fetch --all 2>&1 | Out-Null; git reset --hard origin/main 2>&1 | Out-Null; & C:\app\goal-slot-api\scripts\deploy.ps1; exit $LASTEXITCODE"
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); Set-Location C:\app\goal-slot-api; $prev = (git rev-parse HEAD); if ($LASTEXITCODE -ne 0) { Write-Host 'FAILED: git rev-parse, nothing was changed'; exit 90 }; git fetch --all 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Host 'FAILED: git fetch, nothing was changed'; exit 91 }; git reset --hard origin/main 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Host 'FAILED: git reset, nothing was changed'; exit 92 }; & C:\app\goal-slot-api\scripts\deploy.ps1 -PreviousCommit $prev; exit $LASTEXITCODE"
