@@ -70,4 +70,19 @@ export const envValidationSchema = Joi.object({
   // per-user cap defaults to 20.
   GOOGLE_AI_SHARED_API_KEY: Joi.string().optional().allow(''),
   SHARED_COACH_DAILY_LIMIT: Joi.number().integer().min(1).max(1000).default(20),
+
+  // jiffy-messaging integration (optional).
+  //
+  // Listed here for discoverability, but deliberately validated as loose
+  // optional strings rather than .uri()/.number(): a Joi failure in this
+  // schema aborts ConfigModule and the whole API never boots. A messaging
+  // variable is never worth that. Shape and defaults are handled in
+  // src/modules/messaging/messaging.config.ts, which falls back instead of
+  // throwing, and the endpoints answer 503 while URL or secret are unset.
+  JIFFY_MESSAGING_URL: Joi.string().optional().allow(''),
+  JIFFY_MESSAGING_JWT_SECRET: Joi.string().optional().allow(''),
+  JIFFY_MESSAGING_JWT_ISSUER: Joi.string().optional().allow(''),
+  JIFFY_MESSAGING_JWT_AUDIENCE: Joi.string().optional().allow(''),
+  JIFFY_MESSAGING_TOKEN_TTL: Joi.string().optional().allow(''),
+  JIFFY_MESSAGING_TIMEOUT_MS: Joi.string().optional().allow(''),
 });
