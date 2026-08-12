@@ -647,9 +647,7 @@ describe('CoachAiService', () => {
 
     const userIdx = callOrder.indexOf(`msg.create:${CoachRole.USER}`);
     const factoryIdx = callOrder.indexOf('factory.create');
-    const assistantIdx = callOrder.indexOf(
-      `msg.create:${CoachRole.ASSISTANT}`,
-    );
+    const assistantIdx = callOrder.indexOf(`msg.create:${CoachRole.ASSISTANT}`);
     expect(userIdx).toBeGreaterThanOrEqual(0);
     expect(factoryIdx).toBeGreaterThan(userIdx);
     expect(assistantIdx).toBeGreaterThan(factoryIdx);
@@ -1298,13 +1296,13 @@ describe('normalizedSimilarity', () => {
   });
   it('returns > 0.85 for near-duplicate titles', () => {
     expect(
-      normalizedSimilarity('60-min deep work block', '60-min Deep Work block'.toLowerCase()),
-    ).toBe(1);
-    expect(
       normalizedSimilarity(
         '60-min deep work block',
-        '60 min deep work block',
+        '60-min Deep Work block'.toLowerCase(),
       ),
+    ).toBe(1);
+    expect(
+      normalizedSimilarity('60-min deep work block', '60 min deep work block'),
     ).toBeGreaterThan(0.9);
   });
 });
@@ -1367,9 +1365,7 @@ describe('formatMemoryBlock', () => {
       mediaSlot: null,
       mediaTopic: null,
       status: 'ACCEPTED',
-      acceptedAt: new Date(
-        now.getTime() - weeksOld * 7 * 24 * 60 * 60 * 1000,
-      ),
+      acceptedAt: new Date(now.getTime() - weeksOld * 7 * 24 * 60 * 60 * 1000),
       startedDoingAt: null,
       completedAt: null,
       dismissedAt: null,

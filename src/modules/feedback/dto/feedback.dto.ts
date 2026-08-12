@@ -1,8 +1,19 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, Min, Max, IsBoolean, Length } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  Min,
+  Max,
+  IsBoolean,
+  Length,
+} from 'class-validator';
 
 export class CreateFeedbackDto {
-  @ApiPropertyOptional({ example: 0, description: 'Emoji: 0=love, 1=okay, 2=not great, 3=hate' })
+  @ApiPropertyOptional({
+    example: 0,
+    description: 'Emoji: 0=love, 1=okay, 2=not great, 3=hate',
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -16,7 +27,10 @@ export class CreateFeedbackDto {
 }
 
 export class ArchiveFeedbackDto {
-  @ApiProperty({ example: true, description: 'Archive or unarchive the feedback' })
+  @ApiProperty({
+    example: true,
+    description: 'Archive or unarchive the feedback',
+  })
   @IsBoolean()
   isArchived: boolean;
 }

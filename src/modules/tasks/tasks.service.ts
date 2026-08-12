@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
@@ -48,15 +52,16 @@ export class TasksService {
     },
   ) {
     const where: Prisma.TaskWhereInput = { userId };
-    
+
     // Handle multiple statuses or single status
     if (filters.statuses && filters.statuses.length > 0) {
       where.status = { in: filters.statuses };
     } else if (filters.status) {
       where.status = filters.status;
     }
-    
-    if (filters.scheduleBlockId) where.scheduleBlockId = filters.scheduleBlockId;
+
+    if (filters.scheduleBlockId)
+      where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
     if (filters.dayOfWeek !== undefined) {
       where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
@@ -64,7 +69,6 @@ export class TasksService {
 
     const tasks = await this.prisma.task.findMany({
       where,
-      // @ts-ignore
       orderBy: [{ status: 'asc' }, { order: 'asc' }, { createdAt: 'desc' }],
       include: {
         goal: { select: { id: true, title: true, color: true } },
@@ -75,7 +79,10 @@ export class TasksService {
 
     return tasks.map((task) => ({
       ...task,
-      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      trackedMinutes: task.timeEntries.reduce(
+        (sum, entry) => sum + entry.duration,
+        0,
+      ),
       timeEntries: undefined,
     }));
   }
@@ -96,13 +103,18 @@ export class TasksService {
 
     return {
       ...task,
-      trackedMinutes: task.timeEntries.reduce((sum, entry) => sum + entry.duration, 0),
+      trackedMinutes: task.timeEntries.reduce(
+        (sum, entry) => sum + entry.duration,
+        0,
+      ),
       timeEntries: undefined,
     };
   }
 
   async update(userId: string, taskId: string, dto: UpdateTaskDto) {
-    const task = await this.prisma.task.findFirst({ where: { id: taskId, userId } });
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, userId },
+    });
     if (!task) {
       throw new NotFoundException('Task not found');
     }
@@ -127,7 +139,6 @@ export class TasksService {
   async reorder(userId: string, ids: string[]) {
     return this.prisma.$transaction(
       ids.map((id, index) =>
-        // @ts-ignore
         this.prisma.task.updateMany({
           where: { id, userId },
           data: { order: index },
@@ -158,8 +169,14 @@ export class TasksService {
       select: { duration: true },
     });
 
-    const alreadyTrackedMinutes = trackedEntries.reduce((sum, entry) => sum + entry.duration, 0);
-    const remainingMinutes = Math.max(0, dto.actualMinutes - alreadyTrackedMinutes);
+    const alreadyTrackedMinutes = trackedEntries.reduce(
+      (sum, entry) => sum + entry.duration,
+      0,
+    );
+    const remainingMinutes = Math.max(
+      0,
+      dto.actualMinutes - alreadyTrackedMinutes,
+    );
 
     // Plan limit: tasks per day are enforced via time entries count
     const dayStart = new Date(logDate);
@@ -214,8 +231,8 @@ export class TasksService {
       await this.goalsService.updateProgress(task.goalId, userId);
     }
 
-    return { 
-      task: updatedTask, 
+    return {
+      task: updatedTask,
       timeEntry,
       alreadyTrackedMinutes,
       remainingMinutes,
@@ -276,9 +293,10 @@ export class TasksService {
     return { message: 'Task restored successfully' };
   }
 
-  
   async delete(userId: string, taskId: string) {
-    const task = await this.prisma.task.findFirst({ where: { id: taskId, userId } });
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, userId },
+    });
     if (!task) {
       throw new NotFoundException('Task not found');
     }
@@ -290,17 +308,27 @@ export class TasksService {
     return { message: 'Task deleted successfully' };
   }
 
-  private async validateRelations(userId: string, goalId?: string, scheduleBlockId?: string) {
+  private async validateRelations(
+    userId: string,
+    goalId?: string,
+    scheduleBlockId?: string,
+  ) {
     if (goalId) {
-      const goal = await this.prisma.goal.findFirst({ where: { id: goalId, userId } });
-      if (!goal) throw new ForbiddenException('Goal not found or access denied');
+      const goal = await this.prisma.goal.findFirst({
+        where: { id: goalId, userId },
+      });
+      if (!goal)
+        throw new ForbiddenException('Goal not found or access denied');
     }
 
     if (scheduleBlockId) {
-      const block = await this.prisma.scheduleBlock.findFirst({ where: { id: scheduleBlockId, userId } });
-      if (!block) throw new ForbiddenException('Schedule block not found or access denied');
+      const block = await this.prisma.scheduleBlock.findFirst({
+        where: { id: scheduleBlockId, userId },
+      });
+      if (!block)
+        throw new ForbiddenException(
+          'Schedule block not found or access denied',
+        );
     }
   }
 }
-
-

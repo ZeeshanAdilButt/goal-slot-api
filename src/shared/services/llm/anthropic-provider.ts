@@ -50,20 +50,25 @@ export class AnthropicProvider implements CoachLlmProvider {
     for await (const event of stream) {
       if (event.type === 'message_start') {
         // `message_start` reports `usage.input_tokens` immediately.
-        const u = (event as any).message?.usage;
+        const u = event.message?.usage;
         if (u) {
           promptTokens = u.input_tokens ?? 0;
           completionTokens = u.output_tokens ?? 0;
         }
       } else if (event.type === 'content_block_delta') {
-        const delta = (event as any).delta;
+        const delta = event.delta;
         if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
           if (delta.text.length > 0) {
             yield { delta: delta.text, done: false };
           }
         }
       } else if (event.type === 'message_delta') {
-        const u = (event as any).usage;
+        // The SDK's MessageDeltaUsage type only declares `output_tokens`, but
+        // the API has been observed to also send a cumulative `input_tokens`
+        // here — kept as an optional extension rather than widening to `any`.
+        const u = event.usage as
+          | (Anthropic.MessageDeltaUsage & { input_tokens?: number })
+          | undefined;
         if (u) {
           // message_delta usage carries the cumulative output_tokens.
           if (typeof u.output_tokens === 'number') {
@@ -109,14 +114,14 @@ export class AnthropicProvider implements CoachLlmProvider {
         {
           name: args.schemaName,
           description: 'Return structured insights.',
-          input_schema: args.schema as any,
+          input_schema: args.schema as Anthropic.Tool.InputSchema,
         },
       ],
-      tool_choice: { type: 'tool', name: args.schemaName } as any,
+      tool_choice: { type: 'tool', name: args.schemaName },
     });
 
-    const toolUse = (res.content as any[]).find(
-      (b: any) => b.type === 'tool_use',
+    const toolUse = res.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
     );
     if (!toolUse) {
       throw new Error('Anthropic returned no tool_use block');

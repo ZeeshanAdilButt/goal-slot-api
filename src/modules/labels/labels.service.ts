@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateLabelDto, UpdateLabelDto } from './dto/labels.dto';
 
@@ -32,7 +36,9 @@ export class LabelsService {
     });
 
     if (existing) {
-      throw new ConflictException(`Label with name "${dto.name}" already exists`);
+      throw new ConflictException(
+        `Label with name "${dto.name}" already exists`,
+      );
     }
 
     // Get max order for this user
@@ -107,7 +113,9 @@ export class LabelsService {
         });
 
         if (existing) {
-          throw new ConflictException(`Label with name "${dto.name}" already exists`);
+          throw new ConflictException(
+            `Label with name "${dto.name}" already exists`,
+          );
         }
       }
     }
@@ -167,16 +175,31 @@ export class LabelsService {
    */
   async seedDefaultLabels(userId: string) {
     const currentYear = new Date().getFullYear();
-    
+
     const defaultLabels = [
-      { name: 'Q1', value: 'Q1', color: '#3B82F6', order: 1 },      // blue
-      { name: 'Q2', value: 'Q2', color: '#22C55E', order: 2 },      // green
-      { name: 'Q3', value: 'Q3', color: '#F97316', order: 3 },      // orange
-      { name: 'Q4', value: 'Q4', color: '#EC4899', order: 4 },      // pink
-      { name: `${currentYear}`, value: `${currentYear}`, color: '#8B5CF6', order: 5 }, // purple
-      { name: 'High Priority', value: 'HIGH_PRIORITY', color: '#EF4444', order: 6 },  // red
-      { name: 'Personal', value: 'PERSONAL', color: '#06B6D4', order: 7 },   // cyan
-      { name: 'Professional', value: 'PROFESSIONAL', color: '#6366F1', order: 8 }, // indigo
+      { name: 'Q1', value: 'Q1', color: '#3B82F6', order: 1 }, // blue
+      { name: 'Q2', value: 'Q2', color: '#22C55E', order: 2 }, // green
+      { name: 'Q3', value: 'Q3', color: '#F97316', order: 3 }, // orange
+      { name: 'Q4', value: 'Q4', color: '#EC4899', order: 4 }, // pink
+      {
+        name: `${currentYear}`,
+        value: `${currentYear}`,
+        color: '#8B5CF6',
+        order: 5,
+      }, // purple
+      {
+        name: 'High Priority',
+        value: 'HIGH_PRIORITY',
+        color: '#EF4444',
+        order: 6,
+      }, // red
+      { name: 'Personal', value: 'PERSONAL', color: '#06B6D4', order: 7 }, // cyan
+      {
+        name: 'Professional',
+        value: 'PROFESSIONAL',
+        color: '#6366F1',
+        order: 8,
+      }, // indigo
     ];
 
     // Check if user already has labels

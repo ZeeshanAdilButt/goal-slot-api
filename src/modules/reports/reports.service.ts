@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GoalStatus } from '@prisma/client';
-import { 
-  ReportFiltersDto, 
-  ReportViewType, 
-  ReportGroupBy, 
-  ReportSortBy, 
-  ExportReportDto, 
+import {
+  ReportFiltersDto,
+  ReportViewType,
+  ReportGroupBy,
+  ReportSortBy,
+  ExportReportDto,
   ExportFormat,
   DetailedTimeEntry,
   DailyBreakdown,
@@ -23,6 +23,44 @@ import {
   SchedulePattern,
   ScheduleDayData,
 } from './dto';
+
+interface TopActivity {
+  taskName: string;
+  duration: number;
+  goalTitle: string;
+  goalColor: string;
+}
+
+// generateExport() never produces a ScheduleReportResponse (there's no
+// ReportViewType.SCHEDULE case in its switch — it falls through to the
+// detailed report), so the export/CSV pipeline only ever handles these four.
+type AnyExportReportResponse =
+  | DetailedReportResponse
+  | SummaryReportResponse
+  | DayByTaskReportResponse
+  | DayTotalReportResponse;
+
+// Shape aggregateByGroup() actually reads off a TimeEntry — satisfied by
+// every `include: { goal: {...}, task: {...} }` query in this file.
+interface AggregatableTimeEntry {
+  goalId: string | null;
+  goal?: { title: string; color: string; category: string | null } | null;
+  taskId: string | null;
+  taskName: string;
+  task?: { title: string; category: string | null } | null;
+  date: Date;
+  duration: number;
+}
+
+interface ExportMeta {
+  title: string;
+  generatedBy: string;
+  generatedAt: string;
+  clientName?: string;
+  projectName?: string;
+  notes?: string;
+  format: ExportFormat;
+}
 
 @Injectable()
 export class ReportsService {
@@ -42,18 +80,23 @@ export class ReportsService {
     weekEnd.setDate(weekStart.getDate() + 6);
     weekEnd.setHours(23, 59, 59, 999);
 
-    const [todayTotal, weeklyTotal, activeGoals, tasksLogged] = await Promise.all([
-      this.prisma.timeEntry.aggregate({
-        where: { userId, date: { gte: today, lt: tomorrow } },
-        _sum: { duration: true },
-      }),
-      this.prisma.timeEntry.aggregate({
-        where: { userId, date: { gte: weekStart, lte: weekEnd } },
-        _sum: { duration: true },
-      }),
-      this.prisma.goal.count({ where: { userId, status: GoalStatus.ACTIVE } }),
-      this.prisma.timeEntry.count({ where: { userId, date: { gte: today, lt: tomorrow } } }),
-    ]);
+    const [todayTotal, weeklyTotal, activeGoals, tasksLogged] =
+      await Promise.all([
+        this.prisma.timeEntry.aggregate({
+          where: { userId, date: { gte: today, lt: tomorrow } },
+          _sum: { duration: true },
+        }),
+        this.prisma.timeEntry.aggregate({
+          where: { userId, date: { gte: weekStart, lte: weekEnd } },
+          _sum: { duration: true },
+        }),
+        this.prisma.goal.count({
+          where: { userId, status: GoalStatus.ACTIVE },
+        }),
+        this.prisma.timeEntry.count({
+          where: { userId, date: { gte: today, lt: tomorrow } },
+        }),
+      ]);
 
     return {
       todayMinutes: todayTotal._sum.duration || 0,
@@ -66,7 +109,9 @@ export class ReportsService {
   }
 
   async getWeeklyReport(userId: string, weekStart?: string) {
-    const start = weekStart ? new Date(weekStart) : this.getWeekStart(new Date());
+    const start = weekStart
+      ? new Date(weekStart)
+      : this.getWeekStart(new Date());
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     end.setHours(23, 59, 59, 999);
@@ -82,8 +127,19 @@ export class ReportsService {
     });
 
     // Daily activity
-    const dailyActivity: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
-    const goalBreakdown: Record<string, { title: string; color: string; minutes: number }> = {};
+    const dailyActivity: Record<number, number> = {
+      0: 0,
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      5: 0,
+      6: 0,
+    };
+    const goalBreakdown: Record<
+      string,
+      { title: string; color: string; minutes: number }
+    > = {};
     let totalMinutes = 0;
 
     entries.forEach((entry) => {
@@ -101,7 +157,11 @@ export class ReportsService {
         goalBreakdown[entry.goal.id].minutes += entry.duration;
       } else {
         if (!goalBreakdown['other']) {
-          goalBreakdown['other'] = { title: 'Other', color: '#94A3B8', minutes: 0 };
+          goalBreakdown['other'] = {
+            title: 'Other',
+            color: '#94A3B8',
+            minutes: 0,
+          };
         }
         goalBreakdown['other'].minutes += entry.duration;
       }
@@ -109,7 +169,7 @@ export class ReportsService {
 
     // Top activities
     const topActivities = entries
-      .reduce((acc: any[], entry) => {
+      .reduce<TopActivity[]>((acc, entry) => {
         const existing = acc.find((a) => a.taskName === entry.taskName);
         if (existing) {
           existing.duration += entry.duration;
@@ -126,15 +186,20 @@ export class ReportsService {
       .sort((a, b) => b.duration - a.duration)
       .slice(0, 5);
 
-    const daysWithEntries = Object.values(dailyActivity).filter((d) => d > 0).length;
+    const daysWithEntries = Object.values(dailyActivity).filter(
+      (d) => d > 0,
+    ).length;
 
     return {
       weekStart: start.toISOString(),
       weekEnd: end.toISOString(),
       totalMinutes,
       totalFormatted: this.formatDuration(totalMinutes),
-      dailyAverage: daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
-      dailyAverageFormatted: this.formatDuration(daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0),
+      dailyAverage:
+        daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
+      dailyAverageFormatted: this.formatDuration(
+        daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
+      ),
       tasksLogged: entries.length,
       dailyActivity: Object.entries(dailyActivity).map(([day, minutes]) => ({
         day: Number(day),
@@ -145,7 +210,10 @@ export class ReportsService {
       goalBreakdown: Object.entries(goalBreakdown).map(([id, data]) => ({
         goalId: id,
         ...data,
-        percentage: totalMinutes > 0 ? Math.round((data.minutes / totalMinutes) * 100) : 0,
+        percentage:
+          totalMinutes > 0
+            ? Math.round((data.minutes / totalMinutes) * 100)
+            : 0,
         formatted: this.formatDuration(data.minutes),
       })),
       topActivities: topActivities.map((a, i) => ({
@@ -173,16 +241,16 @@ export class ReportsService {
     });
 
     const totalMinutes = entries.reduce((sum, e) => sum + e.duration, 0);
-    const daysData = [0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
+    const daysData = [0, 1, 2, 3, 4, 5, 6].map((dayIdx) => {
       const dayDate = new Date(start);
       dayDate.setDate(start.getDate() + dayIdx);
-      const dayEntries = entries.filter(e => {
+      const dayEntries = entries.filter((e) => {
         const entryDate = new Date(e.date);
         return entryDate.toDateString() === dayDate.toDateString();
       });
       const totalMins = dayEntries.reduce((s, e) => s + e.duration, 0);
       const categories: Record<string, number> = {};
-      dayEntries.forEach(e => {
+      dayEntries.forEach((e) => {
         const cat = e.goal?.category || 'OTHER';
         categories[cat] = (categories[cat] || 0) + e.duration;
       });
@@ -195,27 +263,38 @@ export class ReportsService {
     });
 
     const byCategory: Record<string, number> = {};
-    entries.forEach(e => {
+    entries.forEach((e) => {
       const cat = e.goal?.category || 'OTHER';
       byCategory[cat] = (byCategory[cat] || 0) + e.duration;
     });
 
-    const byGoal: Array<{ goalId: string; goalTitle: string; minutes: number }> = [];
-    const goalMap: Record<string, { goalId: string; goalTitle: string; minutes: number }> = {};
-    entries.forEach(e => {
+    const byGoal: Array<{
+      goalId: string;
+      goalTitle: string;
+      minutes: number;
+    }> = [];
+    const goalMap: Record<
+      string,
+      { goalId: string; goalTitle: string; minutes: number }
+    > = {};
+    entries.forEach((e) => {
       if (e.goal) {
         if (!goalMap[e.goal.id]) {
-          goalMap[e.goal.id] = { goalId: e.goal.id, goalTitle: e.goal.title, minutes: 0 };
+          goalMap[e.goal.id] = {
+            goalId: e.goal.id,
+            goalTitle: e.goal.title,
+            minutes: 0,
+          };
         }
         goalMap[e.goal.id].minutes += e.duration;
       }
     });
-    Object.values(goalMap).forEach(g => byGoal.push(g));
+    Object.values(goalMap).forEach((g) => byGoal.push(g));
 
-    const daysWithEntries = daysData.filter(d => d.entriesCount > 0).length;
+    const daysWithEntries = daysData.filter((d) => d.entriesCount > 0).length;
     let mostProductiveDay = '';
     let maxMinutes = 0;
-    daysData.forEach(d => {
+    daysData.forEach((d) => {
       if (d.totalMinutes > maxMinutes) {
         maxMinutes = d.totalMinutes;
         mostProductiveDay = d.date;
@@ -224,7 +303,8 @@ export class ReportsService {
 
     return {
       totalMinutes,
-      avgMinutesPerDay: daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
+      avgMinutesPerDay:
+        daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
       totalEntries: entries.length,
       mostProductiveDay,
       byCategory,
@@ -240,9 +320,15 @@ export class ReportsService {
     });
 
     return goals.map((goal) => {
-      const progress = goal.targetHours > 0 ? (goal.loggedHours / goal.targetHours) * 100 : 0;
+      const progress =
+        goal.targetHours > 0 ? (goal.loggedHours / goal.targetHours) * 100 : 0;
       const daysLeft = goal.deadline
-        ? Math.max(0, Math.ceil((goal.deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+        ? Math.max(
+            0,
+            Math.ceil(
+              (goal.deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+            ),
+          )
         : null;
 
       return {
@@ -254,7 +340,12 @@ export class ReportsService {
         progress: Math.min(100, Math.round(progress)),
         deadline: goal.deadline?.toISOString(),
         daysLeft,
-        status: daysLeft !== null && daysLeft < 0 ? 'overdue' : progress >= 100 ? 'completed' : 'in-progress',
+        status:
+          daysLeft !== null && daysLeft < 0
+            ? 'overdue'
+            : progress >= 100
+              ? 'completed'
+              : 'in-progress',
       };
     });
   }
@@ -271,7 +362,8 @@ export class ReportsService {
     });
 
     const totalMinutes = entries.reduce((sum, e) => sum + e.duration, 0);
-    const daysWithEntries = new Set(entries.map((e) => e.date.toDateString())).size;
+    const daysWithEntries = new Set(entries.map((e) => e.date.toDateString()))
+      .size;
 
     return {
       year,
@@ -280,7 +372,8 @@ export class ReportsService {
       totalFormatted: this.formatDuration(totalMinutes),
       totalHours: (totalMinutes / 60).toFixed(1),
       daysActive: daysWithEntries,
-      dailyAverage: daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
+      dailyAverage:
+        daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
       tasksLogged: entries.length,
     };
   }
@@ -290,43 +383,89 @@ export class ReportsService {
    * Perfect for freelancers/contractors sending invoices, mentees reporting to mentors,
    * and students submitting detailed progress reports
    */
-  async getDetailedReport(userId: string, filters: ReportFiltersDto): Promise<DetailedReportResponse> {
+  async getDetailedReport(
+    userId: string,
+    filters: ReportFiltersDto,
+  ): Promise<DetailedReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(filters.endDate);
     end.setHours(23, 59, 59, 999);
 
-    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
-    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+    const goalIdArray = filters.goalIds
+      ? filters.goalIds.split(',').map((id) => id.trim())
+      : undefined;
+    const taskIdArray = filters.taskIds
+      ? filters.taskIds.split(',').map((id) => id.trim())
+      : undefined;
 
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId,
         date: { gte: start, lte: end },
-        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
-        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(goalIdArray && goalIdArray.length > 0
+          ? { goalId: { in: goalIdArray } }
+          : {}),
+        ...(taskIdArray && taskIdArray.length > 0
+          ? { taskId: { in: taskIdArray } }
+          : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
-        goal: { select: { id: true, title: true, color: true, category: true } },
-        task: { select: { id: true, title: true, category: true, notes: true } },
-        ...(filters.showScheduleContext ? {
-          scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true, color: true } },
-        } : {}),
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
+        task: {
+          select: { id: true, title: true, category: true, notes: true },
+        },
+        ...(filters.showScheduleContext
+          ? {
+              scheduleBlock: {
+                select: {
+                  id: true,
+                  title: true,
+                  startTime: true,
+                  endTime: true,
+                  color: true,
+                },
+              },
+            }
+          : {}),
       },
       orderBy: this.getSortOrder(filters.sortBy),
     });
 
     // Build daily breakdown (like a spreadsheet)
     const dailyMap = new Map<string, DailyBreakdown>();
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    
+    const dayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
     let totalMinutes = 0;
+
+    // `scheduleBlock` is only present on `entry` when filters.showScheduleContext
+    // is set (see the conditional `include` above); the conditional spread
+    // means Prisma's inferred type for `entries` never statically includes it.
+    type EntryWithOptionalScheduleBlock = (typeof entries)[number] & {
+      scheduleBlock?: {
+        id: string;
+        title: string;
+        startTime: string;
+        endTime: string;
+        color: string | null;
+      } | null;
+    };
 
     for (const entry of entries) {
       const dateKey = entry.date.toISOString().split('T')[0];
       const dayOfWeek = dayNames[entry.dayOfWeek];
-      
+
       if (!dailyMap.has(dateKey)) {
         dailyMap.set(dateKey, {
           date: dateKey,
@@ -337,9 +476,12 @@ export class ReportsService {
         });
       }
 
-      const endedAt = entry.startedAt && entry.duration 
-        ? new Date(new Date(entry.startedAt).getTime() + entry.duration * 60000).toISOString()
-        : null;
+      const endedAt =
+        entry.startedAt && entry.duration
+          ? new Date(
+              new Date(entry.startedAt).getTime() + entry.duration * 60000,
+            ).toISOString()
+          : null;
 
       const detailedEntry: DetailedTimeEntry = {
         id: entry.id,
@@ -351,17 +493,22 @@ export class ReportsService {
         duration: entry.duration,
         durationFormatted: this.formatDuration(entry.duration),
         notes: entry.notes,
-        taskNotes: filters.includeTaskNotes && entry.task ? entry.task.notes : null,
-        goal: entry.goal ? { id: entry.goal.id, title: entry.goal.title, color: entry.goal.color } : null,
-        task: entry.task ? { id: entry.task.id, title: entry.task.title } : null,
+        taskNotes:
+          filters.includeTaskNotes && entry.task ? entry.task.notes : null,
+        goal: entry.goal
+          ? {
+              id: entry.goal.id,
+              title: entry.goal.title,
+              color: entry.goal.color,
+            }
+          : null,
+        task: entry.task
+          ? { id: entry.task.id, title: entry.task.title }
+          : null,
         category: entry.goal?.category || entry.task?.category || null,
-        scheduleBlock: (entry as any).scheduleBlock ? {
-          id: (entry as any).scheduleBlock.id,
-          title: (entry as any).scheduleBlock.title,
-          startTime: (entry as any).scheduleBlock.startTime,
-          endTime: (entry as any).scheduleBlock.endTime,
-          color: (entry as any).scheduleBlock.color,
-        } : null,
+        scheduleBlock: (entry as EntryWithOptionalScheduleBlock).scheduleBlock
+          ? { ...(entry as EntryWithOptionalScheduleBlock).scheduleBlock! }
+          : null,
       };
 
       const day = dailyMap.get(dateKey)!;
@@ -371,11 +518,13 @@ export class ReportsService {
     }
 
     // Calculate daily totals
-    dailyMap.forEach(day => {
+    dailyMap.forEach((day) => {
       day.totalFormatted = this.formatDuration(day.totalMinutes);
     });
 
-    const dailyBreakdown = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const dailyBreakdown = Array.from(dailyMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
     const totalHours = totalMinutes / 60;
 
     // Calculate billable info if requested
@@ -405,7 +554,10 @@ export class ReportsService {
         totalHours: parseFloat(totalHours.toFixed(2)),
         totalEntries: entries.length,
         daysWithEntries: dailyBreakdown.length,
-        avgMinutesPerDay: dailyBreakdown.length > 0 ? Math.round(totalMinutes / dailyBreakdown.length) : 0,
+        avgMinutesPerDay:
+          dailyBreakdown.length > 0
+            ? Math.round(totalMinutes / dailyBreakdown.length)
+            : 0,
       },
       billable: billableInfo,
       dailyBreakdown,
@@ -417,34 +569,54 @@ export class ReportsService {
    * Shows total accumulated hours without specific timestamps
    * Perfect for quick overviews and high-level progress reports
    */
-  async getSummaryReport(userId: string, filters: ReportFiltersDto): Promise<SummaryReportResponse> {
+  async getSummaryReport(
+    userId: string,
+    filters: ReportFiltersDto,
+  ): Promise<SummaryReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(filters.endDate);
     end.setHours(23, 59, 59, 999);
 
-    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
-    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+    const goalIdArray = filters.goalIds
+      ? filters.goalIds.split(',').map((id) => id.trim())
+      : undefined;
+    const taskIdArray = filters.taskIds
+      ? filters.taskIds.split(',').map((id) => id.trim())
+      : undefined;
 
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId,
         date: { gte: start, lte: end },
-        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
-        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(goalIdArray && goalIdArray.length > 0
+          ? { goalId: { in: goalIdArray } }
+          : {}),
+        ...(taskIdArray && taskIdArray.length > 0
+          ? { taskId: { in: taskIdArray } }
+          : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
-        goal: { select: { id: true, title: true, color: true, category: true } },
-        task: { select: { id: true, title: true, category: true, notes: true } },
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
+        task: {
+          select: { id: true, title: true, category: true, notes: true },
+        },
       },
     });
 
     let totalMinutes = 0;
-    entries.forEach(e => totalMinutes += e.duration);
+    entries.forEach((e) => (totalMinutes += e.duration));
 
     const groupBy = filters.groupBy || ReportGroupBy.GOAL;
-    const summaryItems = this.aggregateByGroup(entries, groupBy, totalMinutes, filters.hourlyRate);
+    const summaryItems = this.aggregateByGroup(
+      entries,
+      groupBy,
+      totalMinutes,
+      filters.hourlyRate,
+    );
 
     // Calculate billable info if requested
     let billableInfo = null;
@@ -477,7 +649,9 @@ export class ReportsService {
         totalFormatted: this.formatDuration(totalMinutes),
         totalHours: parseFloat(totalHours.toFixed(2)),
         totalEntries: entries.length,
-        uniqueDays: new Set(entries.map(e => e.date.toISOString().split('T')[0])).size,
+        uniqueDays: new Set(
+          entries.map((e) => e.date.toISOString().split('T')[0]),
+        ).size,
       },
       billable: billableInfo,
       items: summaryItems,
@@ -489,21 +663,32 @@ export class ReportsService {
    * Get Day by Task report - shows aggregated hours per task per day
    * No individual timestamps, just totals per task per day
    */
-  async getDayByTaskReport(userId: string, filters: ReportFiltersDto): Promise<DayByTaskReportResponse> {
+  async getDayByTaskReport(
+    userId: string,
+    filters: ReportFiltersDto,
+  ): Promise<DayByTaskReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(filters.endDate);
     end.setHours(23, 59, 59, 999);
 
-    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
-    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+    const goalIdArray = filters.goalIds
+      ? filters.goalIds.split(',').map((id) => id.trim())
+      : undefined;
+    const taskIdArray = filters.taskIds
+      ? filters.taskIds.split(',').map((id) => id.trim())
+      : undefined;
 
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId,
         date: { gte: start, lte: end },
-        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
-        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(goalIdArray && goalIdArray.length > 0
+          ? { goalId: { in: goalIdArray } }
+          : {}),
+        ...(taskIdArray && taskIdArray.length > 0
+          ? { taskId: { in: taskIdArray } }
+          : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
@@ -513,25 +698,36 @@ export class ReportsService {
       orderBy: [{ date: 'asc' }],
     });
 
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    
+    const dayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
     // Group entries by date, then by task
-    const dailyMap = new Map<string, Map<string, DayByTaskEntry & { dayOfWeek: string }>>();
+    const dailyMap = new Map<
+      string,
+      Map<string, DayByTaskEntry & { dayOfWeek: string }>
+    >();
     let totalMinutes = 0;
     let totalEntries = 0;
 
     for (const entry of entries) {
       const dateKey = entry.date.toISOString().split('T')[0];
       const dayOfWeek = dayNames[entry.dayOfWeek];
-      
+
       if (!dailyMap.has(dateKey)) {
         dailyMap.set(dateKey, new Map());
       }
-      
+
       const taskMap = dailyMap.get(dateKey)!;
       // Use taskId or normalized task name as key to aggregate
       const taskKey = entry.taskId || entry.taskName.trim().toLowerCase();
-      
+
       if (!taskMap.has(taskKey)) {
         // Use the entry's stored taskName as the displayed name (not the
         // currently-linked task's title). Previously this preferred
@@ -620,33 +816,54 @@ export class ReportsService {
    * Get Day Total report - shows total hours per day with merged task names
    * Just daily totals with comma-separated task names
    */
-  async getDayTotalReport(userId: string, filters: ReportFiltersDto): Promise<DayTotalReportResponse> {
+  async getDayTotalReport(
+    userId: string,
+    filters: ReportFiltersDto,
+  ): Promise<DayTotalReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(filters.endDate);
     end.setHours(23, 59, 59, 999);
 
-    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
-    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+    const goalIdArray = filters.goalIds
+      ? filters.goalIds.split(',').map((id) => id.trim())
+      : undefined;
+    const taskIdArray = filters.taskIds
+      ? filters.taskIds.split(',').map((id) => id.trim())
+      : undefined;
 
     const entries = await this.prisma.timeEntry.findMany({
       where: {
         userId,
         date: { gte: start, lte: end },
-        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
-        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(goalIdArray && goalIdArray.length > 0
+          ? { goalId: { in: goalIdArray } }
+          : {}),
+        ...(taskIdArray && taskIdArray.length > 0
+          ? { taskId: { in: taskIdArray } }
+          : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
         task: { select: { id: true, title: true, notes: true } },
         goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: { select: { id: true, title: true, startTime: true, endTime: true } },
+        scheduleBlock: {
+          select: { id: true, title: true, startTime: true, endTime: true },
+        },
       },
       orderBy: [{ date: 'asc' }],
     });
 
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    
+    const dayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+
     // Group entries by date, then by goal
     interface GoalData {
       goalId: string | null;
@@ -655,14 +872,14 @@ export class ReportsService {
       taskNames: Set<string>;
       totalMinutes: number;
     }
-    
+
     interface DayData {
       dayOfWeek: string;
       goalMap: Map<string, GoalData>; // goalId or 'no-goal' -> GoalData
       allTaskNames: Set<string>;
       totalMinutes: number;
     }
-    
+
     const dailyMap = new Map<string, DayData>();
     let totalMinutes = 0;
     let totalEntries = 0;
@@ -670,7 +887,7 @@ export class ReportsService {
     for (const entry of entries) {
       const dateKey = entry.date.toISOString().split('T')[0];
       const dayOfWeek = dayNames[entry.dayOfWeek];
-      
+
       if (!dailyMap.has(dateKey)) {
         dailyMap.set(dateKey, {
           dayOfWeek,
@@ -679,11 +896,11 @@ export class ReportsService {
           totalMinutes: 0,
         });
       }
-      
+
       const day = dailyMap.get(dateKey)!;
       const taskName = entry.task?.title || entry.taskName;
       const goalKey = entry.goalId || 'no-goal';
-      
+
       if (!day.goalMap.has(goalKey)) {
         day.goalMap.set(goalKey, {
           goalId: entry.goalId,
@@ -693,11 +910,11 @@ export class ReportsService {
           totalMinutes: 0,
         });
       }
-      
+
       const goalData = day.goalMap.get(goalKey)!;
       goalData.taskNames.add(taskName);
       goalData.totalMinutes += entry.duration;
-      
+
       day.allTaskNames.add(taskName);
       day.totalMinutes += entry.duration;
       totalMinutes += entry.duration;
@@ -711,7 +928,7 @@ export class ReportsService {
         dayOfWeek: data.dayOfWeek,
         taskNames: Array.from(data.allTaskNames).join(', '),
         goalGroups: Array.from(data.goalMap.values())
-          .map(g => ({
+          .map((g) => ({
             goalId: g.goalId,
             goalTitle: g.goalTitle,
             goalColor: g.goalColor,
@@ -762,14 +979,21 @@ export class ReportsService {
   /**
    * Get schedule-based report showing hours logged per schedule block
    */
-  async getScheduleReport(userId: string, filters: ReportFiltersDto): Promise<ScheduleReportResponse> {
+  async getScheduleReport(
+    userId: string,
+    filters: ReportFiltersDto,
+  ): Promise<ScheduleReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(filters.endDate);
     end.setHours(23, 59, 59, 999);
 
-    const goalIdArray = filters.goalIds ? filters.goalIds.split(',').map(id => id.trim()) : undefined;
-    const taskIdArray = filters.taskIds ? filters.taskIds.split(',').map(id => id.trim()) : undefined;
+    const goalIdArray = filters.goalIds
+      ? filters.goalIds.split(',').map((id) => id.trim())
+      : undefined;
+    const taskIdArray = filters.taskIds
+      ? filters.taskIds.split(',').map((id) => id.trim())
+      : undefined;
 
     // Get user's schedule blocks
     const scheduleBlocks = await this.prisma.scheduleBlock.findMany({
@@ -785,23 +1009,36 @@ export class ReportsService {
         userId,
         date: { gte: start, lte: end },
         scheduleBlockId: { not: null },
-        ...(goalIdArray && goalIdArray.length > 0 ? { goalId: { in: goalIdArray } } : {}),
-        ...(taskIdArray && taskIdArray.length > 0 ? { taskId: { in: taskIdArray } } : {}),
+        ...(goalIdArray && goalIdArray.length > 0
+          ? { goalId: { in: goalIdArray } }
+          : {}),
+        ...(taskIdArray && taskIdArray.length > 0
+          ? { taskId: { in: taskIdArray } }
+          : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
       include: {
         task: { select: { id: true, title: true } },
         scheduleBlock: {
-          select: { id: true, title: true, startTime: true, endTime: true, category: true, color: true, goalId: true },
+          select: {
+            id: true,
+            title: true,
+            startTime: true,
+            endTime: true,
+            category: true,
+            color: true,
+            goalId: true,
+          },
         },
       },
       orderBy: [{ date: 'asc' }],
     });
 
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
+
     // Build list of days in range
-    const days: Array<{ date: string; dayOfWeek: string; dayNumber: number }> = [];
+    const days: Array<{ date: string; dayOfWeek: string; dayNumber: number }> =
+      [];
     const cursor = new Date(start);
     while (cursor <= end) {
       days.push({
@@ -813,23 +1050,24 @@ export class ReportsService {
     }
 
     // Group schedule blocks by pattern (same title + time range)
-    const patternMap = new Map<string, {
-      pattern: SchedulePattern;
-      blockIds: string[];
-      dayDataMap: Map<string, { minutes: number; tasks: Map<string, number> }>;
-    }>();
+    const patternMap = new Map<
+      string,
+      {
+        pattern: SchedulePattern;
+        blockIds: string[];
+        dayDataMap: Map<
+          string,
+          { minutes: number; tasks: Map<string, number> }
+        >;
+      }
+    >();
 
     for (const block of scheduleBlocks) {
       const patternKey = `${block.title}|${block.startTime}-${block.endTime}`;
-      
-      if (!patternMap.has(patternKey)) {
-        // Calculate expected minutes from schedule time range
-        const [startH, startM] = block.startTime.split(':').map(Number);
-        const [endH, endM] = block.endTime.split(':').map(Number);
-        const expectedMinutes = (endH * 60 + endM) - (startH * 60 + startM);
 
+      if (!patternMap.has(patternKey)) {
         const goal = block.goal;
-        
+
         patternMap.set(patternKey, {
           pattern: {
             patternKey,
@@ -841,7 +1079,10 @@ export class ReportsService {
             goalTitle: goal?.title,
             goalColor: goal?.color,
             daysOfWeek: [],
-            timeRangeFormatted: this.formatTimeRange(block.startTime, block.endTime),
+            timeRangeFormatted: this.formatTimeRange(
+              block.startTime,
+              block.endTime,
+            ),
           },
           blockIds: [],
           dayDataMap: new Map(),
@@ -873,7 +1114,10 @@ export class ReportsService {
 
       const dayData = patternData.dayDataMap.get(dateKey)!;
       dayData.minutes += entry.duration;
-      dayData.tasks.set(taskName, (dayData.tasks.get(taskName) || 0) + entry.duration);
+      dayData.tasks.set(
+        taskName,
+        (dayData.tasks.get(taskName) || 0) + entry.duration,
+      );
       totalEntries++;
     }
 
@@ -884,11 +1128,11 @@ export class ReportsService {
 
     for (const [, patternData] of patternMap) {
       const { pattern, dayDataMap } = patternData;
-      
+
       // Calculate expected minutes for this pattern
       const [startH, startM] = pattern.startTime.split(':').map(Number);
       const [endH, endM] = pattern.endTime.split(':').map(Number);
-      const expectedMinutesPerDay = (endH * 60 + endM) - (startH * 60 + startM);
+      const expectedMinutesPerDay = endH * 60 + endM - (startH * 60 + startM);
 
       const rowDays: ScheduleDayData[] = [];
       let rowTotalLogged = 0;
@@ -897,23 +1141,29 @@ export class ReportsService {
       for (const day of days) {
         const hasSchedule = pattern.daysOfWeek.includes(day.dayNumber);
         const dayData = dayDataMap.get(day.date);
-        
+
         const loggedMinutes = dayData?.minutes || 0;
         const expectedMinutes = hasSchedule ? expectedMinutesPerDay : 0;
-        
+
         rowDays.push({
           date: day.date,
           dayOfWeek: day.dayOfWeek,
           dayNumber: day.dayNumber,
           loggedMinutes,
-          loggedFormatted: loggedMinutes > 0 ? this.formatDuration(loggedMinutes) : '',
+          loggedFormatted:
+            loggedMinutes > 0 ? this.formatDuration(loggedMinutes) : '',
           expectedMinutes,
-          percentage: expectedMinutes > 0 ? Math.round((loggedMinutes / expectedMinutes) * 100) : 0,
-          tasks: dayData ? Array.from(dayData.tasks.entries()).map(([name, mins]) => ({
-            taskName: name,
-            minutes: mins,
-            formatted: this.formatDuration(mins),
-          })) : [],
+          percentage:
+            expectedMinutes > 0
+              ? Math.round((loggedMinutes / expectedMinutes) * 100)
+              : 0,
+          tasks: dayData
+            ? Array.from(dayData.tasks.entries()).map(([name, mins]) => ({
+                taskName: name,
+                minutes: mins,
+                formatted: this.formatDuration(mins),
+              }))
+            : [],
         });
 
         rowTotalLogged += loggedMinutes;
@@ -930,7 +1180,10 @@ export class ReportsService {
           totalLogged: rowTotalLogged,
           totalLoggedFormatted: this.formatDuration(rowTotalLogged),
           totalExpected: rowTotalExpected,
-          overallPercentage: rowTotalExpected > 0 ? Math.round((rowTotalLogged / rowTotalExpected) * 100) : 0,
+          overallPercentage:
+            rowTotalExpected > 0
+              ? Math.round((rowTotalLogged / rowTotalExpected) * 100)
+              : 0,
         });
 
         totalLogged += rowTotalLogged;
@@ -956,7 +1209,10 @@ export class ReportsService {
         totalFormatted: this.formatDuration(totalLogged),
         totalExpectedMinutes: totalExpected,
         totalExpectedFormatted: this.formatDuration(totalExpected),
-        overallPercentage: totalExpected > 0 ? Math.round((totalLogged / totalExpected) * 100) : 0,
+        overallPercentage:
+          totalExpected > 0
+            ? Math.round((totalLogged / totalExpected) * 100)
+            : 0,
         totalEntries,
         schedulesTracked: rows.length,
       },
@@ -970,7 +1226,9 @@ export class ReportsService {
       const [h, m] = time.split(':').map(Number);
       const hour12 = h % 12 === 0 ? 12 : h % 12;
       const meridiem = h >= 12 ? 'PM' : 'AM';
-      return m === 0 ? `${hour12} ${meridiem}` : `${hour12}:${m.toString().padStart(2, '0')} ${meridiem}`;
+      return m === 0
+        ? `${hour12} ${meridiem}`
+        : `${hour12}:${m.toString().padStart(2, '0')} ${meridiem}`;
     };
     return `${formatTime(startTime)} - ${formatTime(endTime)}`;
   }
@@ -985,8 +1243,8 @@ export class ReportsService {
     });
 
     const viewType = filters.viewType || ReportViewType.DETAILED;
-    let reportData: any;
-    
+    let reportData: AnyExportReportResponse;
+
     switch (viewType) {
       case ReportViewType.DETAILED:
         reportData = await this.getDetailedReport(userId, filters);
@@ -1037,11 +1295,17 @@ export class ReportsService {
   async getFilterableGoals(userId: string) {
     const goals = await this.prisma.goal.findMany({
       where: { userId },
-      select: { id: true, title: true, color: true, category: true, status: true },
+      select: {
+        id: true,
+        title: true,
+        color: true,
+        category: true,
+        status: true,
+      },
       orderBy: [{ status: 'asc' }, { title: 'asc' }],
     });
 
-    return goals.map(g => ({
+    return goals.map((g) => ({
       id: g.id,
       title: g.title,
       color: g.color,
@@ -1059,7 +1323,13 @@ export class ReportsService {
         userId,
         ...(goalId ? { goalId } : {}),
       },
-      select: { id: true, title: true, category: true, status: true, goalId: true },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        status: true,
+        goalId: true,
+      },
       orderBy: { title: 'asc' },
     });
 
@@ -1069,12 +1339,15 @@ export class ReportsService {
   // Helper methods for report generation
 
   private aggregateByGroup(
-    entries: any[],
+    entries: AggregatableTimeEntry[],
     groupBy: ReportGroupBy,
     totalMinutes: number,
     hourlyRate?: number,
   ): SummaryItem[] {
-    const groups = new Map<string, { name: string; color?: string; minutes: number; count: number }>();
+    const groups = new Map<
+      string,
+      { name: string; color?: string; minutes: number; count: number }
+    >();
 
     for (const entry of entries) {
       let key: string;
@@ -1120,18 +1393,31 @@ export class ReportsService {
         totalMinutes: data.minutes,
         totalFormatted: this.formatDuration(data.minutes),
         totalHours: parseFloat((data.minutes / 60).toFixed(2)),
-        percentage: totalMinutes > 0 ? Math.round((data.minutes / totalMinutes) * 100) : 0,
+        percentage:
+          totalMinutes > 0
+            ? Math.round((data.minutes / totalMinutes) * 100)
+            : 0,
         entriesCount: data.count,
-        billableAmount: hourlyRate ? parseFloat(((data.minutes / 60) * hourlyRate).toFixed(2)) : undefined,
+        billableAmount: hourlyRate
+          ? parseFloat(((data.minutes / 60) * hourlyRate).toFixed(2))
+          : undefined,
       }))
       .sort((a, b) => b.totalMinutes - a.totalMinutes);
   }
 
-  private buildDateBreakdown(entries: any[], start: Date, end: Date) {
-    const breakdown: Array<{ date: string; minutes: number; formatted: string }> = [];
+  private buildDateBreakdown(
+    entries: Pick<AggregatableTimeEntry, 'date' | 'duration'>[],
+    start: Date,
+    end: Date,
+  ) {
+    const breakdown: Array<{
+      date: string;
+      minutes: number;
+      formatted: string;
+    }> = [];
     const dateMap = new Map<string, number>();
 
-    entries.forEach(e => {
+    entries.forEach((e) => {
       const dateKey = e.date.toISOString().split('T')[0];
       dateMap.set(dateKey, (dateMap.get(dateKey) || 0) + e.duration);
     });
@@ -1152,9 +1438,13 @@ export class ReportsService {
     return breakdown;
   }
 
-  private generateCSV(reportData: any, viewType: ReportViewType, meta: any): string {
+  private generateCSV(
+    reportData: AnyExportReportResponse,
+    viewType: ReportViewType,
+    meta: ExportMeta,
+  ): string {
     const lines: string[] = [];
-    
+
     // Header
     lines.push(`"${meta.title}"`);
     lines.push(`"Generated by: ${meta.generatedBy}"`);
@@ -1166,52 +1456,84 @@ export class ReportsService {
 
     if (viewType === ReportViewType.DETAILED) {
       // Detailed view - each entry as a row
-      lines.push('"Date","Day","Start Time","End Time","Task","Goal","Duration (min)","Duration","Time Entry Notes","Task Notes"');
-      
-      for (const day of reportData.dailyBreakdown) {
+      lines.push(
+        '"Date","Day","Start Time","End Time","Task","Goal","Duration (min)","Duration","Time Entry Notes","Task Notes"',
+      );
+
+      const detailed = reportData as DetailedReportResponse;
+      for (const day of detailed.dailyBreakdown) {
         for (const entry of day.entries) {
-          const startTime = entry.startedAt ? new Date(entry.startedAt).toLocaleTimeString() : '';
-          const endTime = entry.endedAt ? new Date(entry.endedAt).toLocaleTimeString() : '';
-          lines.push(`"${entry.date}","${entry.dayOfWeek}","${startTime}","${endTime}","${entry.taskName}","${entry.goal?.title || ''}","${entry.duration}","${entry.durationFormatted}","${entry.notes || ''}","${entry.taskNotes || ''}"`);
+          const startTime = entry.startedAt
+            ? new Date(entry.startedAt).toLocaleTimeString()
+            : '';
+          const endTime = entry.endedAt
+            ? new Date(entry.endedAt).toLocaleTimeString()
+            : '';
+          lines.push(
+            `"${entry.date}","${entry.dayOfWeek}","${startTime}","${endTime}","${entry.taskName}","${entry.goal?.title || ''}","${entry.duration}","${entry.durationFormatted}","${entry.notes || ''}","${entry.taskNotes || ''}"`,
+          );
         }
         // Daily subtotal
-        lines.push(`"${day.date}","${day.dayOfWeek}","","","DAILY TOTAL","","","${day.totalMinutes}","${day.totalFormatted}","",""`);
+        lines.push(
+          `"${day.date}","${day.dayOfWeek}","","","DAILY TOTAL","","","${day.totalMinutes}","${day.totalFormatted}","",""`,
+        );
         lines.push('');
       }
     } else if (viewType === ReportViewType.DAY_BY_TASK) {
       // Day by Task view - aggregated hours per task per day (no timestamps)
-      lines.push('"Date","Day","Task","Goal","Total Hours","Total Minutes","Duration"');
-      
-      for (const day of reportData.dailyBreakdown) {
+      lines.push(
+        '"Date","Day","Task","Goal","Total Hours","Total Minutes","Duration"',
+      );
+
+      const dayByTask = reportData as DayByTaskReportResponse;
+      for (const day of dayByTask.dailyBreakdown) {
         for (const task of day.tasks) {
           const hours = (task.totalMinutes / 60).toFixed(2);
-          lines.push(`"${day.date}","${day.dayOfWeek}","${task.taskName}","${task.goalTitle || ''}","${hours}","${task.totalMinutes}","${task.totalFormatted}"`);
+          lines.push(
+            `"${day.date}","${day.dayOfWeek}","${task.taskName}","${task.goalTitle || ''}","${hours}","${task.totalMinutes}","${task.totalFormatted}"`,
+          );
         }
         // Daily subtotal
         const dayHours = (day.totalMinutes / 60).toFixed(2);
-        lines.push(`"${day.date}","${day.dayOfWeek}","DAILY TOTAL","","${dayHours}","${day.totalMinutes}","${day.totalFormatted}"`);
+        lines.push(
+          `"${day.date}","${day.dayOfWeek}","DAILY TOTAL","","${dayHours}","${day.totalMinutes}","${day.totalFormatted}"`,
+        );
         lines.push('');
       }
     } else if (viewType === ReportViewType.DAY_TOTAL) {
       // Day Total view - just daily totals with merged task names
-      lines.push('"Date","Day","Tasks Worked On","Total Hours","Total Minutes","Duration"');
-      
-      for (const day of reportData.dailyBreakdown) {
-        lines.push(`"${day.date}","${day.dayOfWeek}","${day.taskNames}","${day.totalHours}","${day.totalMinutes}","${day.totalFormatted}"`);
+      lines.push(
+        '"Date","Day","Tasks Worked On","Total Hours","Total Minutes","Duration"',
+      );
+
+      const dayTotal = reportData as DayTotalReportResponse;
+      for (const day of dayTotal.dailyBreakdown) {
+        lines.push(
+          `"${day.date}","${day.dayOfWeek}","${day.taskNames}","${day.totalHours}","${day.totalMinutes}","${day.totalFormatted}"`,
+        );
       }
     } else {
       // Summary view - grouped totals
-      lines.push(`"${reportData.groupBy.toUpperCase()}","Total Hours","Total Minutes","Entries","Percentage"${reportData.billable ? ',"Billable Amount"' : ''}`);
-      
-      for (const item of reportData.items) {
-        const billableCol = reportData.billable ? `,"$${item.billableAmount}"` : '';
-        lines.push(`"${item.name}","${item.totalHours}","${item.totalMinutes}","${item.entriesCount}","${item.percentage}%"${billableCol}`);
+      const summary = reportData as SummaryReportResponse;
+      lines.push(
+        `"${summary.groupBy.toUpperCase()}","Total Hours","Total Minutes","Entries","Percentage"${summary.billable ? ',"Billable Amount"' : ''}`,
+      );
+
+      for (const item of summary.items) {
+        const billableCol = summary.billable
+          ? `,"$${item.billableAmount}"`
+          : '';
+        lines.push(
+          `"${item.name}","${item.totalHours}","${item.totalMinutes}","${item.entriesCount}","${item.percentage}%"${billableCol}`,
+        );
       }
     }
 
     // Grand total
     lines.push('');
-    lines.push(`"GRAND TOTAL","${reportData.summary.totalHours} hours","${reportData.summary.totalMinutes} minutes","${reportData.summary.totalEntries} entries","100%"${reportData.billable ? `,"$${reportData.billable.totalAmount}"` : ''}`);
+    lines.push(
+      `"GRAND TOTAL","${reportData.summary.totalHours} hours","${reportData.summary.totalMinutes} minutes","${reportData.summary.totalEntries} entries","100%"${reportData.billable ? `,"$${reportData.billable.totalAmount}"` : ''}`,
+    );
 
     if (meta.notes) {
       lines.push('');
@@ -1238,7 +1560,10 @@ export class ReportsService {
 
   private formatCategoryName(category: string): string {
     if (!category) return 'Other';
-    return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase().replace(/_/g, ' ');
+    return (
+      category.charAt(0).toUpperCase() +
+      category.slice(1).toLowerCase().replace(/_/g, ' ')
+    );
   }
 
   private getWeekStart(date: Date): Date {

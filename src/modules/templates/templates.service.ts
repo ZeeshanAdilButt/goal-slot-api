@@ -166,7 +166,7 @@ export class TemplatesService {
             color: this.colorForBlock(b.goalRef, template),
             isRecurring: true,
             seriesId,
-            goalId: b.goalRef ? goalRefMap.get(b.goalRef) ?? null : null,
+            goalId: b.goalRef ? (goalRefMap.get(b.goalRef) ?? null) : null,
           });
         }
         const result = await tx.scheduleBlock.createMany({ data: inputs });
@@ -181,7 +181,7 @@ export class TemplatesService {
             description: t.description ?? null,
             category: t.category ?? null,
             order: idx,
-            goalId: t.goalRef ? goalRefMap.get(t.goalRef) ?? null : null,
+            goalId: t.goalRef ? (goalRefMap.get(t.goalRef) ?? null) : null,
             templateId: template.id,
             templateTaskKey: this.taskKey(t),
           }),
@@ -247,7 +247,11 @@ export class TemplatesService {
       // goalRef does not match any of the user's imported goals (they did
       // not bring that goal in originally, so dropping the task there
       // would be confusing).
-      const toAdd: { task: TemplateTask; key: string; goalId: string | null }[] = [];
+      const toAdd: {
+        task: TemplateTask;
+        key: string;
+        goalId: string | null;
+      }[] = [];
       let skipped = 0;
       for (const t of template.tasks ?? []) {
         const key = this.taskKey(t);
@@ -255,7 +259,7 @@ export class TemplatesService {
           skipped++;
           continue;
         }
-        const goalId = t.goalRef ? goalRefMap.get(t.goalRef) ?? null : null;
+        const goalId = t.goalRef ? (goalRefMap.get(t.goalRef) ?? null) : null;
         if (t.goalRef && !goalId) {
           skipped++;
           continue;
@@ -331,7 +335,10 @@ export class TemplatesService {
     return out;
   }
 
-  private colorForBlock(goalRef: string | undefined, t: TemplateDefinition): string {
+  private colorForBlock(
+    goalRef: string | undefined,
+    t: TemplateDefinition,
+  ): string {
     if (!goalRef) return '#FFD700';
     const g = t.goals?.find((g) => g.ref === goalRef);
     return g?.color ?? '#FFD700';
@@ -350,12 +357,14 @@ export class TemplatesService {
   // next sync, which is acceptable for v1).
   private taskKey(t: TemplateTask): string {
     if (t.key && t.key.trim().length > 0) return t.key.trim();
-    return t.title
-      .toLowerCase()
-      .normalize('NFKD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'task';
+    return (
+      t.title
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || 'task'
+    );
   }
 }

@@ -1,8 +1,8 @@
-import { BadRequestException } from "@nestjs/common";
-import { CoachProvider } from "@prisma/client";
+import { BadRequestException } from '@nestjs/common';
+import { CoachProvider } from '@prisma/client';
 
-import { LlmFactory } from "../../shared/services/llm/llm-factory";
-import { CoachByokService } from "./coach-byok.service";
+import { LlmFactory } from '../../shared/services/llm/llm-factory';
+import { CoachByokService } from './coach-byok.service';
 
 class FakePrisma {
   rows = new Map<string, any>();
@@ -20,7 +20,7 @@ class FakePrisma {
             selectedModel: null,
             tokensUsedThisMonth: 0,
             tokensLimit: 100_000,
-            tokensWindowStart: new Date("2026-06-01T00:00:00.000Z"),
+            tokensWindowStart: new Date('2026-06-01T00:00:00.000Z'),
           };
       this.rows.set(where.userId, row);
       return row;
@@ -42,8 +42,8 @@ class FakeEncryption {
     this.plaintexts.push(plaintext);
     return {
       ciphertext: Buffer.from(`cipher:${plaintext}`),
-      iv: Buffer.from("iv"),
-      authTag: Buffer.from("auth"),
+      iv: Buffer.from('iv'),
+      authTag: Buffer.from('auth'),
     };
   }
 }
@@ -60,45 +60,45 @@ function buildService() {
   return { prisma, encryption, service };
 }
 
-describe("CoachByokService prefix validation", () => {
+describe('CoachByokService prefix validation', () => {
   const validCases: Array<{
     provider: CoachProvider;
     apiKey: string;
     expectedHint: string;
   }> = [
     {
-      provider: "OPENAI",
-      apiKey: "sk-test-abcd1234",
-      expectedHint: "sk-...1234",
+      provider: 'OPENAI',
+      apiKey: 'sk-test-abcd1234',
+      expectedHint: 'sk-...1234',
     },
     {
-      provider: "ANTHROPIC",
-      apiKey: "sk-ant-abc1234",
-      expectedHint: "sk-ant-...1234",
+      provider: 'ANTHROPIC',
+      apiKey: 'sk-ant-abc1234',
+      expectedHint: 'sk-ant-...1234',
     },
     {
-      provider: "GEMINI",
-      apiKey: "AIzaSyExampleKey1234",
-      expectedHint: "AIza...1234",
+      provider: 'GEMINI',
+      apiKey: 'AIzaSyExampleKey1234',
+      expectedHint: 'AIza...1234',
     },
     {
-      provider: "OPENROUTER",
-      apiKey: "sk-or-v1-example1234",
-      expectedHint: "sk-or-...1234",
+      provider: 'OPENROUTER',
+      apiKey: 'sk-or-v1-example1234',
+      expectedHint: 'sk-or-...1234',
     },
   ];
 
   it.each(validCases)(
-    "accepts a correctly-prefixed $provider key and returns a masked hint",
+    'accepts a correctly-prefixed $provider key and returns a masked hint',
     async ({ provider, apiKey, expectedHint }) => {
       const { prisma, service } = buildService();
 
-      const state = await service.saveKey("user_1", { provider, apiKey });
+      const state = await service.saveKey('user_1', { provider, apiKey });
 
-      expect(state.status).toBe("active");
+      expect(state.status).toBe('active');
       expect(state.provider).toBe(provider);
       expect(state.maskedKey).toBe(expectedHint);
-      expect(prisma.rows.get("user_1").maskedHint).toBe(expectedHint);
+      expect(prisma.rows.get('user_1').maskedHint).toBe(expectedHint);
     },
   );
 
@@ -108,36 +108,36 @@ describe("CoachByokService prefix validation", () => {
     leakedFragment: string;
   }> = [
     {
-      provider: "OPENAI",
-      apiKey: "ak-test-abcd1234",
-      leakedFragment: "abcd1234",
+      provider: 'OPENAI',
+      apiKey: 'ak-test-abcd1234',
+      leakedFragment: 'abcd1234',
     },
-    { provider: "ANTHROPIC", apiKey: "sk-abc1234", leakedFragment: "abc1234" },
+    { provider: 'ANTHROPIC', apiKey: 'sk-abc1234', leakedFragment: 'abc1234' },
     {
-      provider: "GEMINI",
-      apiKey: "sk-example1234",
-      leakedFragment: "example1234",
+      provider: 'GEMINI',
+      apiKey: 'sk-example1234',
+      leakedFragment: 'example1234',
     },
     {
-      provider: "OPENROUTER",
-      apiKey: "sk-anything1234",
-      leakedFragment: "anything1234",
+      provider: 'OPENROUTER',
+      apiKey: 'sk-anything1234',
+      leakedFragment: 'anything1234',
     },
-    { provider: "OPENAI", apiKey: "", leakedFragment: "" },
+    { provider: 'OPENAI', apiKey: '', leakedFragment: '' },
   ];
 
   it.each(invalidCases)(
-    "rejects an invalid $provider key without echoing the secret",
+    'rejects an invalid $provider key without echoing the secret',
     async ({ provider, apiKey, leakedFragment }) => {
       const { service } = buildService();
 
       await expect(
-        service.saveKey("user_1", { provider, apiKey }),
+        service.saveKey('user_1', { provider, apiKey }),
       ).rejects.toThrow(BadRequestException);
 
       try {
-        await service.saveKey("user_1", { provider, apiKey });
-        throw new Error("expected saveKey to reject");
+        await service.saveKey('user_1', { provider, apiKey });
+        throw new Error('expected saveKey to reject');
       } catch (err: any) {
         const response = err.getResponse();
         const serialized = JSON.stringify(response);
@@ -152,38 +152,38 @@ describe("CoachByokService prefix validation", () => {
     },
   );
 
-  it("trims leading and trailing whitespace before validation and encryption", async () => {
+  it('trims leading and trailing whitespace before validation and encryption', async () => {
     const { encryption, service } = buildService();
 
-    const state = await service.saveKey("user_1", {
-      provider: "OPENAI",
-      apiKey: "  sk-test-abcd1234  ",
+    const state = await service.saveKey('user_1', {
+      provider: 'OPENAI',
+      apiKey: '  sk-test-abcd1234  ',
     });
 
-    expect(state.maskedKey).toBe("sk-...1234");
-    expect(encryption.plaintexts).toEqual(["sk-test-abcd1234"]);
+    expect(state.maskedKey).toBe('sk-...1234');
+    expect(encryption.plaintexts).toEqual(['sk-test-abcd1234']);
   });
 
-  it("uses the more specific Anthropic prefix instead of the generic OpenAI prefix", async () => {
+  it('uses the more specific Anthropic prefix instead of the generic OpenAI prefix', async () => {
     const { service } = buildService();
 
     await expect(
-      service.saveKey("user_1", {
-        provider: "ANTHROPIC",
-        apiKey: "sk-test-abcd1234",
+      service.saveKey('user_1', {
+        provider: 'ANTHROPIC',
+        apiKey: 'sk-test-abcd1234',
       }),
     ).rejects.toThrow(BadRequestException);
   });
 
-  it("does not include the middle of the key in the masked hint", async () => {
+  it('does not include the middle of the key in the masked hint', async () => {
     const { service } = buildService();
 
-    const state = await service.saveKey("user_1", {
-      provider: "OPENROUTER",
-      apiKey: "sk-or-v1-middle-secret-9999",
+    const state = await service.saveKey('user_1', {
+      provider: 'OPENROUTER',
+      apiKey: 'sk-or-v1-middle-secret-9999',
     });
 
-    expect(state.maskedKey).toBe("sk-or-...9999");
-    expect(state.maskedKey).not.toContain("middle-secret");
+    expect(state.maskedKey).toBe('sk-or-...9999');
+    expect(state.maskedKey).not.toContain('middle-secret');
   });
 });

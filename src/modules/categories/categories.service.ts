@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/categories.dto';
 
 @Injectable()
@@ -33,7 +38,9 @@ export class CategoriesService {
     });
 
     if (existing) {
-      throw new ConflictException(`Category with name "${dto.name}" already exists`);
+      throw new ConflictException(
+        `Category with name "${dto.name}" already exists`,
+      );
     }
 
     // Get max order for this user
@@ -128,13 +135,15 @@ export class CategoriesService {
         });
 
         if (existing) {
-          throw new ConflictException(`Category with name "${dto.name}" already exists`);
+          throw new ConflictException(
+            `Category with name "${dto.name}" already exists`,
+          );
         }
       }
     }
 
     // Build update data
-    const dataToUpdate: any = { ...dto };
+    const dataToUpdate: Prisma.CategoryUpdateInput = { ...dto };
     if (dto.name && value !== category.value) {
       dataToUpdate.value = value;
     }
@@ -157,7 +166,9 @@ export class CategoriesService {
     // Check if category is in use
     const [goalsCount, scheduleCount, tasksCount] = await Promise.all([
       this.prisma.goal.count({ where: { userId, category: category.value } }),
-      this.prisma.scheduleBlock.count({ where: { userId, category: category.value } }),
+      this.prisma.scheduleBlock.count({
+        where: { userId, category: category.value },
+      }),
       this.prisma.task.count({ where: { userId, category: category.value } }),
     ]);
 
@@ -203,11 +214,16 @@ export class CategoriesService {
       { name: 'Work', value: 'WORK', color: '#22D3EE', order: 2 }, // cyan-400
       { name: 'Health', value: 'HEALTH', color: '#22C55E', order: 3 }, // green-500
       { name: 'Creative', value: 'CREATIVE', color: '#EC4899', order: 4 }, // pink-500
-      
+
       // Schedule/Task categories
       { name: 'Deep Work', value: 'DEEP_WORK', color: '#FFD700', order: 5 }, // yellow/gold
       { name: 'Exercise', value: 'EXERCISE', color: '#F97316', order: 6 }, // orange-500
-      { name: 'Side Project', value: 'SIDE_PROJECT', color: '#EC4899', order: 7 }, // pink-500
+      {
+        name: 'Side Project',
+        value: 'SIDE_PROJECT',
+        color: '#EC4899',
+        order: 7,
+      }, // pink-500
       { name: 'DSA', value: 'DSA', color: '#FFD700', order: 8 }, // yellow/gold
       { name: 'Meeting', value: 'MEETING', color: '#8B5CF6', order: 9 }, // purple-500
       { name: 'Admin', value: 'ADMIN', color: '#9CA3AF', order: 10 }, // gray-400
@@ -242,4 +258,3 @@ export class CategoriesService {
     });
   }
 }
-

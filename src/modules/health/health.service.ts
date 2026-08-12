@@ -124,16 +124,10 @@ export class HealthService {
       // Prisma does not cancel the underlying query when this timeout wins;
       // the DB connection is released only after the query eventually returns.
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Database check timeout')),
-          2000,
-        ),
+        setTimeout(() => reject(new Error('Database check timeout')), 2000),
       );
 
-      await Promise.race([
-        this.prisma.$queryRaw`SELECT 1`,
-        timeoutPromise,
-      ]);
+      await Promise.race([this.prisma.$queryRaw`SELECT 1`, timeoutPromise]);
 
       const latencyMs = Date.now() - startTime;
       this.logger.debug(`Database check passed in ${latencyMs}ms`);
@@ -298,4 +292,3 @@ export class HealthService {
     }
   }
 }
-

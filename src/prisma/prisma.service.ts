@@ -3,7 +3,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
   constructor() {
     super(PrismaService.buildClientOptions());
   }
@@ -21,9 +24,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       return { adapter };
     } catch (error) {
       if (error instanceof Error) {
-        throw new Error(`Failed to initialize PrismaPg adapter in buildClientOptions: ${error.message}`);
+        throw new Error(
+          `Failed to initialize PrismaPg adapter in buildClientOptions: ${error.message}`,
+        );
       }
-      throw new Error('Failed to initialize PrismaPg adapter in buildClientOptions.');
+      throw new Error(
+        'Failed to initialize PrismaPg adapter in buildClientOptions.',
+      );
     }
   }
 

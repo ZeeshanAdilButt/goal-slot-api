@@ -1,4 +1,12 @@
-import { IsEmail, IsString, MinLength, IsOptional, IsEnum, Length, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  IsOptional,
+  IsEnum,
+  Length,
+  Matches,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum OTPPurpose {
@@ -133,4 +141,3 @@ export class SSOLoginDto {
   @IsString()
   name?: string;
 }
-

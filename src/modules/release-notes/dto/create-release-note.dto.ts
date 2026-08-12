@@ -1,18 +1,18 @@
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator'
+import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateReleaseNoteDto {
   @IsString()
   @MaxLength(50)
-  version: string
+  version: string;
 
   @IsString()
   @MaxLength(200)
-  title: string
+  title: string;
 
   @IsString()
-  content: string
+  content: string;
 
   @IsOptional()
   @IsDateString()
-  publishedAt?: string
+  publishedAt?: string;
 }

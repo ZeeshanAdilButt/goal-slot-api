@@ -1,4 +1,11 @@
-import { Injectable, UnauthorizedException, ConflictException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  ForbiddenException,
+  BadRequestException,
+  Inject,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -10,9 +17,20 @@ import { SupabaseService } from '../../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { EmailService } from '../email/email.service';
 import { OtpAttemptTrackerService } from './otp-attempt-tracker.service';
-import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, OTPPurpose, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
-import { UserRole, UserType, PlanType } from '@prisma/client';
-import { PLAN_LIMITS, resolvePlanLimits } from './plan-limits';
+import {
+  RegisterDto,
+  LoginDto,
+  SSOLoginDto,
+  SendOTPDto,
+  VerifyOTPDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  OTPPurpose,
+  SendChangePasswordOTPDto,
+  ChangePasswordDto,
+} from './dto/auth.dto';
+import { User, UserRole, UserType, PlanType } from '@prisma/client';
+import { resolvePlanLimits } from './plan-limits';
 
 // OTP constants
 const OTP_EXPIRY = 300; // 5 minutes in seconds
@@ -54,24 +72,34 @@ export class AuthService {
     return `otp:cooldown:${email}:${purpose}`;
   }
 
-  private async checkRateLimit(email: string, purpose: OTPPurpose): Promise<void> {
+  private async checkRateLimit(
+    email: string,
+    purpose: OTPPurpose,
+  ): Promise<void> {
     const key = this.getRateLimitKey(email, purpose);
-    const count = await this.cacheManager.get<number>(key) || 0;
-    
+    const count = (await this.cacheManager.get<number>(key)) || 0;
+
     if (count >= MAX_OTP_REQUESTS_PER_HOUR) {
-      throw new BadRequestException('Too many OTP requests. Please wait before requesting another code.');
+      throw new BadRequestException(
+        'Too many OTP requests. Please wait before requesting another code.',
+      );
     }
-    
+
     // Increment counter with 1 hour TTL
     await this.cacheManager.set(key, count + 1, 3600000); // 3600000ms = 1 hour
   }
 
-  private async checkResendCooldown(email: string, purpose: OTPPurpose): Promise<void> {
+  private async checkResendCooldown(
+    email: string,
+    purpose: OTPPurpose,
+  ): Promise<void> {
     const key = this.getResendCooldownKey(email, purpose);
     const cooldown = await this.cacheManager.get<boolean>(key);
-    
+
     if (cooldown) {
-      throw new BadRequestException('Please wait 60 seconds before requesting a new code.');
+      throw new BadRequestException(
+        'Please wait 60 seconds before requesting a new code.',
+      );
     }
   }
 
@@ -84,11 +112,16 @@ export class AuthService {
 
   private checkVerificationLockout(email: string, purpose: OTPPurpose): void {
     if (this.otpAttemptTracker.isLockedOut(email, purpose)) {
-      throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
+      throw new BadRequestException(
+        'Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.',
+      );
     }
   }
 
-  private incrementVerificationAttempts(email: string, purpose: OTPPurpose): void {
+  private incrementVerificationAttempts(
+    email: string,
+    purpose: OTPPurpose,
+  ): void {
     const { lockedOut } = this.otpAttemptTracker.recordFailedAttempt(
       email,
       purpose,
@@ -98,7 +131,9 @@ export class AuthService {
     );
 
     if (lockedOut) {
-      throw new BadRequestException('Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.');
+      throw new BadRequestException(
+        'Too many failed attempts. Your account is temporarily locked. Please try again in 15 minutes.',
+      );
     }
   }
 
@@ -113,7 +148,6 @@ export class AuthService {
     await this.checkRateLimit(email, purpose);
     await this.checkResendCooldown(email, purpose);
 
-    
     if (purpose === OTPPurpose.SIGNUP) {
       const existingUser = await this.prisma.user.findUnique({
         where: { email },
@@ -134,14 +168,17 @@ export class AuthService {
       const user = await this.prisma.user.findUnique({
         where: { email },
       });
-      
+
       // Silent fail - don't reveal if email exists or not
       if (!user) {
-        return { success: true, message: 'If this email is registered, you will receive a verification code.' };
+        return {
+          success: true,
+          message:
+            'If this email is registered, you will receive a verification code.',
+        };
       }
     }
 
-    
     const otp = this.generateOTP();
     const otpKey = this.getOTPKey(email, purpose);
     await this.cacheManager.set(otpKey, otp, OTP_EXPIRY * 1000); // Convert to milliseconds
@@ -160,23 +197,25 @@ export class AuthService {
 
   async verifyOTP(dto: VerifyOTPDto): Promise<boolean> {
     const { email, otp, purpose } = dto;
-    
+
     // Check if user is locked out due to too many failed attempts
     await this.checkVerificationLockout(email, purpose);
-    
+
     const otpKey = this.getOTPKey(email, purpose);
     const storedOTP = await this.cacheManager.get<string>(otpKey);
-    
+
     if (!storedOTP) {
-      throw new BadRequestException('OTP not found or expired. Please request a new code.');
+      throw new BadRequestException(
+        'OTP not found or expired. Please request a new code.',
+      );
     }
-    
+
     if (storedOTP !== otp) {
       // Increment failed attempts
       await this.incrementVerificationAttempts(email, purpose);
       throw new UnauthorizedException('Invalid OTP code. Please try again.');
     }
-    
+
     // OTP is valid - reset attempts counter
     await this.resetVerificationAttempts(email, purpose);
     return true;
@@ -248,11 +287,16 @@ export class AuthService {
 
     // Check if user has a password (not SSO user)
     if (!user.password) {
-      throw new BadRequestException('Password change is not available for SSO users');
+      throw new BadRequestException(
+        'Password change is not available for SSO users',
+      );
     }
 
     // Verify current password
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
     if (!isPasswordValid) {
       throw new UnauthorizedException('Current password is incorrect');
     }
@@ -265,7 +309,10 @@ export class AuthService {
     const otpKey = this.getOTPKey(user.email, OTPPurpose.CHANGE_PASSWORD);
     await this.cacheManager.set(otpKey, otp, OTP_EXPIRY * 1000);
 
-    const cooldownKey = this.getResendCooldownKey(user.email, OTPPurpose.CHANGE_PASSWORD);
+    const cooldownKey = this.getResendCooldownKey(
+      user.email,
+      OTPPurpose.CHANGE_PASSWORD,
+    );
     await this.cacheManager.set(cooldownKey, true, OTP_RESEND_COOLDOWN * 1000);
 
     // Send email
@@ -278,7 +325,12 @@ export class AuthService {
     return { success: true, message: 'Verification code sent to your email.' };
   }
 
-  async changePassword(userId: string, currentPassword: string, otp: string, newPassword: string) {
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    otp: string,
+    newPassword: string,
+  ) {
     // Get user
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -290,11 +342,16 @@ export class AuthService {
 
     // Check if user has a password (not SSO user)
     if (!user.password) {
-      throw new BadRequestException('Password change is not available for SSO users');
+      throw new BadRequestException(
+        'Password change is not available for SSO users',
+      );
     }
 
     // Verify current password
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
     if (!isPasswordValid) {
       throw new UnauthorizedException('Current password is incorrect');
     }
@@ -322,7 +379,9 @@ export class AuthService {
 
       return { success: true, message: 'Password changed successfully.' };
     } catch (error) {
-      throw new BadRequestException('Failed to change password. Please try again.');
+      throw new BadRequestException(
+        'Failed to change password. Please try again.',
+      );
     }
   }
 
@@ -388,7 +447,9 @@ export class AuthService {
       };
     } catch (error) {
       // If account creation fails, OTP remains in cache (user can retry)
-      throw new BadRequestException('Failed to create account. Please try again.');
+      throw new BadRequestException(
+        'Failed to create account. Please try again.',
+      );
     }
   }
 
@@ -531,7 +592,7 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  private sanitizeUser(user: any) {
+  private sanitizeUser(user: User) {
     const { password, ...sanitized } = user;
     return {
       ...sanitized,
@@ -539,8 +600,11 @@ export class AuthService {
     };
   }
 
-
-  async checkPlanLimit(userId: string, limitType: 'goals' | 'schedules' | 'tasksPerDay', currentCount: number) {
+  async checkPlanLimit(
+    userId: string,
+    limitType: 'goals' | 'schedules' | 'tasksPerDay',
+    currentCount: number,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new ForbiddenException('User not found');
 
@@ -554,7 +618,7 @@ export class AuthService {
 
     if (currentCount >= limitMap[limitType]) {
       throw new ForbiddenException(
-        `You've reached your ${user.plan} plan limit for ${limitType}. Upgrade to Max for unlimited access.`
+        `You've reached your ${user.plan} plan limit for ${limitType}. Upgrade to Max for unlimited access.`,
       );
     }
 
@@ -569,7 +633,12 @@ export class AuthService {
       { name: 'Creative', value: 'CREATIVE', color: '#EC4899', order: 4 }, // pink-500
       { name: 'Deep Work', value: 'DEEP_WORK', color: '#FFD700', order: 5 }, // yellow/gold
       { name: 'Exercise', value: 'EXERCISE', color: '#F97316', order: 6 }, // orange-500
-      { name: 'Side Project', value: 'SIDE_PROJECT', color: '#EC4899', order: 7 }, // pink-500
+      {
+        name: 'Side Project',
+        value: 'SIDE_PROJECT',
+        color: '#EC4899',
+        order: 7,
+      }, // pink-500
       { name: 'DSA', value: 'DSA', color: '#FFD700', order: 8 }, // yellow/gold
       { name: 'Meeting', value: 'MEETING', color: '#8B5CF6', order: 9 }, // purple-500
       { name: 'Admin', value: 'ADMIN', color: '#9CA3AF', order: 10 }, // gray-400
@@ -600,16 +669,31 @@ export class AuthService {
 
   private async seedDefaultLabels(userId: string) {
     const currentYear = new Date().getFullYear();
-    
+
     const defaultLabels = [
-      { name: 'Q1', value: 'Q1', color: '#3B82F6', order: 1 },      // blue
-      { name: 'Q2', value: 'Q2', color: '#22C55E', order: 2 },      // green
-      { name: 'Q3', value: 'Q3', color: '#F97316', order: 3 },      // orange
-      { name: 'Q4', value: 'Q4', color: '#EC4899', order: 4 },      // pink
-      { name: `${currentYear}`, value: `${currentYear}`, color: '#8B5CF6', order: 5 }, // purple
-      { name: 'High Priority', value: 'HIGH_PRIORITY', color: '#EF4444', order: 6 },  // red
-      { name: 'Personal', value: 'PERSONAL', color: '#06B6D4', order: 7 },   // cyan
-      { name: 'Professional', value: 'PROFESSIONAL', color: '#6366F1', order: 8 }, // indigo
+      { name: 'Q1', value: 'Q1', color: '#3B82F6', order: 1 }, // blue
+      { name: 'Q2', value: 'Q2', color: '#22C55E', order: 2 }, // green
+      { name: 'Q3', value: 'Q3', color: '#F97316', order: 3 }, // orange
+      { name: 'Q4', value: 'Q4', color: '#EC4899', order: 4 }, // pink
+      {
+        name: `${currentYear}`,
+        value: `${currentYear}`,
+        color: '#8B5CF6',
+        order: 5,
+      }, // purple
+      {
+        name: 'High Priority',
+        value: 'HIGH_PRIORITY',
+        color: '#EF4444',
+        order: 6,
+      }, // red
+      { name: 'Personal', value: 'PERSONAL', color: '#06B6D4', order: 7 }, // cyan
+      {
+        name: 'Professional',
+        value: 'PROFESSIONAL',
+        color: '#6366F1',
+        order: 8,
+      }, // indigo
     ];
 
     // Check if user already has labels

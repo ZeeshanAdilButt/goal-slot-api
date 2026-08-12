@@ -41,11 +41,13 @@ export const envValidationSchema = Joi.object({
       // Split by comma and validate each URL
       const urls = value.split(',').map((url: string) => url.trim());
       const uriSchema = Joi.string().uri();
-      
+
       for (const url of urls) {
         const { error } = uriSchema.validate(url);
         if (error) {
-          return helpers.error('any.invalid', { message: `Invalid URI in CORS_ORIGIN: ${url}` });
+          return helpers.error('any.invalid', {
+            message: `Invalid URI in CORS_ORIGIN: ${url}`,
+          });
         }
       }
       return value; // Return the original string, we'll parse it in main.ts
@@ -63,11 +65,15 @@ export const envValidationSchema = Joi.object({
       try {
         const buf = Buffer.from(value, 'base64');
         if (buf.length !== 32) {
-          return helpers.error('any.invalid', { message: 'BYOK_ENCRYPTION_KEY must decode to 32 bytes' });
+          return helpers.error('any.invalid', {
+            message: 'BYOK_ENCRYPTION_KEY must decode to 32 bytes',
+          });
         }
         return value;
       } catch {
-        return helpers.error('any.invalid', { message: 'BYOK_ENCRYPTION_KEY must be base64' });
+        return helpers.error('any.invalid', {
+          message: 'BYOK_ENCRYPTION_KEY must be base64',
+        });
       }
     }, 'BYOK key validation'),
 

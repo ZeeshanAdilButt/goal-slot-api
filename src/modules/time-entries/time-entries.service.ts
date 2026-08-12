@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
@@ -140,11 +141,7 @@ export class TimeEntriesService {
           select: { id: true, title: true, category: true },
         },
       },
-      orderBy: [
-        { date: 'desc' },
-        { startedAt: 'desc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ date: 'desc' }, { startedAt: 'desc' }, { createdAt: 'desc' }],
     });
   }
 
@@ -173,7 +170,6 @@ export class TimeEntriesService {
       throw new NotFoundException('Time entry not found');
     }
 
-    const oldDuration = entry.duration;
     const oldGoalId = entry.goalId;
 
     let taskTitle = dto.taskTitle;
@@ -290,9 +286,12 @@ export class TimeEntriesService {
     },
   ) {
     const page = params?.page && params.page > 0 ? params.page : 1;
-    const pageSize = params?.pageSize && params.pageSize > 0 ? Math.min(params.pageSize, 100) : 10;
+    const pageSize =
+      params?.pageSize && params.pageSize > 0
+        ? Math.min(params.pageSize, 100)
+        : 10;
 
-    const where: any = { userId };
+    const where: Prisma.TimeEntryWhereInput = { userId };
 
     if (params?.startDate || params?.endDate) {
       const start = params.startDate ? new Date(params.startDate) : undefined;

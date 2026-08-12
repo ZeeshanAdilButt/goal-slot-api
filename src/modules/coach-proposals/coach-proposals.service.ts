@@ -79,6 +79,15 @@ const FORBIDDEN_PAYLOAD_KEYS = [
 /**
  * Dispatches Coach-proposed actions onto the existing domain services.
  *
+ * `CoachProposedAction.payload` is intentionally untyped JSON (see the class
+ * comment on CoachProposedAction) — the Coach LLM emits one shape per action
+ * type, checked here with ad-hoc `typeof` guards rather than a full DTO,
+ * before being routed into the real, fully-validated domain service. The
+ * `payload as unknown as XyzDto` casts below reflect that: they document
+ * which shape each branch expects without claiming compile-time proof the
+ * LLM actually sent it — that's the job of the `typeof` guards and of the
+ * domain service's own validation.
+ *
  * Security model:
  *   - Every action is dispatched with `userId` from the JWT — services already
  *     enforce row-level ownership via findFirst({ where: { id, userId } }).
@@ -137,12 +146,14 @@ export class CoachProposalsService {
       // goal, so the user can log time against the goal as soon as they click apply.
       const action: CoachProposedAction = {
         ...raw,
-        payload: resolveRefs(raw.payload, results),
+        payload: resolveRefs(raw.payload, results) as
+          | Record<string, unknown>
+          | undefined,
       };
       try {
         const resultId = await this.dispatch(userId, action);
         results.push({ index: i, type: action.type, ok: true, resultId });
-      } catch (err: any) {
+      } catch (err) {
         const message =
           err?.response?.message ??
           err?.message ??
@@ -224,12 +235,16 @@ export class CoachProposalsService {
         }
         const updated = await this.goals.update(userId, action.id, {
           title: payload.title.trim(),
-        } as any);
+        });
         return updated?.id;
       }
       case 'UPDATE_GOAL': {
         if (!action.id) throw new Error('UPDATE_GOAL requires id');
-        const updated = await this.goals.update(userId, action.id, payload as any);
+        const updated = await this.goals.update(
+          userId,
+          action.id,
+          payload as unknown as UpdateGoalDto,
+        );
         return updated?.id;
       }
       case 'CREATE_GOAL': {
@@ -242,18 +257,23 @@ export class CoachProposalsService {
         if (typeof payload.targetHours !== 'number') {
           throw new Error('CREATE_GOAL requires numeric payload.targetHours');
         }
-        const created = await this.goals.create(userId, payload as any);
+        const created = await this.goals.create(
+          userId,
+          payload as unknown as CreateGoalDto,
+        );
         return created?.id;
       }
       case 'DELETE_GOAL': {
         if (!action.id) throw new Error('DELETE_GOAL requires id');
-        await this.deleteIdempotent(() => this.goals.delete(userId, action.id!));
+        await this.deleteIdempotent(() =>
+          this.goals.delete(userId, action.id!),
+        );
         return action.id;
       }
 
       // -------- Schedule blocks --------
       case 'CREATE_SCHEDULE_BLOCK': {
-        const p = { ...(payload as any) };
+        const p: Record<string, unknown> = { ...payload };
         // Multi-day support: the model may pass daysOfWeek:number[] to create
         // the same block across several days in ONE action, as a recurring
         // series sharing a seriesId. This is how a whole week fits in ~13
@@ -265,8 +285,7 @@ export class CoachProposalsService {
           ? Array.from(
               new Set(
                 rawDays.filter(
-                  (d): d is number =>
-                    Number.isInteger(d) && d >= 0 && d <= 6,
+                  (d): d is number => Number.isInteger(d) && d >= 0 && d <= 6,
                 ),
               ),
             )
@@ -384,17 +403,20 @@ export class CoachProposalsService {
 
       // -------- Time entries --------
       case 'CREATE_TIME_ENTRY': {
-        const created = await this.timeEntries.create(userId, payload as any);
-        return (created as any)?.id;
+        const created = await this.timeEntries.create(
+          userId,
+          payload as unknown as CreateTimeEntryDto,
+        );
+        return created?.id;
       }
       case 'UPDATE_TIME_ENTRY': {
         if (!action.id) throw new Error('UPDATE_TIME_ENTRY requires id');
         const updated = await this.timeEntries.update(
           userId,
           action.id,
-          payload as any,
+          payload as unknown as UpdateTimeEntryDto,
         );
-        return (updated as any)?.id ?? action.id;
+        return updated?.id ?? action.id;
       }
       case 'DELETE_TIME_ENTRY': {
         if (!action.id) throw new Error('DELETE_TIME_ENTRY requires id');
@@ -406,28 +428,42 @@ export class CoachProposalsService {
 
       // -------- Tasks --------
       case 'CREATE_TASK': {
-        const created = await this.tasks.create(userId, payload as any);
-        return (created as any)?.id;
+        const created = await this.tasks.create(
+          userId,
+          payload as unknown as CreateTaskDto,
+        );
+        return created?.id;
       }
       case 'UPDATE_TASK': {
         if (!action.id) throw new Error('UPDATE_TASK requires id');
-        const updated = await this.tasks.update(userId, action.id, payload as any);
-        return (updated as any)?.id ?? action.id;
+        const updated = await this.tasks.update(
+          userId,
+          action.id,
+          payload as unknown as UpdateTaskDto,
+        );
+        return updated?.id ?? action.id;
       }
       case 'DELETE_TASK': {
         if (!action.id) throw new Error('DELETE_TASK requires id');
-        await this.deleteIdempotent(() => this.tasks.delete(userId, action.id!));
+        await this.deleteIdempotent(() =>
+          this.tasks.delete(userId, action.id!),
+        );
         return action.id;
       }
 
       // -------- Active practice (CoachInsight in ACCEPTED) --------
       case 'CREATE_PRACTICE': {
-        const created = await this.insights.createAccepted(userId, payload as any);
+        const created = await this.insights.createAccepted(
+          userId,
+          payload as unknown as Parameters<
+            typeof this.insights.createAccepted
+          >[1],
+        );
         return created.id;
       }
 
       default:
-        throw new Error(`Unknown action type: ${(action as any).type}`);
+        throw new Error(`Unknown action type: ${action.type}`);
     }
   }
 
@@ -438,7 +474,7 @@ export class CoachProposalsService {
    */
   private async createBlockIdempotent(
     userId: string,
-    p: any,
+    p: Record<string, unknown>,
   ): Promise<string | undefined> {
     if (
       p &&
@@ -459,8 +495,11 @@ export class CoachProposalsService {
       });
       if (existing) return existing.id;
     }
-    const created = await this.schedule.create(userId, p);
-    return (created as any)?.id;
+    const created = await this.schedule.create(
+      userId,
+      p as unknown as CreateScheduleBlockDto,
+    );
+    return created?.id;
   }
 
   /**
@@ -718,10 +757,7 @@ function flattenValidationErrors(errors: ValidationError[]): string {
  * action at batch index N. Walks objects + arrays recursively. Used so the
  * Coach can express dependencies inside a single approval batch.
  */
-function resolveRefs(
-  value: any,
-  results: CoachActionResult[],
-): any {
+function resolveRefs(value: unknown, results: CoachActionResult[]): unknown {
   if (typeof value === 'string') {
     const m = /^\$ref:(\d+)$/.exec(value);
     if (m) {
@@ -738,8 +774,10 @@ function resolveRefs(
   }
   if (Array.isArray(value)) return value.map((v) => resolveRefs(v, results));
   if (value && typeof value === 'object') {
-    const out: Record<string, any> = {};
-    for (const k of Object.keys(value)) out[k] = resolveRefs(value[k], results);
+    const entries = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(entries))
+      out[k] = resolveRefs(entries[k], results);
     return out;
   }
   return value;

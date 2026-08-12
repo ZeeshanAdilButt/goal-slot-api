@@ -1,4 +1,8 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationType } from '@prisma/client';
 
@@ -19,7 +23,9 @@ interface CreateFeedbackReplyNotificationInput {
 export class NotificationsService {
   constructor(private prisma: PrismaService) {}
 
-  async createFeedbackReplyNotification(input: CreateFeedbackReplyNotificationInput) {
+  async createFeedbackReplyNotification(
+    input: CreateFeedbackReplyNotificationInput,
+  ) {
     const preview = input.message.slice(0, 140);
     return this.prisma.notification.create({
       data: {
@@ -52,7 +58,9 @@ export class NotificationsService {
     const hasMore = items.length > take;
     const sliced = hasMore ? items.slice(0, take) : items;
     const nextCursor = hasMore ? items[take].id : undefined;
-    const unreadCount = await this.prisma.notification.count({ where: { userId: params.userId, readAt: null } });
+    const unreadCount = await this.prisma.notification.count({
+      where: { userId: params.userId, readAt: null },
+    });
 
     return {
       items: sliced,
@@ -63,7 +71,9 @@ export class NotificationsService {
   }
 
   async markRead(id: string, userId: string) {
-    const notification = await this.prisma.notification.findUnique({ where: { id } });
+    const notification = await this.prisma.notification.findUnique({
+      where: { id },
+    });
     if (!notification) {
       throw new NotFoundException('Notification not found');
     }

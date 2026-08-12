@@ -2,9 +2,9 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { Resend } from "resend";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Resend } from 'resend';
 
 // Every template below interpolates user-controlled strings (display
 // names, titles, emails) into HTML that gets sent from GoalSlot's
@@ -27,25 +27,25 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   private maskEmail(email: string): string {
-    const [local, domain] = email.split("@");
-    if (!local || !domain) return "***";
+    const [local, domain] = email.split('@');
+    if (!local || !domain) return '***';
     return `${local.slice(0, 2)}***@${domain}`;
   }
 
   private resend: Resend;
   private onboardingEmail: string;
   private notificationEmail: string;
-  private appUrl = "";
+  private appUrl = '';
 
   constructor(private readonly configService: ConfigService) {
     this.resend = new Resend(
-      this.configService.getOrThrow<string>("RESEND_API_KEY"),
+      this.configService.getOrThrow<string>('RESEND_API_KEY'),
     );
-    this.appUrl = this.configService.getOrThrow<string>("APP_URL");
+    this.appUrl = this.configService.getOrThrow<string>('APP_URL');
     this.onboardingEmail =
-      this.configService.getOrThrow<string>("ONBOARDING_EMAIL");
+      this.configService.getOrThrow<string>('ONBOARDING_EMAIL');
     this.notificationEmail =
-      this.configService.getOrThrow<string>("NOTIFICATION_EMAIL");
+      this.configService.getOrThrow<string>('NOTIFICATION_EMAIL');
   }
 
   // -----------------------------------------------------------------
@@ -60,7 +60,7 @@ export class EmailService {
     const { bodyHtml, preheader } = opts;
     const hiddenPreheader = preheader
       ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">${preheader}</div>`
-      : "";
+      : '';
     return `<!DOCTYPE html>
 <html>
   <head>
@@ -104,7 +104,7 @@ export class EmailService {
                 <div style="margin-bottom:4px;font-weight:600;color:#52525b;">GoalSlot</div>
                 <div>Goals, schedule, time, tasks, notes, journal &mdash; one place.</div>
                 <div style="margin-top:8px;">
-                  <a href="${this.appUrl}" style="color:#71717a;text-decoration:none;">${this.appUrl.replace(/^https?:\/\//, "")}</a>
+                  <a href="${this.appUrl}" style="color:#71717a;text-decoration:none;">${this.appUrl.replace(/^https?:\/\//, '')}</a>
                 </div>
               </td>
             </tr>
@@ -118,8 +118,12 @@ export class EmailService {
 
   // Primary CTA button. Inline styles only because email clients ignore
   // most stylesheets. Centered by default; pass align: 'left' to opt out.
-  private renderButton(href: string, label: string, align: "center" | "left" = "center"): string {
-    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" style="margin:${align === "center" ? "20px auto" : "20px 0"};">
+  private renderButton(
+    href: string,
+    label: string,
+    align: 'center' | 'left' = 'center',
+  ): string {
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" style="margin:${align === 'center' ? '20px auto' : '20px 0'};">
       <tr>
         <td style="border-radius:8px;background:#f2cc0d;">
           <a href="${href}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#18181b;text-decoration:none;border-radius:8px;letter-spacing:0.02em;">
@@ -133,20 +137,20 @@ export class EmailService {
   // Soft-tinted callout box used for security notes, step rows, info
   // panels, etc. tone controls the background + accent color.
   private renderCallout(opts: {
-    tone?: "info" | "warning" | "success";
+    tone?: 'info' | 'warning' | 'success';
     title?: string;
     html: string;
   }): string {
-    const tone = opts.tone ?? "info";
+    const tone = opts.tone ?? 'info';
     const palette =
-      tone === "warning"
-        ? { bg: "#fff7d1", border: "#f4e6a4", accent: "#8a7307" }
-        : tone === "success"
-          ? { bg: "#ecfdf5", border: "#a7f3d0", accent: "#047857" }
-          : { bg: "#fafafa", border: "#e4e4e7", accent: "#52525b" };
+      tone === 'warning'
+        ? { bg: '#fff7d1', border: '#f4e6a4', accent: '#8a7307' }
+        : tone === 'success'
+          ? { bg: '#ecfdf5', border: '#a7f3d0', accent: '#047857' }
+          : { bg: '#fafafa', border: '#e4e4e7', accent: '#52525b' };
     const titleHtml = opts.title
       ? `<div style="font-weight:700;font-size:13px;color:${palette.accent};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">${opts.title}</div>`
-      : "";
+      : '';
     return `<div style="background:${palette.bg};border:1px solid ${palette.border};border-radius:10px;padding:14px 16px;margin:18px 0;font-size:13.5px;color:#27272a;">
       ${titleHtml}${opts.html}
     </div>`;
@@ -182,15 +186,15 @@ export class EmailService {
           <strong>${safeInviterName}</strong> (${safeInviterEmail}) shared their GoalSlot focus reports and productivity data with you.
         </p>
         <p style="margin:0 0 4px;color:#3f3f46;">Click below to open the shared view:</p>
-        ${this.renderButton(viewLink, "View shared reports")}
+        ${this.renderButton(viewLink, 'View shared reports')}
         ${this.renderCallout({
-          tone: "info",
-          title: "What this link does",
+          tone: 'info',
+          title: 'What this link does',
           html: `<ul style="margin:6px 0 0;padding-left:18px;color:#3f3f46;">
             <li>Secure, unique, view-only access.</li>
             <li>No account required to view.</li>
             <li>Expires in 7 days.</li>
-            ${!isExistingUser ? "<li>Sign up to track your own focus time and unlock the rest of GoalSlot.</li>" : ""}
+            ${!isExistingUser ? '<li>Sign up to track your own focus time and unlock the rest of GoalSlot.</li>' : ''}
           </ul>`,
         })}
         <p style="margin:18px 0 6px;font-size:12px;color:#71717a;">If the button does not work, copy this link into your browser:</p>
@@ -209,7 +213,7 @@ What this link does:
 - Secure, unique, view-only access.
 - No account required to view.
 - Expires in 7 days.
-${!isExistingUser ? "- Sign up to track your own focus time and unlock the rest of GoalSlot.\n" : ""}
+${!isExistingUser ? '- Sign up to track your own focus time and unlock the rest of GoalSlot.\n' : ''}
 If you did not expect this invitation, you can safely ignore it.
 
 GoalSlot`;
@@ -257,7 +261,7 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/notes?shared=${noteId}`;
-    const safeTitle = escapeHtml(noteTitle || "Untitled");
+    const safeTitle = escapeHtml(noteTitle || 'Untitled');
     const safeInviterName = escapeHtml(inviterName);
     const safeInviterEmail = escapeHtml(inviterEmail);
 
@@ -271,10 +275,10 @@ GoalSlot`;
         ${this.renderTitleCard(safeTitle)}
         <p style="margin:0 0 4px;color:#3f3f46;">${
           isExistingUser
-            ? "Open it from Notes &rsaquo; Shared with me, or click below."
-            : "You will need to sign up with this email to view it. Sign up is quick and free."
+            ? 'Open it from Notes &rsaquo; Shared with me, or click below.'
+            : 'You will need to sign up with this email to view it. Sign up is quick and free.'
         }</p>
-        ${this.renderButton(viewLink, isExistingUser ? "Open the note" : "Sign up and view")}
+        ${this.renderButton(viewLink, isExistingUser ? 'Open the note' : 'Sign up and view')}
         <p style="margin:18px 0 6px;font-size:12px;color:#71717a;">If the button does not work, copy this link into your browser:</p>
         <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all;">${viewLink}</p>
       `,
@@ -328,7 +332,7 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/whiteboards?shared=${whiteboardId}`;
-    const safeTitle = escapeHtml(whiteboardTitle || "Untitled");
+    const safeTitle = escapeHtml(whiteboardTitle || 'Untitled');
     const safeInviterName = escapeHtml(inviterName);
     const safeInviterEmail = escapeHtml(inviterEmail);
 
@@ -342,10 +346,10 @@ GoalSlot`;
         ${this.renderTitleCard(safeTitle)}
         <p style="margin:0 0 4px;color:#3f3f46;">${
           isExistingUser
-            ? "Open it from Whiteboards &rsaquo; Shared with me, or click below."
-            : "You will need to sign up with this email to view it. Sign up is quick and free."
+            ? 'Open it from Whiteboards &rsaquo; Shared with me, or click below.'
+            : 'You will need to sign up with this email to view it. Sign up is quick and free.'
         }</p>
-        ${this.renderButton(viewLink, isExistingUser ? "Open the whiteboard" : "Sign up and view")}
+        ${this.renderButton(viewLink, isExistingUser ? 'Open the whiteboard' : 'Sign up and view')}
         <p style="margin:18px 0 6px;font-size:12px;color:#71717a;">If the button does not work, copy this link into your browser:</p>
         <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all;">${viewLink}</p>
       `,
@@ -393,9 +397,9 @@ GoalSlot`;
     const setPasswordLink = `${this.appUrl}/forgot-password?email=${encodeURIComponent(toEmail)}`;
     const loginLink = `${this.appUrl}/login`;
     const roleLine =
-      role === "ADMIN"
-        ? "You have been added as an admin."
-        : "Your free Fellowship account is ready.";
+      role === 'ADMIN'
+        ? 'You have been added as an admin.'
+        : 'Your free Fellowship account is ready.';
 
     const html = this.renderLayout({
       preheader: `${safeInviterName} invited you to GoalSlot.`,
@@ -405,14 +409,14 @@ GoalSlot`;
           <strong>${safeInviterName}</strong> (${safeInviterEmail}) invited you to join GoalSlot. ${roleLine}
         </p>
         ${this.renderCallout({
-          tone: "info",
-          title: "Step 1 &ndash; Set your password",
+          tone: 'info',
+          title: 'Step 1 &ndash; Set your password',
           html: `<p style="margin:0 0 4px;color:#3f3f46;">Use this email address (${safeToEmail}) when prompted.</p>
-            ${this.renderButton(setPasswordLink, "Set my password", "left")}`,
+            ${this.renderButton(setPasswordLink, 'Set my password', 'left')}`,
         })}
         ${this.renderCallout({
-          tone: "info",
-          title: "Step 2 &ndash; Log in",
+          tone: 'info',
+          title: 'Step 2 &ndash; Log in',
           html: `<p style="margin:0;color:#3f3f46;">Once your password is set, log in at <a href="${loginLink}">${loginLink}</a>.</p>`,
         })}
         <p style="margin:18px 0 6px;font-size:12px;color:#71717a;">If the button does not work, copy this link into your browser:</p>
@@ -455,16 +459,16 @@ GoalSlot`;
   async sendOTPEmail(params: {
     toEmail: string;
     otp: string;
-    purpose: "signup" | "forgot-password";
+    purpose: 'signup' | 'forgot-password';
   }) {
     const { toEmail, otp, purpose } = params;
 
     const purposeText =
-      purpose === "signup" ? "Email verification" : "Password reset";
+      purpose === 'signup' ? 'Email verification' : 'Password reset';
     const purposeDescription =
-      purpose === "signup"
-        ? "to complete your registration"
-        : "to reset your password";
+      purpose === 'signup'
+        ? 'to complete your registration'
+        : 'to reset your password';
 
     const html = this.renderLayout({
       preheader: `Your GoalSlot ${purposeText.toLowerCase()} code: ${otp}`,
@@ -477,8 +481,8 @@ GoalSlot`;
           </div>
         </div>
         ${this.renderCallout({
-          tone: "warning",
-          title: "Security",
+          tone: 'warning',
+          title: 'Security',
           html: `<ul style="margin:6px 0 0;padding-left:18px;color:#3f3f46;">
             <li>Expires in <strong>5 minutes</strong>.</li>
             <li>One use only.</li>
@@ -538,7 +542,7 @@ GoalSlot`;
 
     const dashboardLink = `${this.appUrl}/dashboard`;
     const libraryLink = `${this.appUrl}/dashboard/library`;
-    const firstName = escapeHtml(userName.split(" ")[0]);
+    const firstName = escapeHtml(userName.split(' ')[0]);
 
     const html = this.renderLayout({
       preheader: `Welcome to GoalSlot, ${firstName}. Set up your first goal in two minutes.`,
@@ -547,10 +551,10 @@ GoalSlot`;
         <p style="margin:0 0 12px;color:#3f3f46;">
           GoalSlot ties your goals, weekly schedule, time tracking, tasks, notes, and journal into one place. The fastest way to feel it: import a curated schedule from the Library, edit what you do not like, and start tracking.
         </p>
-        ${this.renderButton(libraryLink, "Browse the Library")}
+        ${this.renderButton(libraryLink, 'Browse the Library')}
         ${this.renderCallout({
-          tone: "info",
-          title: "Three places to start",
+          tone: 'info',
+          title: 'Three places to start',
           html: `<ul style="margin:6px 0 0;padding-left:18px;color:#3f3f46;">
             <li><a href="${this.appUrl}/dashboard/goals">Add your first goal</a> &ndash; what you are working on this month.</li>
             <li><a href="${this.appUrl}/dashboard/schedule">Block one weekly slot</a> &ndash; when that goal gets attention.</li>
@@ -558,7 +562,7 @@ GoalSlot`;
           </ul>`,
         })}
         <p style="margin:18px 0 4px;color:#3f3f46;">Or jump straight into the dashboard:</p>
-        ${this.renderButton(dashboardLink, "Open my dashboard", "left")}
+        ${this.renderButton(dashboardLink, 'Open my dashboard', 'left')}
         <p style="margin:18px 0 0;color:#3f3f46;">Consistency beats intensity. Small daily focus sessions compound.</p>
       `,
     });
@@ -617,8 +621,8 @@ GoalSlot`;
           <strong>${safeAccepterName}</strong> (${safeAccepterEmail}) accepted your invitation and can now view your focus reports on GoalSlot.
         </p>
         ${this.renderCallout({
-          tone: "success",
-          title: "What they can see",
+          tone: 'success',
+          title: 'What they can see',
           html: `<ul style="margin:6px 0 0;padding-left:18px;color:#3f3f46;">
             <li>Your focus time reports and analytics.</li>
             <li>Your goals and progress.</li>
@@ -626,7 +630,7 @@ GoalSlot`;
           </ul>`,
         })}
         <p style="margin:0;color:#3f3f46;">You can manage shared access anytime from the Sharing section in your dashboard.</p>
-        ${this.renderButton(`${this.appUrl}/dashboard/sharing`, "Manage sharing", "left")}
+        ${this.renderButton(`${this.appUrl}/dashboard/sharing`, 'Manage sharing', 'left')}
       `,
     });
 

@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PlanType } from '@prisma/client';
+import { PlanType, Prisma } from '@prisma/client';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -13,7 +13,8 @@ export class StripeService {
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
-    const secretKey = this.configService.getOrThrow<string>('STRIPE_SECRET_KEY');
+    const secretKey =
+      this.configService.getOrThrow<string>('STRIPE_SECRET_KEY');
     this.isMock = secretKey.startsWith('sk_test_mock');
 
     if (!this.isMock) {
@@ -23,17 +24,25 @@ export class StripeService {
 
   private getPriceId(plan: PlanType) {
     if (plan === PlanType.PRO) {
-      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_PRO') || this.configService.get<string>('STRIPE_PRICE_ID');
+      const priceId =
+        this.configService.get<string>('STRIPE_PRICE_ID_PRO') ||
+        this.configService.get<string>('STRIPE_PRICE_ID');
       if (!priceId) {
-        throw new BadRequestException('Stripe price for Max plan is not configured');
+        throw new BadRequestException(
+          'Stripe price for Max plan is not configured',
+        );
       }
       return priceId;
     }
 
     if (plan === PlanType.BASIC) {
-      const priceId = this.configService.get<string>('STRIPE_PRICE_ID_BASIC') || this.configService.get<string>('STRIPE_PRICE_ID');
+      const priceId =
+        this.configService.get<string>('STRIPE_PRICE_ID_BASIC') ||
+        this.configService.get<string>('STRIPE_PRICE_ID');
       if (!priceId) {
-        throw new BadRequestException('Stripe price for Pro plan is not configured');
+        throw new BadRequestException(
+          'Stripe price for Pro plan is not configured',
+        );
       }
       return priceId;
     }
@@ -112,22 +121,32 @@ export class StripeService {
       return { received: true, mock: true };
     }
 
-    const webhookSecret = this.configService.getOrThrow<string>('STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = this.configService.getOrThrow<string>(
+      'STRIPE_WEBHOOK_SECRET',
+    );
     let event: Stripe.Event;
 
     try {
-      event = this.stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+      event = this.stripe.webhooks.constructEvent(
+        payload,
+        signature,
+        webhookSecret,
+      );
     } catch (err) {
       throw new BadRequestException(`Webhook Error: ${err.message}`);
     }
 
     switch (event.type) {
       case 'checkout.session.completed':
-        await this.handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await this.handleCheckoutCompleted(
+          event.data.object as Stripe.Checkout.Session,
+        );
         break;
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted':
-        await this.handleSubscriptionChange(event.data.object as Stripe.Subscription);
+        await this.handleSubscriptionChange(
+          event.data.object as Stripe.Subscription,
+        );
         break;
       case 'invoice.paid':
         await this.handleInvoicePaid(event.data.object as Stripe.Invoice);
@@ -166,7 +185,8 @@ export class StripeService {
     });
     if (!user) return;
 
-    const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+    const isActive =
+      subscription.status === 'active' || subscription.status === 'trialing';
     const plan = (subscription.metadata?.plan as PlanType) || PlanType.PRO;
 
     await this.prisma.user.update({
@@ -206,7 +226,7 @@ export class StripeService {
     if (!user) return;
 
     const now = new Date();
-    const updateData: any = {
+    const updateData: Prisma.UserUpdateInput = {
       lastPaymentDate: now,
       invoicePending: false,
       lastInvoiceId: invoice.id,
@@ -278,12 +298,24 @@ export class StripeService {
       invoicePending: user.invoicePending,
       lastInvoiceId: user.lastInvoiceId,
       // Flags for UI
-      requiresPaymentAction: user.invoicePending || user.subscriptionStatus === 'past_due',
+      requiresPaymentAction:
+        user.invoicePending || user.subscriptionStatus === 'past_due',
       price: user.plan === PlanType.PRO ? '$12/month' : '$7/month',
       features: {
         free: ['3 goals', '5 schedules', '3 tasks/day', 'Basic analytics'],
-        pro: ['10 goals', 'Unlimited schedules', 'Unlimited tasks', 'Advanced analytics'],
-        max: ['Unlimited goals', 'Unlimited schedules', 'Unlimited tasks', 'Priority support', 'Advanced analytics'],
+        pro: [
+          '10 goals',
+          'Unlimited schedules',
+          'Unlimited tasks',
+          'Advanced analytics',
+        ],
+        max: [
+          'Unlimited goals',
+          'Unlimited schedules',
+          'Unlimited tasks',
+          'Priority support',
+          'Advanced analytics',
+        ],
       },
     };
   }
@@ -338,15 +370,21 @@ export class StripeService {
     ]);
 
     return {
-      subscription: subscription ? {
-        id: subscription.id,
-        status: subscription.status,
-        currentPeriodStart: new Date(subscription.current_period_start * 1000),
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-        cancelAt: subscription.cancel_at ? new Date(subscription.cancel_at * 1000) : null,
-      } : null,
-      invoices: invoices.data.map(inv => ({
+      subscription: subscription
+        ? {
+            id: subscription.id,
+            status: subscription.status,
+            currentPeriodStart: new Date(
+              subscription.current_period_start * 1000,
+            ),
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            cancelAt: subscription.cancel_at
+              ? new Date(subscription.cancel_at * 1000)
+              : null,
+          }
+        : null,
+      invoices: invoices.data.map((inv) => ({
         id: inv.id,
         number: inv.number,
         status: inv.status,
@@ -359,7 +397,7 @@ export class StripeService {
         hostedInvoiceUrl: inv.hosted_invoice_url,
         invoicePdf: inv.invoice_pdf,
       })),
-      paymentMethods: paymentMethods.data.map(pm => ({
+      paymentMethods: paymentMethods.data.map((pm) => ({
         id: pm.id,
         brand: pm.card?.brand,
         last4: pm.card?.last4,
@@ -375,19 +413,26 @@ export class StripeService {
   }
 
   // Mock implementation for development
-  private createMockCheckoutSession(userId: string, email: string, plan: PlanType) {
+  private createMockCheckoutSession(
+    userId: string,
+    email: string,
+    plan: PlanType,
+  ) {
     const mockSessionId = `mock_session_${Date.now()}`;
     return {
       url: `/billing/mock-checkout?session=${mockSessionId}&userId=${userId}&plan=${plan}`,
       sessionId: mockSessionId,
       mock: true,
-      message: 'This is a mock checkout. In production, this will redirect to Stripe.',
+      message:
+        'This is a mock checkout. In production, this will redirect to Stripe.',
     };
   }
 
   async mockActivateSubscription(userId: string) {
     if (!this.isMock) {
-      throw new BadRequestException('Mock activation only available in development');
+      throw new BadRequestException(
+        'Mock activation only available in development',
+      );
     }
 
     await this.prisma.user.update({
@@ -405,7 +450,9 @@ export class StripeService {
 
   async mockCancelSubscription(userId: string) {
     if (!this.isMock) {
-      throw new BadRequestException('Mock cancellation only available in development');
+      throw new BadRequestException(
+        'Mock cancellation only available in development',
+      );
     }
 
     await this.prisma.user.update({

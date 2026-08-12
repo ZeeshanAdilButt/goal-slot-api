@@ -18,13 +18,23 @@ export class IdempotencyService {
   constructor(private readonly prisma: PrismaService) {}
 
   hashRequest(method: string, routePattern: string, body: unknown): string {
-    const payload = JSON.stringify({ method, routePattern, body: body ?? null });
+    const payload = JSON.stringify({
+      method,
+      routePattern,
+      body: body ?? null,
+    });
     return createHash('sha256').update(payload).digest('hex');
   }
 
   async find(key: string, userId: string): Promise<IdempotencyLookup | null> {
-    const record = await this.prisma.idempotencyRecord.findUnique({ where: { key } });
-    if (!record || record.userId !== userId || record.expiresAt.getTime() < Date.now()) {
+    const record = await this.prisma.idempotencyRecord.findUnique({
+      where: { key },
+    });
+    if (
+      !record ||
+      record.userId !== userId ||
+      record.expiresAt.getTime() < Date.now()
+    ) {
       return null;
     }
     return {
@@ -68,7 +78,9 @@ export class IdempotencyService {
     if (now - this.lastSweepAt < SWEEP_INTERVAL_MS) return;
     this.lastSweepAt = now;
     try {
-      await this.prisma.idempotencyRecord.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+      await this.prisma.idempotencyRecord.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      });
     } catch {
       // Best-effort cleanup.
     }

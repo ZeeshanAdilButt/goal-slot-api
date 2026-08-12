@@ -1,4 +1,8 @@
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import * as http from 'http';
@@ -59,7 +63,10 @@ class FakePrisma {
   store = new Map<string, FakeInsight>();
   private idCounter = 0;
 
-  seed(row: Omit<FakeInsight, 'id' | 'createdAt' | 'updatedAt'> & Partial<Pick<FakeInsight, 'id' | 'createdAt' | 'updatedAt'>>): FakeInsight {
+  seed(
+    row: Omit<FakeInsight, 'id' | 'createdAt' | 'updatedAt'> &
+      Partial<Pick<FakeInsight, 'id' | 'createdAt' | 'updatedAt'>>,
+  ): FakeInsight {
     const now = new Date();
     const id = row.id ?? 'ins_' + (++this.idCounter).toString();
     const full: FakeInsight = {
@@ -73,7 +80,13 @@ class FakePrisma {
   }
 
   coachInsight = {
-    findMany: async ({ where, orderBy: _orderBy }: { where: any; orderBy?: any }) => {
+    findMany: async ({
+      where,
+      orderBy: _orderBy,
+    }: {
+      where: any;
+      orderBy?: any;
+    }) => {
       const rows = Array.from(this.store.values()).filter((r) =>
         matchesWhere(r, where),
       );
@@ -218,13 +231,54 @@ describe('CoachInsightsModule (e2e)', () => {
       savedAt: null,
       userNote: null,
     };
-    fakePrisma.seed({ ...baseRow, id: 'a_proposed', status: 'PROPOSED', title: 'A proposed' });
-    fakePrisma.seed({ ...baseRow, id: 'a_accepted', status: 'ACCEPTED', title: 'A accepted', acceptedAt: new Date() });
-    fakePrisma.seed({ ...baseRow, id: 'a_doing', status: 'DOING', title: 'A doing', startedDoingAt: new Date() });
-    fakePrisma.seed({ ...baseRow, id: 'a_done', status: 'DONE', title: 'A done', completedAt: new Date() });
-    fakePrisma.seed({ ...baseRow, id: 'a_dismissed', status: 'DISMISSED', title: 'A dismissed', dismissedAt: new Date() });
-    fakePrisma.seed({ ...baseRow, id: 'a_saved', status: 'SAVED', title: 'A saved', savedAt: new Date() });
-    fakePrisma.seed({ ...baseRow, userId: USER_B, id: 'b_proposed', status: 'PROPOSED', title: 'B proposed' });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_proposed',
+      status: 'PROPOSED',
+      title: 'A proposed',
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_accepted',
+      status: 'ACCEPTED',
+      title: 'A accepted',
+      acceptedAt: new Date(),
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_doing',
+      status: 'DOING',
+      title: 'A doing',
+      startedDoingAt: new Date(),
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_done',
+      status: 'DONE',
+      title: 'A done',
+      completedAt: new Date(),
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_dismissed',
+      status: 'DISMISSED',
+      title: 'A dismissed',
+      dismissedAt: new Date(),
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      id: 'a_saved',
+      status: 'SAVED',
+      title: 'A saved',
+      savedAt: new Date(),
+    });
+    fakePrisma.seed({
+      ...baseRow,
+      userId: USER_B,
+      id: 'b_proposed',
+      status: 'PROPOSED',
+      title: 'B proposed',
+    });
   });
 
   afterAll(async () => {
@@ -232,7 +286,9 @@ describe('CoachInsightsModule (e2e)', () => {
   });
 
   it('GET / with no filter returns ACTIVE (PROPOSED+ACCEPTED+DOING) only', async () => {
-    const res = await request(baseUrl, 'GET', '/coach/insights', { userId: USER_A });
+    const res = await request(baseUrl, 'GET', '/coach/insights', {
+      userId: USER_A,
+    });
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     const statuses = res.body.map((r: any) => r.status).sort();
@@ -242,15 +298,26 @@ describe('CoachInsightsModule (e2e)', () => {
   });
 
   it('GET /?status=ALL returns everything (including DISMISSED + SAVED) for the user', async () => {
-    const res = await request(baseUrl, 'GET', '/coach/insights?status=ALL', { userId: USER_A });
+    const res = await request(baseUrl, 'GET', '/coach/insights?status=ALL', {
+      userId: USER_A,
+    });
     expect(res.status).toBe(200);
     expect(res.body.length).toBe(6);
     const statuses = res.body.map((r: any) => r.status).sort();
-    expect(statuses).toEqual(['ACCEPTED', 'DISMISSED', 'DOING', 'DONE', 'PROPOSED', 'SAVED']);
+    expect(statuses).toEqual([
+      'ACCEPTED',
+      'DISMISSED',
+      'DOING',
+      'DONE',
+      'PROPOSED',
+      'SAVED',
+    ]);
   });
 
   it('cross-user: user B cannot read user A insight (404)', async () => {
-    const res = await request(baseUrl, 'GET', '/coach/insights/a_proposed', { userId: USER_B });
+    const res = await request(baseUrl, 'GET', '/coach/insights/a_proposed', {
+      userId: USER_B,
+    });
     expect(res.status).toBe(404);
   });
 
@@ -275,10 +342,15 @@ describe('CoachInsightsModule (e2e)', () => {
       savedAt: null,
       userNote: null,
     });
-    const res = await request(baseUrl, 'POST', `/coach/insights/${fresh.id}/status`, {
-      userId: USER_A,
-      body: { status: 'ACCEPTED' },
-    });
+    const res = await request(
+      baseUrl,
+      'POST',
+      `/coach/insights/${fresh.id}/status`,
+      {
+        userId: USER_A,
+        body: { status: 'ACCEPTED' },
+      },
+    );
     expect([200, 201]).toContain(res.status);
     expect(res.body.status).toBe('ACCEPTED');
     expect(res.body.acceptedAt).toBeTruthy();
@@ -305,10 +377,15 @@ describe('CoachInsightsModule (e2e)', () => {
       savedAt: null,
       userNote: null,
     });
-    const res = await request(baseUrl, 'POST', `/coach/insights/${fresh.id}/status`, {
-      userId: USER_A,
-      body: { status: 'SAVED' },
-    });
+    const res = await request(
+      baseUrl,
+      'POST',
+      `/coach/insights/${fresh.id}/status`,
+      {
+        userId: USER_A,
+        body: { status: 'SAVED' },
+      },
+    );
     expect([200, 201]).toContain(res.status);
     expect(res.body.status).toBe('SAVED');
     expect(res.body.savedAt).toBeTruthy();
@@ -335,20 +412,29 @@ describe('CoachInsightsModule (e2e)', () => {
       savedAt: null,
       userNote: null,
     });
-    const res = await request(baseUrl, 'DELETE', `/coach/insights/${fresh.id}`, { userId: USER_A });
+    const res = await request(
+      baseUrl,
+      'DELETE',
+      `/coach/insights/${fresh.id}`,
+      { userId: USER_A },
+    );
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
 
   it('DELETE on ACCEPTED returns 409', async () => {
-    const res = await request(baseUrl, 'DELETE', `/coach/insights/a_accepted`, { userId: USER_A });
+    const res = await request(baseUrl, 'DELETE', `/coach/insights/a_accepted`, {
+      userId: USER_A,
+    });
     expect(res.status).toBe(409);
   });
 
   it('rejects unauthenticated request (guard canActivate=false → 401/403)', async () => {
     authMode = 'allow-empty';
     try {
-      const res = await request(baseUrl, 'GET', '/coach/insights', { noAuth: true });
+      const res = await request(baseUrl, 'GET', '/coach/insights', {
+        noAuth: true,
+      });
       expect([401, 403]).toContain(res.status);
     } finally {
       authMode = 'bearer-required';

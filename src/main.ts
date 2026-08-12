@@ -21,15 +21,14 @@ async function bootstrap() {
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
-  const corsOrigin = configService.getOrThrow<string>('CORS_ORIGIN')
-  const corsOrigins = corsOrigin.split(',').map(url => url.trim());
+  const corsOrigin = configService.getOrThrow<string>('CORS_ORIGIN');
+  const corsOrigins = corsOrigin.split(',').map((url) => url.trim());
 
   // Enable CORS
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
   });
-
 
   // Global validation pipe
   app.useGlobalPipes(

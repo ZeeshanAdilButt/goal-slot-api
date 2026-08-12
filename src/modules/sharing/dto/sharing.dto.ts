@@ -1,4 +1,11 @@
-import { IsEmail, IsEnum, IsOptional, IsNumber, Min, Max } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsNumber,
+  Min,
+  Max,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum AccessLevel {
@@ -16,19 +23,30 @@ export class InviteUserDto {
   @IsEmail()
   email: string;
 
-  @ApiProperty({ enum: AccessLevel, required: false, default: AccessLevel.VIEW })
+  @ApiProperty({
+    enum: AccessLevel,
+    required: false,
+    default: AccessLevel.VIEW,
+  })
   @IsOptional()
   @IsEnum(AccessLevel)
   accessLevel?: AccessLevel;
 }
 
 export class CreatePublicLinkDto {
-  @ApiProperty({ enum: AccessLevel, required: false, default: AccessLevel.VIEW })
+  @ApiProperty({
+    enum: AccessLevel,
+    required: false,
+    default: AccessLevel.VIEW,
+  })
   @IsOptional()
   @IsEnum(AccessLevel)
   accessLevel?: AccessLevel;
 
-  @ApiProperty({ description: 'Number of days until the link expires (1-365)', default: 30 })
+  @ApiProperty({
+    description: 'Number of days until the link expires (1-365)',
+    default: 30,
+  })
   @IsOptional()
   @IsNumber()
   @Min(1)

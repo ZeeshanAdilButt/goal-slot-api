@@ -4,14 +4,15 @@ import {
   ForbiddenException,
   BadRequestException,
   PayloadTooLargeException,
-} from "@nestjs/common";
-import { randomBytes } from "crypto";
-import { PrismaService } from "../../prisma/prisma.service";
-import { EmailService } from "../email/email.service";
+} from '@nestjs/common';
+import { randomBytes } from 'crypto';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import {
   CreateWhiteboardDto,
   UpdateWhiteboardDto,
-} from "./dto/whiteboards.dto";
+} from './dto/whiteboards.dto';
 
 @Injectable()
 export class WhiteboardsService {
@@ -23,7 +24,7 @@ export class WhiteboardsService {
   async findAll(userId: string) {
     return this.prisma.whiteboard.findMany({
       where: { userId, deletedAt: null },
-      orderBy: [{ createdAt: "desc" }],
+      orderBy: [{ createdAt: 'desc' }],
     });
   }
 
@@ -33,11 +34,11 @@ export class WhiteboardsService {
     });
 
     if (!whiteboard || whiteboard.deletedAt) {
-      throw new NotFoundException("Whiteboard not found");
+      throw new NotFoundException('Whiteboard not found');
     }
 
     if (whiteboard.userId !== userId) {
-      throw new ForbiddenException("You do not have access to this whiteboard");
+      throw new ForbiddenException('You do not have access to this whiteboard');
     }
 
     return whiteboard;
@@ -49,7 +50,7 @@ export class WhiteboardsService {
     });
 
     if (!whiteboard || whiteboard.deletedAt) {
-      throw new NotFoundException("Whiteboard not found");
+      throw new NotFoundException('Whiteboard not found');
     }
 
     if (whiteboard.userId === userId) {
@@ -65,7 +66,7 @@ export class WhiteboardsService {
     });
 
     if (!share) {
-      throw new NotFoundException("Whiteboard not found");
+      throw new NotFoundException('Whiteboard not found');
     }
 
     if (!share.acceptedAt) {
@@ -93,7 +94,7 @@ export class WhiteboardsService {
     // Reject oversized scene payloads
     if (dto.content && JSON.stringify(dto.content).length > 2_000_000) {
       throw new PayloadTooLargeException(
-        "Whiteboard content exceeds the 2 MB limit. Try removing large images.",
+        'Whiteboard content exceeds the 2 MB limit. Try removing large images.',
       );
     }
     await this.findOne(id, userId);
@@ -102,7 +103,9 @@ export class WhiteboardsService {
       where: { id },
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
-        ...(dto.content !== undefined && { content: dto.content as any }),
+        ...(dto.content !== undefined && {
+          content: dto.content as unknown as Prisma.InputJsonValue,
+        }),
         ...(dto.icon !== undefined && { icon: dto.icon }),
         ...(dto.color !== undefined && { color: dto.color }),
         ...(dto.isFavorite !== undefined && { isFavorite: dto.isFavorite }),
@@ -119,7 +122,7 @@ export class WhiteboardsService {
         where: { id },
         data: {
           deletedAt: new Date(),
-          deletedReason: "User deleted",
+          deletedReason: 'User deleted',
           deletedByUserId: userId,
           publicShareToken: null, // token can't be used after deletion
         },
@@ -168,7 +171,7 @@ export class WhiteboardsService {
       }),
       this.prisma.whiteboardShare.findMany({
         where: { whiteboardId, revokedAt: null },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           recipientEmail: true,
@@ -188,7 +191,7 @@ export class WhiteboardsService {
   async invite(whiteboardId: string, ownerId: string, rawEmail: string) {
     const email = rawEmail.trim().toLowerCase();
     if (!email) {
-      throw new BadRequestException("Email is required");
+      throw new BadRequestException('Email is required');
     }
     await this.findOne(whiteboardId, ownerId);
 
@@ -197,11 +200,11 @@ export class WhiteboardsService {
       select: { email: true, name: true },
     });
     if (!owner) {
-      throw new NotFoundException("Owner not found");
+      throw new NotFoundException('Owner not found');
     }
     if (owner.email.toLowerCase() === email) {
       throw new BadRequestException(
-        "You cannot share a whiteboard with yourself",
+        'You cannot share a whiteboard with yourself',
       );
     }
 
@@ -240,13 +243,13 @@ export class WhiteboardsService {
         toEmail: email,
         inviterName: owner.name,
         inviterEmail: owner.email,
-        whiteboardTitle: whiteboard?.title || "Untitled",
+        whiteboardTitle: whiteboard?.title || 'Untitled',
         whiteboardId,
         isExistingUser: !!recipientUser,
       });
       emailSent = true;
     } catch (err) {
-      emailError = err instanceof Error ? err.message : "Unknown error";
+      emailError = err instanceof Error ? err.message : 'Unknown error';
       // swallow: share record still works in-app
     }
 
@@ -259,7 +262,7 @@ export class WhiteboardsService {
       where: { id: shareId },
     });
     if (!share || share.whiteboardId !== whiteboardId) {
-      throw new NotFoundException("Share not found");
+      throw new NotFoundException('Share not found');
     }
     await this.prisma.whiteboardShare.update({
       where: { id: shareId },
@@ -274,7 +277,7 @@ export class WhiteboardsService {
       select: { email: true },
     });
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
     const email = user.email.toLowerCase();
 
@@ -293,7 +296,7 @@ export class WhiteboardsService {
         revokedAt: null,
         whiteboard: { deletedAt: null },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         whiteboard: {
           select: {
@@ -322,7 +325,7 @@ export class WhiteboardsService {
 
   async findByPublicToken(token: string) {
     if (!token || token.length < 16) {
-      throw new NotFoundException("Whiteboard not found");
+      throw new NotFoundException('Whiteboard not found');
     }
     const whiteboard = await this.prisma.whiteboard.findFirst({
       where: { publicShareToken: token, deletedAt: null },
@@ -337,12 +340,12 @@ export class WhiteboardsService {
       },
     });
     if (!whiteboard) {
-      throw new NotFoundException("Whiteboard not found");
+      throw new NotFoundException('Whiteboard not found');
     }
     return whiteboard;
   }
 
   private generateToken(): string {
-    return randomBytes(24).toString("base64url");
+    return randomBytes(24).toString('base64url');
   }
 }
