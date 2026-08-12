@@ -15,6 +15,7 @@ import {
   CoachActionResult,
   CoachProposedAction,
 } from './dto/apply-proposals.dto';
+import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
 
 /**
  * Dispatches Coach-proposed actions onto the existing domain services.
@@ -45,7 +46,14 @@ export class CoachProposalsService {
   async apply(
     userId: string,
     actions: CoachProposedAction[],
+    opts: { confirmedDeleteIds?: string[] } = {},
   ): Promise<CoachActionResult[]> {
+    // Blast-radius check for the whole batch, before anything is dispatched.
+    // It has to run here rather than inside the loop: dispatch is sequential
+    // and deliberately not transactional, so a cap that tripped mid-batch
+    // would leave the earlier actions already written.
+    assertProposalBatchSafe(actions, opts);
+
     const results: CoachActionResult[] = [];
 
     for (let i = 0; i < actions.length; i++) {
