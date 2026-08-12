@@ -83,6 +83,7 @@ model User {
   journalEntries           JournalEntry[]
   coachConversations       CoachConversation[]
   coachInsights            CoachInsight[]
+  activeTimerSession       ActiveTimerSession?
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -111,11 +112,12 @@ model Goal {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  timeEntries    TimeEntry[]
-  scheduleBlocks ScheduleBlock[]
-  tasks          Task[]
-  labels         GoalLabel[]
-  reflections    GoalReflection[]
+  timeEntries         TimeEntry[]
+  scheduleBlocks      ScheduleBlock[]
+  tasks               Task[]
+  labels              GoalLabel[]
+  reflections         GoalReflection[]
+  activeTimerSessions ActiveTimerSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -162,6 +164,79 @@ model TimeEntry {
   @@index([goalId])
 }
 
+// A timer that is currently running (or paused) for a user.
+//
+// A TimeEntry is only written when a timer STOPS, so before this model
+// existed a running timer lived exclusively in each client's local zustand
+// store and the web app and the mobile app had no idea about each other.
+// This row is the shared, server-side truth: whichever client asks, it sees
+// the same running session.
+//
+// Deliberately NOT stored: a computed "elapsed" number. It would go stale
+// the instant nobody wrote to it (a timer running for an hour with no client
+// touching the API would still read as 0). Instead we store the raw facts
+// and recompute elapsed on every read:
+//
+//   RUNNING -> accumulatedMs + (now - segmentStartedAt)
+//   PAUSED  -> accumulatedMs
+//
+// which is exactly the shape the mobile client already uses locally
+// (pausedElapsedMs + a segment start), so pause/resume cycles compose:
+// every pause folds the finished segment into accumulatedMs, every resume
+// opens a new segment.
+model ActiveTimerSession {
+  id String @id @default(uuid())
+
+  // One active session per user, enforced by the database rather than by a
+  // read-then-write in the service. Two devices racing on start therefore
+  // resolve to one winner and one unique-violation, not two rows.
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status ActiveTimerStatus @default(RUNNING)
+
+  // When the session as a whole began. Never moves; this is what dates the
+  // resulting TimeEntry.
+  startedAt DateTime
+
+  // Start of the CURRENT running segment. Null while PAUSED.
+  segmentStartedAt DateTime?
+
+  // When the session entered PAUSED. Null while RUNNING. Not used for the
+  // elapsed math (accumulatedMs already covers it) but clients want to show
+  // "paused 12 minutes ago", and it makes a stuck-paused session diagnosable.
+  pausedAt DateTime?
+
+  // Milliseconds of running time accumulated across all COMPLETED segments.
+  // Only ever grows, and only on pause.
+  accumulatedMs Int @default(0)
+
+  // Attribution, all optional: tracking can start with nothing selected and
+  // have a goal/task attached later via PATCH.
+  taskName String?
+  notes    String?
+
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  scheduleBlockId String?
+  scheduleBlock   ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id], onDelete: SetNull)
+
+  // Free-form label for the client that last wrote ("web", "ios", "android").
+  // Purely so the UI can say "running on your phone" in the takeover prompt.
+  lastClient String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([goalId])
+  @@index([taskId])
+  @@index([scheduleBlockId])
+}
+
 // Schedule blocks for planning
 model ScheduleBlock {
   id          String  @id @default(uuid())
@@ -184,8 +259,9 @@ model ScheduleBlock {
   goalId String?
   goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
 
-  timeEntries TimeEntry[]
-  tasks       Task[]
+  timeEntries         TimeEntry[]
+  tasks               Task[]
+  activeTimerSessions ActiveTimerSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -227,7 +303,8 @@ model Task {
   goalId String?
   goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
 
-  timeEntries TimeEntry[]
+  timeEntries         TimeEntry[]
+  activeTimerSessions ActiveTimerSession[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -592,6 +669,14 @@ enum NotificationType {
 enum TimeEntrySource {
   COMPLETION
   TRACKER
+}
+
+// There is no STOPPED member on purpose: a stopped timer is the absence of
+// an ActiveTimerSession row, not a row in a terminal state. That keeps the
+// one-session-per-user unique constraint on userId meaningful.
+enum ActiveTimerStatus {
+  RUNNING
+  PAUSED
 }
 
 // ============================================================================
