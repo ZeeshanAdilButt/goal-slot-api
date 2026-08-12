@@ -85,6 +85,36 @@ export function toDurationMinutes(elapsedMs: number): number {
   return Math.max(1, Math.round(elapsedMs / 60_000));
 }
 
+/**
+ * Normalizes an instant to `TimeEntry.date`'s expected shape: UTC-midnight of
+ * a calendar date, matching TimeEntriesService.create's handling of a
+ * client-supplied `dto.date` string (`new Date(dto.date)`, e.g.
+ * `new Date('2026-08-13')`).
+ *
+ * There is no per-user timezone tracked anywhere in this codebase (see the
+ * User model in prisma/schema.prisma) — on the manual-entry path the client
+ * decides what "today" means and just sends a date string, and the server
+ * trusts it. `stop()` has no client-supplied string to trust, so this uses
+ * the server process's own local calendar fields as the best available
+ * stand-in for "today", which is the same gap the rest of the app already
+ * has, not a new one.
+ *
+ * `dayOfWeek` should be read off this date's UTC calendar fields
+ * (`date.getUTCDay()`), not `date.getDay()`. Every reader of `date` treats
+ * `date.toISOString().split('T')[0]` as the canonical calendar-date string
+ * (see reports.service.ts), and only the UTC day-of-week is guaranteed to
+ * agree with that string on a server whose local TZ isn't UTC — `.getDay()`
+ * reinterprets the UTC-midnight instant in local time and can walk it onto
+ * the adjacent calendar day, which is exactly how `date` and `dayOfWeek`
+ * ended up disagreeing on the same row before this fix.
+ */
+export function toLocalDateOnly(instant: Date): Date {
+  const year = instant.getFullYear();
+  const month = String(instant.getMonth() + 1).padStart(2, '0');
+  const day = String(instant.getDate()).padStart(2, '0');
+  return new Date(`${year}-${month}-${day}`);
+}
+
 @Injectable()
 export class ActiveTimerService {
   constructor(
@@ -280,10 +310,16 @@ export class ActiveTimerService {
     const explicitName = dto.taskName !== undefined ? dto.taskName : session.taskName;
     const taskName = explicitName?.trim() || taskTitle || DEFAULT_TASK_NAME;
 
-    // `date` is the moment the session STARTED, not the moment it stopped, so
-    // a session that runs across midnight lands on the day the work began —
-    // matching how TimeEntry.date is used everywhere else.
-    const date = session.startedAt;
+    // `date` is the LOCAL CALENDAR DATE the session STARTED on, not the
+    // moment it stopped and not the raw startedAt instant — so a session
+    // that runs across midnight lands on the day the work began, and the
+    // stored value matches the UTC-midnight-of-a-calendar-date shape every
+    // other write path produces (see toLocalDateOnly above). Storing the raw
+    // instant here previously corrupted day bucketing: reports read `date`
+    // via `.toISOString().split('T')[0]`, which is not the same calendar day
+    // as `session.startedAt` whenever the session started outside the UTC
+    // 00:00-23:59 window relative to the server's local day.
+    const date = toLocalDateOnly(session.startedAt);
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.activeTimerSession.deleteMany({
@@ -302,7 +338,7 @@ export class ActiveTimerService {
           taskTitle: taskTitle ?? undefined,
           duration,
           date,
-          dayOfWeek: date.getDay(),
+          dayOfWeek: date.getUTCDay(),
           startedAt: session.startedAt,
           notes: notes ?? undefined,
           userId,

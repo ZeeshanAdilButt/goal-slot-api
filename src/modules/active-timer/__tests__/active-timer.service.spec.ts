@@ -6,6 +6,7 @@ import {
   ActiveTimerService,
   computeElapsedMs,
   toDurationMinutes,
+  toLocalDateOnly,
 } from '../active-timer.service';
 import { MAX_SESSION_MS } from '../active-timer.constants';
 
@@ -538,16 +539,98 @@ describe('ActiveTimerService', () => {
       expect(await service.getActive(USER)).toBeNull();
     });
 
-    it('dates the entry from when the session started, not when it stopped', async () => {
+    it('dates the entry from when the session started, not when it stopped, while preserving the exact startedAt instant', async () => {
       const { prisma, service } = build();
       at('2026-08-12T23:40:00.000Z');
       await service.start(USER, {});
       at('2026-08-13T00:20:00.000Z');
 
       const result: any = await service.stop(USER, {});
-      expect(result.timeEntry.date.toISOString()).toBe('2026-08-12T23:40:00.000Z');
-      expect(result.timeEntry.dayOfWeek).toBe(new Date('2026-08-12T23:40:00.000Z').getDay());
+      // `date` is a normalized calendar date (UTC-midnight), not the raw
+      // instant -- see the "date normalization across server timezones"
+      // tests below for the corruption that storing the raw instant caused.
+      // `startedAt` is untouched: it is the one field allowed to carry the
+      // exact moment tracking began.
       expect(prisma.timeEntries[0].startedAt.toISOString()).toBe('2026-08-12T23:40:00.000Z');
+    });
+
+    // ---------------------------------------------------------------------
+    // date normalization across server timezones
+    //
+    // TimeEntry.date is read everywhere else in this codebase as UTC-midnight
+    // of a calendar date -- TimeEntriesService.create builds it from a
+    // client-supplied "YYYY-MM-DD" string via `new Date(dto.date)`, and every
+    // report reads it back via `entry.date.toISOString().split('T')[0]`.
+    // There is no per-user timezone tracked anywhere (see the User model),
+    // and this API's deploy config never pins the server process to a TZ
+    // either, so these tests pin `process.env.TZ` themselves to make the
+    // scenario reproducible regardless of which machine runs the suite.
+    // ---------------------------------------------------------------------
+    describe('date normalization across server timezones', () => {
+      const ORIGINAL_TZ = process.env.TZ;
+
+      afterEach(() => {
+        if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+        else process.env.TZ = ORIGINAL_TZ;
+      });
+
+      it('lands the entry on the LOCAL calendar date the session started on, not the UTC date of the raw instant', async () => {
+        // Exactly the scenario from the bug report: a session started at
+        // 2026-08-13 02:00 local time on a server pinned to Asia/Karachi
+        // (UTC+5) is the UTC instant 2026-08-12T21:00:00.000Z. Storing that
+        // raw instant (the pre-fix behavior) put the entry's date-key at
+        // "2026-08-12" -- one calendar day earlier than the session's own
+        // local wall clock said it started.
+        process.env.TZ = 'Asia/Karachi';
+        const { prisma, service } = build();
+
+        at('2026-08-12T21:00:00.000Z'); // 2026-08-13 02:00 local (Asia/Karachi)
+        await service.start(USER, {});
+
+        at('2026-08-12T21:30:00.000Z'); // 2026-08-13 02:30 local, same local day
+        const result: any = await service.stop(USER, {});
+
+        expect(result.timeEntry.date.toISOString().split('T')[0]).toBe('2026-08-13');
+        expect(prisma.timeEntries[0].date.toISOString().split('T')[0]).toBe('2026-08-13');
+      });
+
+      it('keeps date and dayOfWeek mutually consistent even when the server TZ is WEST of UTC', async () => {
+        // West-of-UTC is what actually distinguishes `.getDay()` (which
+        // reinterprets a UTC-midnight instant in server-local time and can
+        // walk it onto the PREVIOUS calendar day) from `.getUTCDay()`
+        // (reads the date's own UTC calendar fields -- the same fields
+        // `date.toISOString().split('T')[0]` reads, which is the canonical
+        // date key every report in reports.service.ts uses). Using the
+        // wrong one is exactly how a stopped session could write a `date`
+        // and a `dayOfWeek` that disagree with each other on the same row.
+        process.env.TZ = 'Pacific/Honolulu'; // UTC-10, no DST to worry about
+        const { prisma, service } = build();
+
+        at('2026-08-13T10:30:00.000Z'); // 2026-08-13 00:30 local (Honolulu)
+        await service.start(USER, {});
+
+        at('2026-08-13T11:00:00.000Z'); // 2026-08-13 01:00 local, same local day
+        const result: any = await service.stop(USER, {});
+
+        const dateKey = result.timeEntry.date.toISOString().split('T')[0];
+        expect(dateKey).toBe('2026-08-13');
+
+        const impliedDayOfWeek = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+        expect(result.timeEntry.dayOfWeek).toBe(impliedDayOfWeek);
+        expect(prisma.timeEntries[0].dayOfWeek).toBe(impliedDayOfWeek);
+      });
+
+      it('toLocalDateOnly + getUTCDay is what stop() relies on for the invariant above', () => {
+        // Direct unit coverage of the helper itself, pinned to a
+        // west-of-UTC TZ so the two getters (`getDay` vs `getUTCDay`) are
+        // exercised where they can actually diverge.
+        process.env.TZ = 'Pacific/Honolulu';
+        const startedAt = new Date('2026-08-13T10:30:00.000Z');
+
+        const normalized = toLocalDateOnly(startedAt);
+        expect(normalized.toISOString()).toBe('2026-08-13T00:00:00.000Z');
+        expect(normalized.getUTCDay()).toBe(4); // Thursday
+      });
     });
 
     it('produces exactly one entry when two devices stop at the same moment', async () => {
