@@ -42,26 +42,32 @@ async function bootstrap() {
   // API prefix
   app.setGlobalPrefix('api');
 
-  // Swagger documentation
-  const config = new DocumentBuilder()
-    .setTitle('Time Master API')
-    .setDescription('API for productivity tracking and goal management')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('health', 'Health check endpoints')
-    .addTag('auth', 'Authentication endpoints')
-    .addTag('users', 'User management')
-    .addTag('goals', 'Goals management')
-    .addTag('time-entries', 'Time tracking')
-    .addTag('active-timer', 'Cross-device active timer session')
-    .addTag('schedule', 'Schedule planning')
-    .addTag('reports', 'Analytics and reports')
-    .addTag('sharing', 'Access sharing')
-    .addTag('stripe', 'Subscription management')
-    .build();
+  // Swagger documentation. Not mounted in production: it published a full,
+  // browsable map of every route and body shape to anonymous callers.
+  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
+  const swaggerEnabled = nodeEnv !== 'production';
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  if (swaggerEnabled) {
+    const config = new DocumentBuilder()
+      .setTitle('Time Master API')
+      .setDescription('API for productivity tracking and goal management')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .addTag('health', 'Health check endpoints')
+      .addTag('auth', 'Authentication endpoints')
+      .addTag('users', 'User management')
+      .addTag('goals', 'Goals management')
+      .addTag('time-entries', 'Time tracking')
+      .addTag('active-timer', 'Cross-device active timer session')
+      .addTag('schedule', 'Schedule planning')
+      .addTag('reports', 'Analytics and reports')
+      .addTag('sharing', 'Access sharing')
+      .addTag('stripe', 'Subscription management')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = configService.get<number>('PORT') || 4000;
   await app.listen(port);
@@ -69,8 +75,8 @@ async function bootstrap() {
   ⚡ Time Master API
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   🚀 Server running on: http://localhost:${port}
-  📚 API Docs: http://localhost:${port}/api/docs
-  🔑 Environment: ${configService.get<string>('NODE_ENV') || 'development'}
+  📚 API Docs: ${swaggerEnabled ? `http://localhost:${port}/api/docs` : 'disabled in production'}
+  🔑 Environment: ${nodeEnv}
   `);
 }
 

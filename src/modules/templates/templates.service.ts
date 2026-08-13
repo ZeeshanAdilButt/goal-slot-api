@@ -56,21 +56,44 @@ export class TemplatesService {
       let scheduleBlocksCreated = 0;
       let tasksCreated = 0;
 
-      // "Replace existing" wipes the user's current rows for whichever
-      // sections are being imported. Order matters: tasks and schedule
-      // blocks reference goals, so delete them first so goals can be
-      // deleted without dangling foreign keys (the relation uses
-      // onDelete: SetNull, so the deletes would succeed either way, but
-      // doing them in this order is clearer).
+      // "Replace existing" re-imports this template from scratch, so it may
+      // only remove rows THIS template created on a previous import. It used
+      // to delete every task, schedule block, and goal the user owned, which
+      // wiped hand-created data, cascaded into GoalLabel / GoalReflection,
+      // and nulled goalId on every historical TimeEntry.
+      //
+      // Order matters: tasks and schedule blocks reference goals, so delete
+      // them first so goals can be deleted without dangling foreign keys (the
+      // relation uses onDelete: SetNull, so the deletes would succeed either
+      // way, but doing them in this order is clearer).
       if (opts.replaceExisting) {
         if (opts.tasks) {
-          await tx.task.deleteMany({ where: { userId } });
+          await tx.task.deleteMany({
+            where: { userId, templateId: template.id },
+          });
         }
         if (opts.schedule) {
-          await tx.scheduleBlock.deleteMany({ where: { userId } });
+          // ScheduleBlock has no templateId column, so provenance is derived
+          // from the goal the block points at: every block this template
+          // creates is linked to one of the template's goals. Blocks the user
+          // created by hand, and blocks from other templates, are left alone.
+          const templateGoals = await tx.goal.findMany({
+            where: { userId, templateId: template.id },
+            select: { id: true },
+          });
+          if (templateGoals.length > 0) {
+            await tx.scheduleBlock.deleteMany({
+              where: {
+                userId,
+                goalId: { in: templateGoals.map((g) => g.id) },
+              },
+            });
+          }
         }
         if (opts.goals) {
-          await tx.goal.deleteMany({ where: { userId } });
+          await tx.goal.deleteMany({
+            where: { userId, templateId: template.id },
+          });
         }
       }
 

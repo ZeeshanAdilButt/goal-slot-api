@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
@@ -12,7 +16,54 @@ export class TimeEntriesService {
     private goalsService: GoalsService,
   ) {}
 
+  /**
+   * Every relation on a time entry is client-supplied, so each one has to be
+   * confirmed to belong to the caller before it is written. Without this a
+   * caller could point an entry at a stranger's goal, read that goal back out
+   * of the `include: { goal: true }` response (private goals included), and
+   * have their own minutes folded into the victim's loggedHours.
+   *
+   * Mirrors TasksService.validateRelations, extended to cover taskId, which
+   * time entries also carry.
+   */
+  private async validateRelations(
+    userId: string,
+    goalId?: string | null,
+    scheduleBlockId?: string | null,
+    taskId?: string | null,
+  ) {
+    if (goalId) {
+      const goal = await this.prisma.goal.findFirst({
+        where: { id: goalId, userId },
+      });
+      if (!goal) throw new ForbiddenException('Goal not found or access denied');
+    }
+
+    if (scheduleBlockId) {
+      const block = await this.prisma.scheduleBlock.findFirst({
+        where: { id: scheduleBlockId, userId },
+      });
+      if (!block) {
+        throw new ForbiddenException('Schedule block not found or access denied');
+      }
+    }
+
+    if (taskId) {
+      const task = await this.prisma.task.findFirst({
+        where: { id: taskId, userId },
+      });
+      if (!task) throw new ForbiddenException('Task not found or access denied');
+    }
+  }
+
   async create(userId: string, dto: CreateTimeEntryDto) {
+    await this.validateRelations(
+      userId,
+      dto.goalId,
+      dto.scheduleBlockId,
+      dto.taskId,
+    );
+
     const date = new Date(dto.date);
     const dayOfWeek = date.getDay();
     const startedAt = dto.startedAt ? new Date(dto.startedAt) : date;
@@ -63,7 +114,7 @@ export class TimeEntriesService {
 
     // Update goal progress if linked
     if (dto.goalId) {
-      await this.goalsService.updateProgress(dto.goalId, dto.duration);
+      await this.goalsService.updateProgress(dto.goalId, userId);
     }
 
     return entry;
@@ -107,6 +158,13 @@ export class TimeEntriesService {
   }
 
   async update(userId: string, entryId: string, dto: UpdateTimeEntryDto) {
+    await this.validateRelations(
+      userId,
+      dto.goalId,
+      dto.scheduleBlockId,
+      dto.taskId,
+    );
+
     const entry = await this.prisma.timeEntry.findFirst({
       where: { id: entryId, userId },
     });
@@ -144,10 +202,10 @@ export class TimeEntriesService {
     if (dto.duration !== undefined || dto.goalId !== undefined) {
       const newGoalId = dto.goalId ?? oldGoalId;
       if (oldGoalId && oldGoalId !== newGoalId) {
-        await this.goalsService.updateProgress(oldGoalId);
+        await this.goalsService.updateProgress(oldGoalId, userId);
       }
       if (newGoalId) {
-        await this.goalsService.updateProgress(newGoalId);
+        await this.goalsService.updateProgress(newGoalId, userId);
       }
     }
 
@@ -166,7 +224,7 @@ export class TimeEntriesService {
     await this.prisma.timeEntry.delete({ where: { id: entryId } });
 
     if (entry.goalId) {
-      await this.goalsService.updateProgress(entry.goalId);
+      await this.goalsService.updateProgress(entry.goalId, userId);
     }
     return { message: 'Time entry deleted' };
   }

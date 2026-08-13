@@ -356,7 +356,7 @@ export class ActiveTimerService {
     // run after commit. Keeping it out avoids holding the row lock on Goal
     // for the length of an aggregate.
     if (goalId) {
-      await this.goalsService.updateProgress(goalId);
+      await this.goalsService.updateProgress(goalId, userId);
     }
 
     return {

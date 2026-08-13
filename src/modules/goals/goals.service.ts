@@ -295,13 +295,19 @@ export class GoalsService {
     return { message: 'Goal deleted successfully' };
   }
 
-  async updateProgress(goalId: string, _additionalMinutes?: number) {
+  /**
+   * Recompute a goal's loggedHours. Scoped to `userId`: the goalId reaching
+   * this method originates from a client-supplied field on a time entry or
+   * task, so an unscoped lookup let a caller drive recomputation (and the
+   * ACTIVE -> COMPLETED flip) on a goal belonging to someone else.
+   */
+  async updateProgress(goalId: string, userId: string) {
     // Recompute loggedHours from the SUM of TimeEntry rows linked to this goal
     // instead of incrementing/decrementing. Incremental math drifted on float
     // subtraction and lost sync on deletions that bypassed the recognized
     // paths, surfacing as negative loggedHours on real production goals.
     const [goal, agg] = await Promise.all([
-      this.prisma.goal.findUnique({ where: { id: goalId } }),
+      this.prisma.goal.findFirst({ where: { id: goalId, userId } }),
       this.prisma.timeEntry.aggregate({
         where: { goalId },
         _sum: { duration: true },
