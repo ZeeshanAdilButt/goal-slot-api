@@ -1062,7 +1062,7 @@ describe('CoachAiService', () => {
       // separator and quote characters neutralised.
       const evilRow = listLines.find((l) => l.startsWith('- id=b_evil'))!;
       expect(evilRow).toContain('g_victim');
-      expect(evilRow.split('|')).toHaveLength(4); // id | title | when | category
+      expect(evilRow.split('|')).toHaveLength(5); // id | title | when | category | goalId
 
       // In the JSON blob the same title is structurally contained: JSON string
       // escaping means the newline and the pipe cannot fabricate a sibling

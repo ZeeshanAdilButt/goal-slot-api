@@ -50,6 +50,14 @@ export class CoachProposedAction {
   @IsOptional()
   @IsObject()
   payload?: Record<string, any>;
+
+  @ApiPropertyOptional({
+    description:
+      "For UPDATE_SCHEDULE_BLOCK: the block's title as the Coach currently believes it to be, BEFORE this action's changes are applied. Used purely as an identity check against the row `id` resolves to — never written. Distinct from payload.title, which (when present) is the NEW title to rename to. Lets the backend reject an action that targets the wrong block (id resolves, but to a block with a different title than the Coach intended) and lets stale-id recovery re-match a deleted-and-recreated block by title.",
+  })
+  @IsOptional()
+  @IsString()
+  expectedTitle?: string;
 }
 
 export class ApplyProposalsDto {
