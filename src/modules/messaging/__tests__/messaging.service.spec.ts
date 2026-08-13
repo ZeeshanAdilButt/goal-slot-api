@@ -273,9 +273,7 @@ describe('MessagingService conversation handling', () => {
 
     expect(result.conversationId).not.toBe('conv_other');
     expect(result.created).toBe(true);
-    expect([...result.participantIds].sort()).toEqual(
-      [FRIEND, ME].sort(),
-    );
+    expect([...result.participantIds].sort()).toEqual([FRIEND, ME].sort());
   });
 
   it('returns the counterpart so a client can render the thread header', async () => {

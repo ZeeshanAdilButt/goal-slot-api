@@ -18,7 +18,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string }): Promise<AuthenticatedUser> {
+  async validate(payload: {
+    sub: string;
+    [claim: string]: unknown;
+  }): Promise<AuthenticatedUser> {
     // Look the user up on every authenticated request instead of trusting
     // the JWT payload blindly. Without this, disabling a user
     // (POST /users/admin/toggle-status/:userId) has no effect on tokens

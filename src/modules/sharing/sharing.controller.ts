@@ -147,7 +147,10 @@ export class SharingController {
 
   @Post(':id/mark-viewed')
   @ApiOperation({ summary: "Mark a mentee's shared report as viewed" })
-  async markViewed(@Request() req: any, @Param('id') id: string) {
+  async markViewed(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     return this.sharingService.markViewed(id, req.user.sub);
   }
 

@@ -36,7 +36,8 @@ class FakePrisma {
   failNextTimeEntryCreate = false;
 
   activeTimerSession = {
-    findUnique: async ({ where }: any) => this.clone(this.sessions.get(where.userId)),
+    findUnique: async ({ where }: any) =>
+      this.clone(this.sessions.get(where.userId)),
 
     create: async ({ data }: any) => {
       if (this.sessions.has(data.userId)) {
@@ -117,20 +118,26 @@ class FakePrisma {
 
   goal = {
     count: async ({ where }: any) =>
-      this.goals.filter((g) => g.id === where.id && g.userId === where.userId).length,
+      this.goals.filter((g) => g.id === where.id && g.userId === where.userId)
+        .length,
   };
 
   task = {
     count: async ({ where }: any) =>
-      this.tasksRows.filter((t) => t.id === where.id && t.userId === where.userId).length,
+      this.tasksRows.filter(
+        (t) => t.id === where.id && t.userId === where.userId,
+      ).length,
     findFirst: async ({ where }: any) =>
-      this.tasksRows.find((t) => t.id === where.id && t.userId === where.userId) ?? null,
+      this.tasksRows.find(
+        (t) => t.id === where.id && t.userId === where.userId,
+      ) ?? null,
   };
 
   scheduleBlock = {
     count: async ({ where }: any) =>
-      this.scheduleBlocks.filter((b) => b.id === where.id && b.userId === where.userId)
-        .length,
+      this.scheduleBlocks.filter(
+        (b) => b.id === where.id && b.userId === where.userId,
+      ).length,
   };
 
   private txChain: Promise<unknown> = Promise.resolve();
@@ -192,7 +199,11 @@ function build() {
   const prisma = new FakePrisma();
   const auth = new FakeAuth();
   const goals = new FakeGoals();
-  const service = new ActiveTimerService(prisma as any, auth as any, goals as any);
+  const service = new ActiveTimerService(
+    prisma as any,
+    auth as any,
+    goals as any,
+  );
   return { prisma, auth, goals, service };
 }
 
@@ -251,13 +262,15 @@ describe('ActiveTimerService', () => {
       const { prisma, service } = build();
 
       await service.start(USER, {});
-      await expect(service.start(USER, {})).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.start(USER, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       await service.start(USER, { takeOver: true });
 
       expect(prisma.sessions.size).toBe(1);
     });
 
-    it('does not let one user\'s session block another user', async () => {
+    it("does not let one user's session block another user", async () => {
       const { prisma, service } = build();
 
       await service.start(USER, {});
@@ -274,7 +287,9 @@ describe('ActiveTimerService', () => {
       // reason the second start fails is the P2002 the fake raises, exactly
       // as the @unique index on userId would.
       const createSpy = jest.spyOn(prisma.activeTimerSession, 'create');
-      await expect(service.start(USER, {})).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.start(USER, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(createSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -292,21 +307,40 @@ describe('ActiveTimerService', () => {
       // Attribution detaches rather than cascading, matching TimeEntry.
       expect(model).toMatch(/goal\s+Goal\?.*onDelete: SetNull/);
       expect(model).toMatch(/task\s+Task\?.*onDelete: SetNull/);
-      expect(model).toMatch(/scheduleBlock\s+ScheduleBlock\?.*onDelete: SetNull/);
+      expect(model).toMatch(
+        /scheduleBlock\s+ScheduleBlock\?.*onDelete: SetNull/,
+      );
       // Deleting the user takes the session with it.
       expect(model).toMatch(/user\s+User\s+@relation.*onDelete: Cascade/);
     });
 
     it('ships a committed migration for the new table', () => {
-      const migrationsDir = path.join(__dirname, '..', '..', '..', '..', 'prisma', 'migrations');
+      const migrationsDir = path.join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        '..',
+        'prisma',
+        'migrations',
+      );
       const sql = fs
         .readdirSync(migrationsDir)
-        .filter((entry) => fs.existsSync(path.join(migrationsDir, entry, 'migration.sql')))
-        .map((entry) => fs.readFileSync(path.join(migrationsDir, entry, 'migration.sql'), 'utf8'))
+        .filter((entry) =>
+          fs.existsSync(path.join(migrationsDir, entry, 'migration.sql')),
+        )
+        .map((entry) =>
+          fs.readFileSync(
+            path.join(migrationsDir, entry, 'migration.sql'),
+            'utf8',
+          ),
+        )
         .join('\n');
 
       expect(sql).toContain('CREATE TABLE "ActiveTimerSession"');
-      expect(sql).toContain('CREATE UNIQUE INDEX "ActiveTimerSession_userId_key"');
+      expect(sql).toContain(
+        'CREATE UNIQUE INDEX "ActiveTimerSession_userId_key"',
+      );
     });
   });
 
@@ -320,7 +354,9 @@ describe('ActiveTimerService', () => {
       await service.start(USER, { taskName: 'Deep work', client: 'web' });
 
       at('2026-08-12T09:10:00.000Z');
-      const error = await service.start(USER, { client: 'ios' }).catch((e) => e);
+      const error = await service
+        .start(USER, { client: 'ios' })
+        .catch((e) => e);
 
       expect(error).toBeInstanceOf(ConflictException);
       const body: any = error.getResponse();
@@ -336,7 +372,9 @@ describe('ActiveTimerService', () => {
       const started = await service.start(USER, { taskName: 'Deep work' });
 
       at('2026-08-12T09:05:00.000Z');
-      await service.start(USER, { taskName: 'Something else' }).catch(() => undefined);
+      await service
+        .start(USER, { taskName: 'Something else' })
+        .catch(() => undefined);
 
       const current: any = await service.getActive(USER);
       expect(current.id).toBe(started.id);
@@ -459,8 +497,12 @@ describe('ActiveTimerService', () => {
 
     it('rejects pause and resume when nothing is running', async () => {
       const { service } = build();
-      await expect(service.pause(USER)).rejects.toBeInstanceOf(NotFoundException);
-      await expect(service.resume(USER)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.pause(USER)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(service.resume(USER)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
 
     it('clamps a client clock that runs ahead of the server', () => {
@@ -470,7 +512,9 @@ describe('ActiveTimerService', () => {
         accumulatedMs: 60_000,
       };
       // "now" is before the segment started — elapsed must not go backwards.
-      expect(computeElapsedMs(session, new Date('2026-08-12T09:00:00.000Z'))).toBe(60_000);
+      expect(
+        computeElapsedMs(session, new Date('2026-08-12T09:00:00.000Z')),
+      ).toBe(60_000);
     });
   });
 
@@ -492,7 +536,9 @@ describe('ActiveTimerService', () => {
 
       await service.start(USER, {});
       at('2026-08-12T09:10:00.000Z');
-      const s: any = await service.updateAttribution(USER, { goalId: 'goal-1' });
+      const s: any = await service.updateAttribution(USER, {
+        goalId: 'goal-1',
+      });
 
       expect(s.goalId).toBe('goal-1');
       expect(s.elapsedMs).toBe(10 * 60_000);
@@ -514,7 +560,9 @@ describe('ActiveTimerService', () => {
       const { prisma, service } = build();
       prisma.goals.push({ id: 'goal-x', userId: OTHER_USER });
 
-      await expect(service.start(USER, { goalId: 'goal-x' })).rejects.toThrow('Goal not found');
+      await expect(service.start(USER, { goalId: 'goal-x' })).rejects.toThrow(
+        'Goal not found',
+      );
     });
   });
 
@@ -545,13 +593,15 @@ describe('ActiveTimerService', () => {
       await service.start(USER, {});
       at('2026-08-13T00:20:00.000Z');
 
-      const result: any = await service.stop(USER, {});
+      await service.stop(USER, {});
       // `date` is a normalized calendar date (UTC-midnight), not the raw
       // instant -- see the "date normalization across server timezones"
       // tests below for the corruption that storing the raw instant caused.
       // `startedAt` is untouched: it is the one field allowed to carry the
       // exact moment tracking began.
-      expect(prisma.timeEntries[0].startedAt.toISOString()).toBe('2026-08-12T23:40:00.000Z');
+      expect(prisma.timeEntries[0].startedAt.toISOString()).toBe(
+        '2026-08-12T23:40:00.000Z',
+      );
     });
 
     // ---------------------------------------------------------------------
@@ -590,8 +640,12 @@ describe('ActiveTimerService', () => {
         at('2026-08-12T21:30:00.000Z'); // 2026-08-13 02:30 local, same local day
         const result: any = await service.stop(USER, {});
 
-        expect(result.timeEntry.date.toISOString().split('T')[0]).toBe('2026-08-13');
-        expect(prisma.timeEntries[0].date.toISOString().split('T')[0]).toBe('2026-08-13');
+        expect(result.timeEntry.date.toISOString().split('T')[0]).toBe(
+          '2026-08-13',
+        );
+        expect(prisma.timeEntries[0].date.toISOString().split('T')[0]).toBe(
+          '2026-08-13',
+        );
       });
 
       it('keeps date and dayOfWeek mutually consistent even when the server TZ is WEST of UTC', async () => {
@@ -615,7 +669,9 @@ describe('ActiveTimerService', () => {
         const dateKey = result.timeEntry.date.toISOString().split('T')[0];
         expect(dateKey).toBe('2026-08-13');
 
-        const impliedDayOfWeek = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+        const impliedDayOfWeek = new Date(
+          `${dateKey}T00:00:00.000Z`,
+        ).getUTCDay();
         expect(result.timeEntry.dayOfWeek).toBe(impliedDayOfWeek);
         expect(prisma.timeEntries[0].dayOfWeek).toBe(impliedDayOfWeek);
       });
@@ -638,16 +694,21 @@ describe('ActiveTimerService', () => {
       await service.start(USER, { taskName: 'Deep work' });
       at('2026-08-12T09:30:00.000Z');
 
-      const [a, b] = await Promise.allSettled([service.stop(USER, {}), service.stop(USER, {})]);
+      const [a, b] = await Promise.allSettled([
+        service.stop(USER, {}),
+        service.stop(USER, {}),
+      ]);
 
       const outcomes = [a.status, b.status].sort();
       expect(outcomes).toEqual(['fulfilled', 'rejected']);
       expect(prisma.timeEntries).toHaveLength(1);
       expect(prisma.sessions.size).toBe(0);
 
-      const rejected = (a.status === 'rejected' ? a.reason : (b as any).reason);
+      const rejected = a.status === 'rejected' ? a.reason : (b as any).reason;
       expect(rejected).toBeInstanceOf(ConflictException);
-      expect(rejected.getResponse().code).toBe('ACTIVE_TIMER_SESSION_ALREADY_STOPPED');
+      expect(rejected.getResponse().code).toBe(
+        'ACTIVE_TIMER_SESSION_ALREADY_STOPPED',
+      );
     });
 
     it('rolls the delete back when the time entry insert fails', async () => {
@@ -656,7 +717,9 @@ describe('ActiveTimerService', () => {
       at('2026-08-12T09:30:00.000Z');
       prisma.failNextTimeEntryCreate = true;
 
-      await expect(service.stop(USER, {})).rejects.toThrow('simulated insert failure');
+      await expect(service.stop(USER, {})).rejects.toThrow(
+        'simulated insert failure',
+      );
 
       // The session must survive: losing it here would mean 30 minutes of
       // tracked work with nowhere to land.
@@ -691,11 +754,18 @@ describe('ActiveTimerService', () => {
     it('accepts attribution supplied at stop time', async () => {
       const { prisma, service } = build();
       prisma.goals.push({ id: 'goal-1', userId: USER });
-      prisma.tasksRows.push({ id: 'task-1', userId: USER, title: 'Ship the timer' });
+      prisma.tasksRows.push({
+        id: 'task-1',
+        userId: USER,
+        title: 'Ship the timer',
+      });
 
       await service.start(USER, {});
       at('2026-08-12T09:30:00.000Z');
-      const result: any = await service.stop(USER, { goalId: 'goal-1', taskId: 'task-1' });
+      const result: any = await service.stop(USER, {
+        goalId: 'goal-1',
+        taskId: 'task-1',
+      });
 
       expect(result.timeEntry.goalId).toBe('goal-1');
       expect(result.timeEntry.taskId).toBe('task-1');
@@ -714,7 +784,9 @@ describe('ActiveTimerService', () => {
 
     it('404s when there is nothing to stop', async () => {
       const { service } = build();
-      await expect(service.stop(USER, {})).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.stop(USER, {})).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 
@@ -755,7 +827,9 @@ describe('ActiveTimerService', () => {
       await expect(service.discard(USER)).resolves.toEqual({ discarded: true });
       expect(prisma.timeEntries).toHaveLength(0);
       expect(prisma.sessions.size).toBe(0);
-      await expect(service.discard(USER)).resolves.toEqual({ discarded: false });
+      await expect(service.discard(USER)).resolves.toEqual({
+        discarded: false,
+      });
     });
   });
 
@@ -817,7 +891,9 @@ describe('ActiveTimerService', () => {
     it('enforces the plan limit at start rather than stranding a session at stop', async () => {
       const { auth, service } = build();
       auth.limitReached = true;
-      await expect(service.start(USER, {})).rejects.toThrow('plan limit reached');
+      await expect(service.start(USER, {})).rejects.toThrow(
+        'plan limit reached',
+      );
       await expect(service.getActive(USER)).resolves.toBeNull();
     });
   });

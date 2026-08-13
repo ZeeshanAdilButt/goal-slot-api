@@ -1045,7 +1045,7 @@ export class CoachAiService {
         where: { userId_day: { userId, day } },
         data: { messageCount: { decrement: 1 } },
       });
-    } catch (err: any) {
+    } catch (err) {
       // Best effort. Losing a refund costs the user one message off today's
       // allowance; failing the request over it would be worse.
       this.logger.warn(

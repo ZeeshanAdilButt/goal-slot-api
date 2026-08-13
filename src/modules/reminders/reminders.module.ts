@@ -17,12 +17,16 @@ import { ExpoPushReminderChannel } from './channels/expo-push-channel.provider';
     ExpoPushReminderChannel,
     {
       provide: REMINDER_CHANNELS,
-      useFactory: (email: EmailReminderChannel, expoPush: ExpoPushReminderChannel, webPush: WebPushReminderChannel) => [
-        email,
-        expoPush,
-        webPush,
+      useFactory: (
+        email: EmailReminderChannel,
+        expoPush: ExpoPushReminderChannel,
+        webPush: WebPushReminderChannel,
+      ) => [email, expoPush, webPush],
+      inject: [
+        EmailReminderChannel,
+        ExpoPushReminderChannel,
+        WebPushReminderChannel,
       ],
-      inject: [EmailReminderChannel, ExpoPushReminderChannel, WebPushReminderChannel],
     },
   ],
   exports: [ReminderDispatchService],

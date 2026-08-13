@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OpenConversationDto } from './dto/messaging.dto';
 import { MessagingService } from './messaging.service';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('messaging')
 @Controller('messaging')
@@ -20,7 +21,7 @@ export class MessagingController {
       'POST again to refresh; the response carries expiresIn so a client ' +
       'can schedule that. Returns 503 when messaging is not configured.',
   })
-  async issueToken(@Request() req: any) {
+  async issueToken(@Request() req: AuthenticatedRequest) {
     return this.messagingService.issueToken(req.user.sub);
   }
 
@@ -33,7 +34,7 @@ export class MessagingController {
       'messaging is not configured or the service is unreachable.',
   })
   async openConversation(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Body() dto: OpenConversationDto,
   ) {
     return this.messagingService.openConversation(req.user.sub, dto.userId);

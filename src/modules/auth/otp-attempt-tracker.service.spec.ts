@@ -15,7 +15,13 @@ describe('OtpAttemptTrackerService', () => {
         // microtask so they genuinely race to call recordFailedAttempt,
         // rather than running strictly in array order.
         Promise.resolve().then(() =>
-          tracker.recordFailedAttempt('racer@example.com', 'TEST', 100_000, 60_000, 60_000),
+          tracker.recordFailedAttempt(
+            'racer@example.com',
+            'TEST',
+            100_000,
+            60_000,
+            60_000,
+          ),
         ),
       ),
     );
@@ -29,7 +35,13 @@ describe('OtpAttemptTrackerService', () => {
     const maxAttempts = 5;
 
     const outcomes = Array.from({ length: 8 }, () =>
-      tracker.recordFailedAttempt('brute@example.com', 'TEST', maxAttempts, 60_000, 900_000),
+      tracker.recordFailedAttempt(
+        'brute@example.com',
+        'TEST',
+        maxAttempts,
+        60_000,
+        900_000,
+      ),
     );
 
     const lockedOutOutcomes = outcomes.filter((o) => o.lockedOut);
@@ -41,17 +53,31 @@ describe('OtpAttemptTrackerService', () => {
   it('does not lock out a different email or purpose sharing part of the key', () => {
     const tracker = new OtpAttemptTrackerService();
     for (let i = 0; i < 5; i++) {
-      tracker.recordFailedAttempt('victim@example.com', 'SIGNUP', 5, 60_000, 900_000);
+      tracker.recordFailedAttempt(
+        'victim@example.com',
+        'SIGNUP',
+        5,
+        60_000,
+        900_000,
+      );
     }
     expect(tracker.isLockedOut('victim@example.com', 'SIGNUP')).toBe(true);
-    expect(tracker.isLockedOut('victim@example.com', 'FORGOT_PASSWORD')).toBe(false);
+    expect(tracker.isLockedOut('victim@example.com', 'FORGOT_PASSWORD')).toBe(
+      false,
+    );
     expect(tracker.isLockedOut('other@example.com', 'SIGNUP')).toBe(false);
   });
 
   it('reset() clears both the attempt count and any active lockout', () => {
     const tracker = new OtpAttemptTrackerService();
     for (let i = 0; i < 5; i++) {
-      tracker.recordFailedAttempt('user@example.com', 'TEST', 5, 60_000, 900_000);
+      tracker.recordFailedAttempt(
+        'user@example.com',
+        'TEST',
+        5,
+        60_000,
+        900_000,
+      );
     }
     expect(tracker.isLockedOut('user@example.com', 'TEST')).toBe(true);
 
@@ -61,10 +87,22 @@ describe('OtpAttemptTrackerService', () => {
     // Confirm the attempt counter was cleared too, not just the lockout:
     // a fresh 5 failures should be required to lock out again.
     for (let i = 0; i < 4; i++) {
-      const { lockedOut } = tracker.recordFailedAttempt('user@example.com', 'TEST', 5, 60_000, 900_000);
+      const { lockedOut } = tracker.recordFailedAttempt(
+        'user@example.com',
+        'TEST',
+        5,
+        60_000,
+        900_000,
+      );
       expect(lockedOut).toBe(false);
     }
-    const { lockedOut } = tracker.recordFailedAttempt('user@example.com', 'TEST', 5, 60_000, 900_000);
+    const { lockedOut } = tracker.recordFailedAttempt(
+      'user@example.com',
+      'TEST',
+      5,
+      60_000,
+      900_000,
+    );
     expect(lockedOut).toBe(true);
   });
 
@@ -74,7 +112,13 @@ describe('OtpAttemptTrackerService', () => {
 
     nowSpy.mockReturnValue(1_000_000);
     for (let i = 0; i < 5; i++) {
-      tracker.recordFailedAttempt('user@example.com', 'TEST', 5, 60_000, 900_000);
+      tracker.recordFailedAttempt(
+        'user@example.com',
+        'TEST',
+        5,
+        60_000,
+        900_000,
+      );
     }
     expect(tracker.isLockedOut('user@example.com', 'TEST')).toBe(true);
 

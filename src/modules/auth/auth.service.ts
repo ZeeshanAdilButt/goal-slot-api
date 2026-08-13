@@ -26,8 +26,6 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
   OTPPurpose,
-  SendChangePasswordOTPDto,
-  ChangePasswordDto,
 } from './dto/auth.dto';
 import { User, UserRole, UserType, PlanType } from '@prisma/client';
 import { resolvePlanLimits } from './plan-limits';
@@ -159,7 +157,10 @@ export class AuthService {
         // 409) let anyone enumerate registered emails by calling send-otp
         // directly; register() still independently rejects a duplicate
         // email as a final defense-in-depth.
-        return { success: true, message: 'Verification code sent to your email.' };
+        return {
+          success: true,
+          message: 'Verification code sent to your email.',
+        };
       }
     }
 

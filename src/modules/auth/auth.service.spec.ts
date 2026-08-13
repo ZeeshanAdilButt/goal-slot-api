@@ -17,14 +17,20 @@ class FakeUserStore {
 
   findUnique = async (args: any) => {
     const where = args.where;
-    if (where.id !== undefined) return this.users.find((u) => u.id === where.id) ?? null;
-    if (where.email !== undefined) return this.users.find((u) => u.email === where.email) ?? null;
+    if (where.id !== undefined)
+      return this.users.find((u) => u.id === where.id) ?? null;
+    if (where.email !== undefined)
+      return this.users.find((u) => u.email === where.email) ?? null;
     return null;
   };
 
   findFirst = async (args: any) => {
     const orConditions: any[] = args.where?.OR ?? [args.where];
-    return this.users.find((u) => orConditions.some((cond) => this.matches(u, cond))) ?? null;
+    return (
+      this.users.find((u) =>
+        orConditions.some((cond) => this.matches(u, cond)),
+      ) ?? null
+    );
   };
 
   create = async (args: any) => {
@@ -90,7 +96,10 @@ class FakeJwtService {
 }
 
 class FakeSupabaseService {
-  result: { valid: boolean; user?: { id: string; email?: string; name?: string } } = { valid: false };
+  result: {
+    valid: boolean;
+    user?: { id: string; email?: string; name?: string };
+  } = { valid: false };
 
   async verifySSOToken(_token: string) {
     return this.result;
@@ -123,7 +132,15 @@ function buildAuthService() {
     otpAttemptTracker,
   );
 
-  return { authService, prisma, cacheManager, jwtService, supabaseService, emailService, otpAttemptTracker };
+  return {
+    authService,
+    prisma,
+    cacheManager,
+    jwtService,
+    supabaseService,
+    emailService,
+    otpAttemptTracker,
+  };
 }
 
 // ---------- SSO login trusts only the verified token email ----------
@@ -133,7 +150,11 @@ describe('AuthService.ssoLogin', () => {
     const { authService, supabaseService, prisma } = buildAuthService();
     supabaseService.result = {
       valid: true,
-      user: { id: 'supabase-id-1', email: 'victim@company.com', name: 'Victim' },
+      user: {
+        id: 'supabase-id-1',
+        email: 'victim@company.com',
+        name: 'Victim',
+      },
     };
 
     const result = await authService.ssoLogin({
@@ -168,7 +189,11 @@ describe('AuthService.ssoLogin', () => {
     // in the request body hoping the server trusts it.
     supabaseService.result = {
       valid: true,
-      user: { id: 'attacker-supabase-id', email: 'attacker@evil.com', name: 'Attacker' },
+      user: {
+        id: 'attacker-supabase-id',
+        email: 'attacker@evil.com',
+        name: 'Attacker',
+      },
     };
 
     const result = await authService.ssoLogin({
@@ -202,7 +227,11 @@ describe('AuthService.ssoLogin', () => {
 
     supabaseService.result = {
       valid: true,
-      user: { id: 'sso-id-real', email: 'real@example.com', name: 'Real Person' },
+      user: {
+        id: 'sso-id-real',
+        email: 'real@example.com',
+        name: 'Real Person',
+      },
     };
 
     const result = await authService.ssoLogin({
@@ -223,7 +252,10 @@ describe('AuthService.ssoLogin', () => {
     supabaseService.result = { valid: false };
 
     await expect(
-      authService.ssoLogin({ token: 'bad-token', email: 'x@example.com' } as any),
+      authService.ssoLogin({
+        token: 'bad-token',
+        email: 'x@example.com',
+      } as any),
     ).rejects.toThrow(UnauthorizedException);
   });
 
@@ -245,7 +277,10 @@ describe('AuthService.ssoLogin', () => {
     };
 
     await expect(
-      authService.ssoLogin({ token: 'valid-token', email: 'disabled@example.com' } as any),
+      authService.ssoLogin({
+        token: 'valid-token',
+        email: 'disabled@example.com',
+      } as any),
     ).rejects.toThrow('This account has been disabled');
   });
 });
@@ -286,10 +321,14 @@ describe('AuthService.verifyOTP concurrency', () => {
     );
 
     const invalidOtpRejections = outcomes.filter(
-      (o) => o.status === 'rejected' && String((o as any).reason?.message).includes('Invalid OTP'),
+      (o) =>
+        o.status === 'rejected' &&
+        String((o as any).reason?.message).includes('Invalid OTP'),
     );
     const lockedOutRejections = outcomes.filter(
-      (o) => o.status === 'rejected' && String((o as any).reason?.message).includes('temporarily locked'),
+      (o) =>
+        o.status === 'rejected' &&
+        String((o as any).reason?.message).includes('temporarily locked'),
     );
 
     // With a properly atomic counter, 10 concurrent wrong guesses cannot
@@ -302,9 +341,9 @@ describe('AuthService.verifyOTP concurrency', () => {
     // The lockout must be durable: a follow-up call after the burst is
     // rejected even with the *correct* OTP, proving the lock isn't just a
     // per-request fluke.
-    await expect(authService.verifyOTP({ email, otp: '111111', purpose })).rejects.toThrow(
-      'temporarily locked',
-    );
+    await expect(
+      authService.verifyOTP({ email, otp: '111111', purpose }),
+    ).rejects.toThrow('temporarily locked');
   });
 
   it('does not lock out on a single wrong attempt and clears the counter on success', async () => {
@@ -313,11 +352,13 @@ describe('AuthService.verifyOTP concurrency', () => {
     const purpose = OTPPurpose.SIGNUP;
     await cacheManager.set(`otp:${email}:${purpose}`, '654321');
 
-    await expect(authService.verifyOTP({ email, otp: '000000', purpose })).rejects.toThrow(
-      'Invalid OTP code',
-    );
+    await expect(
+      authService.verifyOTP({ email, otp: '000000', purpose }),
+    ).rejects.toThrow('Invalid OTP code');
 
-    await expect(authService.verifyOTP({ email, otp: '654321', purpose })).resolves.toBe(true);
+    await expect(
+      authService.verifyOTP({ email, otp: '654321', purpose }),
+    ).resolves.toBe(true);
   });
 });
 
@@ -338,7 +379,10 @@ describe('AuthService.login / refreshToken with a disabled account', () => {
     });
 
     await expect(
-      authService.login({ email: 'disabled@example.com', password: 'correct-password' }),
+      authService.login({
+        email: 'disabled@example.com',
+        password: 'correct-password',
+      }),
     ).rejects.toThrow('This account has been disabled');
   });
 
@@ -356,7 +400,10 @@ describe('AuthService.login / refreshToken with a disabled account', () => {
     });
 
     await expect(
-      authService.login({ email: 'disabled@example.com', password: 'wrong-password' }),
+      authService.login({
+        email: 'disabled@example.com',
+        password: 'wrong-password',
+      }),
     ).rejects.toThrow('Invalid credentials');
   });
 
@@ -373,7 +420,10 @@ describe('AuthService.login / refreshToken with a disabled account', () => {
       plan: 'FREE',
     });
 
-    const result = await authService.login({ email: 'active@example.com', password: 'correct-password' });
+    const result = await authService.login({
+      email: 'active@example.com',
+      password: 'correct-password',
+    });
     expect(result.user.email).toBe('active@example.com');
     expect(result.accessToken).toBeDefined();
   });
@@ -389,7 +439,9 @@ describe('AuthService.login / refreshToken with a disabled account', () => {
       plan: 'FREE',
     });
 
-    await expect(authService.refreshToken('user_1')).rejects.toThrow('This account has been disabled');
+    await expect(authService.refreshToken('user_1')).rejects.toThrow(
+      'This account has been disabled',
+    );
   });
 
   it('refreshToken succeeds for an active user', async () => {
@@ -423,18 +475,30 @@ describe('AuthService email enumeration fixes', () => {
       plan: 'FREE',
     });
 
-    const result = await authService.sendOTP({ email: 'taken@example.com', purpose: OTPPurpose.SIGNUP });
+    const result = await authService.sendOTP({
+      email: 'taken@example.com',
+      purpose: OTPPurpose.SIGNUP,
+    });
 
-    expect(result).toEqual({ success: true, message: 'Verification code sent to your email.' });
+    expect(result).toEqual({
+      success: true,
+      message: 'Verification code sent to your email.',
+    });
     expect(emailService.sendOTPEmail).not.toHaveBeenCalled();
   });
 
   it('sendOTP for SIGNUP sends a real code and the same-shaped response for a new email', async () => {
     const { authService, emailService } = buildAuthService();
 
-    const result = await authService.sendOTP({ email: 'new@example.com', purpose: OTPPurpose.SIGNUP });
+    const result = await authService.sendOTP({
+      email: 'new@example.com',
+      purpose: OTPPurpose.SIGNUP,
+    });
 
-    expect(result).toEqual({ success: true, message: 'Verification code sent to your email.' });
+    expect(result).toEqual({
+      success: true,
+      message: 'Verification code sent to your email.',
+    });
     expect(emailService.sendOTPEmail).toHaveBeenCalledTimes(1);
   });
 
@@ -461,7 +525,10 @@ describe('AuthService email enumeration fixes', () => {
       newPassword: 'NewPassword123!',
     });
 
-    const [realResult, fakeResult] = await Promise.allSettled([realEmailAttempt, fakeEmailAttempt]);
+    const [realResult, fakeResult] = await Promise.allSettled([
+      realEmailAttempt,
+      fakeEmailAttempt,
+    ]);
 
     expect(realResult.status).toBe('rejected');
     expect(fakeResult.status).toBe('rejected');

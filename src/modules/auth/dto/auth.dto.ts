@@ -131,7 +131,11 @@ export class SSOLoginDto {
   // derives the account email from the verified SSO token itself
   // (see AuthService.ssoLogin), never from this field. Do not wire this
   // value into any lookup, creation, or account-linking logic.
-  @ApiPropertyOptional({ example: 'user@example.com', description: 'Ignored for authentication; the verified SSO token email is used instead.' })
+  @ApiPropertyOptional({
+    example: 'user@example.com',
+    description:
+      'Ignored for authentication; the verified SSO token email is used instead.',
+  })
   @IsOptional()
   @IsEmail()
   email?: string;

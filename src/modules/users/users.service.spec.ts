@@ -45,8 +45,7 @@ class FakePrisma {
       if (where.id) return this.users.get(where.id) ?? null;
       if (where.email) {
         return (
-          [...this.users.values()].find((u) => u.email === where.email) ??
-          null
+          [...this.users.values()].find((u) => u.email === where.email) ?? null
         );
       }
       return null;
@@ -113,7 +112,9 @@ describe('UsersService role-escalation guard', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(
-        [...prisma.users.values()].some((u) => u.email === 'newsuper@example.com'),
+        [...prisma.users.values()].some(
+          (u) => u.email === 'newsuper@example.com',
+        ),
       ).toBe(false);
     });
 
@@ -159,7 +160,9 @@ describe('UsersService role-escalation guard', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(
-        [...prisma.users.values()].some((u) => u.email === 'victim@example.com'),
+        [...prisma.users.values()].some(
+          (u) => u.email === 'victim@example.com',
+        ),
       ).toBe(false);
       expect(emailService.sent).toHaveLength(0);
     });

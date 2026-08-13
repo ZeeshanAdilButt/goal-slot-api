@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PushSubscriptionsService } from './push-subscriptions.service';
 
 class FakePrisma {
@@ -10,11 +14,15 @@ class FakePrisma {
       let existing: any;
       if (where.userId_endpoint) {
         existing = this.rows.find(
-          (r) => r.userId === where.userId_endpoint.userId && r.endpoint === where.userId_endpoint.endpoint,
+          (r) =>
+            r.userId === where.userId_endpoint.userId &&
+            r.endpoint === where.userId_endpoint.endpoint,
         );
       } else if (where.userId_expoToken) {
         existing = this.rows.find(
-          (r) => r.userId === where.userId_expoToken.userId && r.expoToken === where.userId_expoToken.expoToken,
+          (r) =>
+            r.userId === where.userId_expoToken.userId &&
+            r.expoToken === where.userId_expoToken.expoToken,
         );
       }
 
@@ -23,11 +31,19 @@ class FakePrisma {
         return existing;
       }
 
-      const row = { id: `ps_${this.nextId++}`, endpoint: null, p256dh: null, auth: null, expoToken: null, ...create };
+      const row = {
+        id: `ps_${this.nextId++}`,
+        endpoint: null,
+        p256dh: null,
+        auth: null,
+        expoToken: null,
+        ...create,
+      };
       this.rows.push(row);
       return row;
     },
-    findUnique: async ({ where }: any) => this.rows.find((r) => r.id === where.id) ?? null,
+    findUnique: async ({ where }: any) =>
+      this.rows.find((r) => r.id === where.id) ?? null,
     delete: async ({ where }: any) => {
       const index = this.rows.findIndex((r) => r.id === where.id);
       const [removed] = this.rows.splice(index, 1);
@@ -71,7 +87,9 @@ describe('PushSubscriptionsService', () => {
     it('creates an EXPO row when only expoToken is provided', async () => {
       const { prisma, service } = buildService();
 
-      const result = await service.register('user_1', { expoToken: 'ExponentPushToken[abc]' });
+      const result = await service.register('user_1', {
+        expoToken: 'ExponentPushToken[abc]',
+      });
 
       expect(result.kind).toBe('EXPO');
       expect(result.expoToken).toBe('ExponentPushToken[abc]');
@@ -94,7 +112,9 @@ describe('PushSubscriptionsService', () => {
     it('rejects a payload with neither shape', async () => {
       const { service } = buildService();
 
-      await expect(service.register('user_1', {})).rejects.toThrow(BadRequestException);
+      await expect(service.register('user_1', {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects an incomplete web push shape', async () => {
@@ -127,7 +147,9 @@ describe('PushSubscriptionsService', () => {
   describe('unregister', () => {
     it('deletes the row when the caller owns it', async () => {
       const { prisma, service } = buildService();
-      const created = await service.register('user_1', { expoToken: 'ExponentPushToken[abc]' });
+      const created = await service.register('user_1', {
+        expoToken: 'ExponentPushToken[abc]',
+      });
 
       await service.unregister(created.id, 'user_1');
 
@@ -136,24 +158,38 @@ describe('PushSubscriptionsService', () => {
 
     it('throws ForbiddenException when the caller does not own the row', async () => {
       const { prisma, service } = buildService();
-      const created = await service.register('user_1', { expoToken: 'ExponentPushToken[abc]' });
+      const created = await service.register('user_1', {
+        expoToken: 'ExponentPushToken[abc]',
+      });
 
-      await expect(service.unregister(created.id, 'user_2')).rejects.toThrow(ForbiddenException);
+      await expect(service.unregister(created.id, 'user_2')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(prisma.rows).toHaveLength(1);
     });
 
     it('throws NotFoundException when the row does not exist', async () => {
       const { service } = buildService();
 
-      await expect(service.unregister('missing-id', 'user_1')).rejects.toThrow(NotFoundException);
+      await expect(service.unregister('missing-id', 'user_1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('deleteByEndpoint / deleteByExpoToken', () => {
     it('removes only the matching WEB subscription', async () => {
       const { prisma, service } = buildService();
-      await service.register('user_1', { endpoint: 'https://push.example/1', p256dh: 'p', auth: 'a' });
-      await service.register('user_1', { endpoint: 'https://push.example/2', p256dh: 'p', auth: 'a' });
+      await service.register('user_1', {
+        endpoint: 'https://push.example/1',
+        p256dh: 'p',
+        auth: 'a',
+      });
+      await service.register('user_1', {
+        endpoint: 'https://push.example/2',
+        p256dh: 'p',
+        auth: 'a',
+      });
 
       await service.deleteByEndpoint('user_1', 'https://push.example/1');
 

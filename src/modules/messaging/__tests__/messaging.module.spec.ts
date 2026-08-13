@@ -1,4 +1,7 @@
-import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import {
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 
@@ -10,6 +13,7 @@ import { MessagingConfigService } from '../messaging-config.service';
 import { MessagingController } from '../messaging.controller';
 import { MessagingService } from '../messaging.service';
 import { MessagingTokenService } from '../messaging-token.service';
+import { AuthenticatedRequest } from '../../../shared/types/authenticated-request.interface';
 
 /**
  * The bootstrap guarantee, and the reason this module reads its config in
@@ -48,12 +52,14 @@ describe('MessagingModule wiring', () => {
     const controller = (await compileWith({})).get(MessagingController);
 
     await expect(
-      controller.issueToken({ user: { sub: 'user_1' } }),
+      controller.issueToken({
+        user: { sub: 'user_1' },
+      } as AuthenticatedRequest),
     ).rejects.toThrow(ServiceUnavailableException);
 
     await expect(
       controller.openConversation(
-        { user: { sub: 'user_1' } },
+        { user: { sub: 'user_1' } } as AuthenticatedRequest,
         { userId: 'user_2' },
       ),
     ).rejects.toThrow(ServiceUnavailableException);
@@ -69,7 +75,7 @@ describe('MessagingModule wiring', () => {
 
     const token = await moduleRef
       .get(MessagingController)
-      .issueToken({ user: { sub: 'user_1' } });
+      .issueToken({ user: { sub: 'user_1' } } as AuthenticatedRequest);
 
     expect(token.messagingUrl).toBe('https://messaging.example.com');
   });
@@ -87,21 +93,27 @@ describe('MessagingModule wiring', () => {
     const guard = moduleRef.get(ConversationGateSecretGuard);
 
     const context = {
-      switchToHttp: () => ({ getRequest: () => ({ headers: { authorization: 'Bearer anything' } }) }),
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { authorization: 'Bearer anything' } }),
+      }),
     } as any;
 
     expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
   });
 
   it('accepts the internal endpoint via its guard once CONVERSATION_GATE_SECRET is set, independent of outbound messaging config', async () => {
-    const moduleRef = await compileWith({ CONVERSATION_GATE_SECRET: 'shared-secret' });
+    const moduleRef = await compileWith({
+      CONVERSATION_GATE_SECRET: 'shared-secret',
+    });
 
     expect(moduleRef.get(MessagingConfigService).isEnabled).toBe(false);
 
     const guard = moduleRef.get(ConversationGateSecretGuard);
     const context = {
       switchToHttp: () => ({
-        getRequest: () => ({ headers: { authorization: 'Bearer shared-secret' } }),
+        getRequest: () => ({
+          headers: { authorization: 'Bearer shared-secret' },
+        }),
       }),
     } as any;
 

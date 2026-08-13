@@ -1,12 +1,16 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger } from '@nestjs/common';
 
-import { PrismaService } from "../../../prisma/prisma.service";
-import { EmailService } from "../../email/email.service";
-import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from "../reminder-channel.interface";
+import { PrismaService } from '../../../prisma/prisma.service';
+import { EmailService } from '../../email/email.service';
+import {
+  ReminderChannel,
+  ReminderChannelInput,
+  ReminderChannelResult,
+} from '../reminder-channel.interface';
 
 @Injectable()
 export class EmailReminderChannel implements ReminderChannel {
-  readonly name = "email";
+  readonly name = 'email';
 
   private readonly logger = new Logger(EmailReminderChannel.name);
 

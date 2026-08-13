@@ -30,14 +30,23 @@ import {
 } from './dto/apply-proposals.dto';
 import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
 
+// This file dispatches onto domain services whose payload shape depends on
+// runtime data the Coach LLM produced, not on anything TypeScript can prove
+// at compile time — the class doc comment below explains why. `any` here
+// documents that boundary rather than hiding a type that could otherwise be
+// known; forcing `unknown` at every one of these call sites would just move
+// the same casts one line over without adding any real safety, since the
+// actual safety comes from the runtime DTO validation in validatePayload.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 /**
  * The DTO each action's payload must satisfy before it is handed to a domain
  * service.
  *
  * The global ValidationPipe runs with `whitelist: true`, but that does NOT
  * recurse into `CoachProposedAction.payload` because the property is typed
- * `Record<string, any>` with a bare `@IsObject()`. Without the check below the
- * raw JSON body reached Prisma verbatim (`goals.update` spreads
+ * `Record<string, unknown>` with a bare `@IsObject()`. Without the check
+ * below the raw JSON body reached Prisma verbatim (`goals.update` spreads
  * `{ ...updateData }`), so a caller could set any column the DTO never
  * exposes — most damagingly `userId`, which re-parents the row onto another
  * account.
@@ -343,7 +352,11 @@ export class CoachProposalsService {
         }
 
         try {
-          const updated = await this.schedule.update(userId, action.id, payload as any);
+          const updated = await this.schedule.update(
+            userId,
+            action.id,
+            payload as any,
+          );
           return (updated as any)?.id ?? action.id;
         } catch (err) {
           if (!(err instanceof NotFoundException)) throw err;
@@ -379,7 +392,11 @@ export class CoachProposalsService {
           // Re-check before applying so a weak tier can never silently edit the
           // wrong block just because expectedTitle wasn't part of that tier.
           if (expectedTitle) {
-            await this.assertExpectedTitle(userId, resolution.id, expectedTitle);
+            await this.assertExpectedTitle(
+              userId,
+              resolution.id,
+              expectedTitle,
+            );
           }
           const updated = await this.schedule.update(
             userId,
@@ -595,7 +612,11 @@ export class CoachProposalsService {
       typeof payload.startTime === 'string' &&
       typeof payload.endTime === 'string';
 
-    if (title === undefined && dayOfWeek === undefined && goalId === undefined) {
+    if (
+      title === undefined &&
+      dayOfWeek === undefined &&
+      goalId === undefined
+    ) {
       // Nothing identifies the block beyond its (now dead) id.
       return { status: 'no-match' };
     }
@@ -643,7 +664,8 @@ export class CoachProposalsService {
 
     for (const tier of tiers) {
       const matches = blocks.filter(tier);
-      if (matches.length === 1) return { status: 'resolved', id: matches[0].id };
+      if (matches.length === 1)
+        return { status: 'resolved', id: matches[0].id };
       if (matches.length > 1) return { status: 'ambiguous' };
     }
 
@@ -664,7 +686,10 @@ export class CoachProposalsService {
     if (expectedTitle) {
       bits.push(`"${expectedTitle}"`);
     }
-    if (typeof payload.startTime === 'string' && typeof payload.endTime === 'string') {
+    if (
+      typeof payload.startTime === 'string' &&
+      typeof payload.endTime === 'string'
+    ) {
       bits.push(`its time to ${payload.startTime}-${payload.endTime}`);
     } else if (typeof payload.startTime === 'string') {
       bits.push(`its start time to ${payload.startTime}`);
@@ -672,7 +697,9 @@ export class CoachProposalsService {
       bits.push(`its end time to ${payload.endTime}`);
     }
     if (typeof payload.dayOfWeek === 'number') {
-      bits.push(`its day to ${DAY_NAMES[payload.dayOfWeek] ?? payload.dayOfWeek}`);
+      bits.push(
+        `its day to ${DAY_NAMES[payload.dayOfWeek] ?? payload.dayOfWeek}`,
+      );
     }
     if (typeof payload.title === 'string') {
       bits.push(`its title to "${payload.title}"`);
@@ -747,7 +774,8 @@ function flattenValidationErrors(errors: ValidationError[]): string {
   const out: string[] = [];
   for (const error of errors) {
     if (error.constraints) out.push(...Object.values(error.constraints));
-    if (error.children?.length) out.push(flattenValidationErrors(error.children));
+    if (error.children?.length)
+      out.push(flattenValidationErrors(error.children));
   }
   return out.join('; ');
 }

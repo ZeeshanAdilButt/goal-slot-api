@@ -1,5 +1,9 @@
 import { ReminderDispatchService } from './reminder-dispatch.service';
-import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from './reminder-channel.interface';
+import {
+  ReminderChannel,
+  ReminderChannelInput,
+  ReminderChannelResult,
+} from './reminder-channel.interface';
 
 class FakePrisma {
   sharedAccesses: any[] = [];
@@ -82,7 +86,10 @@ describe('ReminderDispatchService.runDailySweep - report staleness', () => {
 
     expect(email.calls).toHaveLength(1);
     expect(email.calls[0].userId).toBe('mentor_1');
-    expect(email.calls[0].data).toEqual({ type: 'schedule', sharedAccessId: 'share_1' });
+    expect(email.calls[0].data).toEqual({
+      type: 'schedule',
+      sharedAccessId: 'share_1',
+    });
     expect(email.calls[0].title).toContain('Mentee One');
     expect(prisma.sharedAccesses[0].lastViewReminderAt).toEqual(NOW);
   });
@@ -193,7 +200,10 @@ describe('ReminderDispatchService.runDailySweep - pending instructions', () => {
 
     expect(email.calls).toHaveLength(1);
     expect(email.calls[0].userId).toBe('mentee_1');
-    expect(email.calls[0].data).toEqual({ type: 'instruction', instructionId: 'instr_1' });
+    expect(email.calls[0].data).toEqual({
+      type: 'instruction',
+      instructionId: 'instr_1',
+    });
     expect(prisma.instructions[0].lastReminderAt).toEqual(NOW);
   });
 
@@ -212,7 +222,9 @@ describe('ReminderDispatchService.runDailySweep - pending instructions', () => {
     await service.runDailySweep();
 
     expect(email.calls).toHaveLength(0);
-    expect(prisma.instructions[0].lastReminderAt).toEqual(new Date(NOW.getTime() - days(1)));
+    expect(prisma.instructions[0].lastReminderAt).toEqual(
+      new Date(NOW.getTime() - days(1)),
+    );
   });
 });
 
@@ -235,7 +247,11 @@ describe('ReminderDispatchService.sendInstructionReminder', () => {
     });
 
     const succeeded = await service.sendInstructionReminder(
-      { id: 'instr_5', assigneeId: 'mentee_5', title: 'Start tracking your time again' },
+      {
+        id: 'instr_5',
+        assigneeId: 'mentee_5',
+        title: 'Start tracking your time again',
+      },
       NOW,
     );
 
@@ -243,8 +259,13 @@ describe('ReminderDispatchService.sendInstructionReminder', () => {
     for (const channel of [email, expoPush, webPush]) {
       expect(channel.calls).toHaveLength(1);
       expect(channel.calls[0].userId).toBe('mentee_5');
-      expect(channel.calls[0].title).toContain('Start tracking your time again');
-      expect(channel.calls[0].data).toEqual({ type: 'instruction', instructionId: 'instr_5' });
+      expect(channel.calls[0].title).toContain(
+        'Start tracking your time again',
+      );
+      expect(channel.calls[0].data).toEqual({
+        type: 'instruction',
+        instructionId: 'instr_5',
+      });
     }
     expect(prisma.instructions[0].lastReminderAt).toEqual(NOW);
   });
@@ -276,7 +297,10 @@ describe('ReminderDispatchService.sendInstructionReminder', () => {
     // FakePrisma will operate on undefined and throw when merging fields -
     // sendInstructionReminder must still resolve rather than propagate.
     await expect(
-      service.sendInstructionReminder({ id: 'does_not_exist', assigneeId: 'mentee_7', title: 'Ghost' }, NOW),
+      service.sendInstructionReminder(
+        { id: 'does_not_exist', assigneeId: 'mentee_7', title: 'Ghost' },
+        NOW,
+      ),
     ).resolves.toBe(false);
   });
 });

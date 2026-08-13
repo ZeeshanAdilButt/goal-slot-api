@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterPushSubscriptionDto } from './dto/push-subscriptions.dto';
 
@@ -11,12 +16,16 @@ export class PushSubscriptionsService {
     const isExpoShape = Boolean(dto.expoToken);
 
     if (isWebShape && isExpoShape) {
-      throw new BadRequestException('Provide either a web push subscription or an Expo token, not both');
+      throw new BadRequestException(
+        'Provide either a web push subscription or an Expo token, not both',
+      );
     }
 
     if (isWebShape) {
       if (!dto.endpoint || !dto.p256dh || !dto.auth) {
-        throw new BadRequestException('A web push subscription requires endpoint, p256dh, and auth');
+        throw new BadRequestException(
+          'A web push subscription requires endpoint, p256dh, and auth',
+        );
       }
 
       return this.prisma.pushSubscription.upsert({
@@ -47,11 +56,15 @@ export class PushSubscriptionsService {
       });
     }
 
-    throw new BadRequestException('Provide either a web push subscription (endpoint, p256dh, auth) or an expoToken');
+    throw new BadRequestException(
+      'Provide either a web push subscription (endpoint, p256dh, auth) or an expoToken',
+    );
   }
 
   async unregister(id: string, userId: string) {
-    const subscription = await this.prisma.pushSubscription.findUnique({ where: { id } });
+    const subscription = await this.prisma.pushSubscription.findUnique({
+      where: { id },
+    });
     if (!subscription) {
       throw new NotFoundException('Push subscription not found');
     }
@@ -66,10 +79,14 @@ export class PushSubscriptionsService {
   // service reports as dead (e.g. web push 404/410). Deliberately not
   // scoped to throw if nothing matches — the row may already be gone.
   async deleteByEndpoint(userId: string, endpoint: string) {
-    await this.prisma.pushSubscription.deleteMany({ where: { userId, endpoint } });
+    await this.prisma.pushSubscription.deleteMany({
+      where: { userId, endpoint },
+    });
   }
 
   async deleteByExpoToken(userId: string, expoToken: string) {
-    await this.prisma.pushSubscription.deleteMany({ where: { userId, expoToken } });
+    await this.prisma.pushSubscription.deleteMany({
+      where: { userId, expoToken },
+    });
   }
 }

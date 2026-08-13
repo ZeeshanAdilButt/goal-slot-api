@@ -14,12 +14,12 @@ import { Resend } from 'resend';
 // anyone they invite. Route every interpolated value through this before
 // it goes into an html string (plain-text bodies don't need it).
 function escapeHtml(value: string): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 @Injectable()
@@ -668,7 +668,11 @@ GoalSlot`;
   // (report-staleness nudges, instruction reminders). Unlike the
   // templated methods above, callers supply the title/body directly
   // since the source data varies per reminder type.
-  async sendReminderEmail(params: { toEmail: string; title: string; body: string }) {
+  async sendReminderEmail(params: {
+    toEmail: string;
+    title: string;
+    body: string;
+  }) {
     const { toEmail, title, body } = params;
     // title/body originate from user-controlled data (e.g. an
     // AssignInstructionDto.title set by another user's mentor/mentee) and
@@ -682,7 +686,7 @@ GoalSlot`;
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">${safeTitle}</h1>
         <p style="margin:0 0 12px;color:#3f3f46;">${safeBody}</p>
-        ${this.renderButton(`${this.appUrl}/dashboard`, "Open GoalSlot", "left")}
+        ${this.renderButton(`${this.appUrl}/dashboard`, 'Open GoalSlot', 'left')}
       `,
     });
 

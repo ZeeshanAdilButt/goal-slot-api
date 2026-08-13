@@ -269,7 +269,11 @@ export class HealthService {
     }
 
     // Non-critical dependencies missing or unreachable degrade the report
-    if (!supabaseCheck.configured || !supabaseCheck.ok || !resendCheck.configured) {
+    if (
+      !supabaseCheck.configured ||
+      !supabaseCheck.ok ||
+      !resendCheck.configured
+    ) {
       return 'degraded';
     }
 

@@ -49,7 +49,9 @@ function deletes(type: CoachActionType, n: number): CoachProposedAction[] {
 
 describe('destructive action classification', () => {
   it('flags exactly the four DELETE_* types', () => {
-    const flagged = COACH_ACTION_TYPES.filter((t) => isDestructiveActionType(t));
+    const flagged = COACH_ACTION_TYPES.filter((t) =>
+      isDestructiveActionType(t),
+    );
     expect([...flagged].sort()).toEqual(
       [...DESTRUCTIVE_COACH_ACTION_TYPES].sort(),
     );
@@ -123,7 +125,9 @@ describe('assertProposalBatchSafe: destructive caps', () => {
     expect(() => assertProposalBatchSafe(deletes('DELETE_GOAL', 4))).toThrow(
       /deletes 4 goals/,
     );
-    expect(() => assertProposalBatchSafe(deletes('DELETE_GOAL', 3))).not.toThrow();
+    expect(() =>
+      assertProposalBatchSafe(deletes('DELETE_GOAL', 3)),
+    ).not.toThrow();
   });
 
   it('counts deletes across all four types toward the total cap', () => {

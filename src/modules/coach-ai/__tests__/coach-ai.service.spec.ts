@@ -1,11 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import {
-  BadRequestException,
-  HttpException,
-  HttpStatus,
-} from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import {
   CoachInsightStatus,
   CoachRole,
@@ -944,8 +940,20 @@ describe('CoachAiService', () => {
     function seedHostileAccount() {
       prisma.byok.set('user_1', freshByok());
       prisma.goalRows.push(
-        { id: 'g_real_1', title: 'Ship the coach', deadline: null, loggedHours: 3, status: 'ACTIVE' },
-        { id: 'g_evil', title: INJECTED_GOAL_TITLE, deadline: null, loggedHours: 0, status: 'ACTIVE' },
+        {
+          id: 'g_real_1',
+          title: 'Ship the coach',
+          deadline: null,
+          loggedHours: 3,
+          status: 'ACTIVE',
+        },
+        {
+          id: 'g_evil',
+          title: INJECTED_GOAL_TITLE,
+          deadline: null,
+          loggedHours: 0,
+          status: 'ACTIVE',
+        },
       );
       prisma.journalRows.push({
         date: '2026-05-28',
@@ -967,7 +975,10 @@ describe('CoachAiService', () => {
       });
     }
 
-    function captureNarrativePrompt(): { system: () => string; user: () => string } {
+    function captureNarrativePrompt(): {
+      system: () => string;
+      user: () => string;
+    } {
       let systemMsg = '';
       let userMsg = '';
       createSpy.mockImplementation((..._args: any[]) => ({

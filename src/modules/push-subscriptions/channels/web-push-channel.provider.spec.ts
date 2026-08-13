@@ -23,7 +23,9 @@ describe('WebPushReminderChannel', () => {
     process.env = ORIGINAL_ENV;
   });
 
-  function buildChannel(config: { publicKey?: string; privateKey?: string; subject?: string } = {}) {
+  function buildChannel(
+    config: { publicKey?: string; privateKey?: string; subject?: string } = {},
+  ) {
     const withDefaults = {
       publicKey: 'public-key',
       privateKey: 'private-key',
@@ -47,13 +49,23 @@ describe('WebPushReminderChannel', () => {
       process.env.VAPID_SUBJECT = withDefaults.subject;
     }
 
-    return new WebPushReminderChannel(prisma as any, pushSubscriptionsService as any);
+    return new WebPushReminderChannel(
+      prisma as any,
+      pushSubscriptionsService as any,
+    );
   }
 
   it('short-circuits without throwing when VAPID keys are missing', async () => {
-    const channel = buildChannel({ publicKey: undefined, privateKey: undefined });
+    const channel = buildChannel({
+      publicKey: undefined,
+      privateKey: undefined,
+    });
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: false });
     expect(prisma.pushSubscription.findMany).not.toHaveBeenCalled();
@@ -64,7 +76,11 @@ describe('WebPushReminderChannel', () => {
     const channel = buildChannel();
     prisma.pushSubscription.findMany.mockResolvedValue([]);
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: false });
     expect(webpush.sendNotification).not.toHaveBeenCalled();
@@ -73,11 +89,24 @@ describe('WebPushReminderChannel', () => {
   it('returns ok:true when the send succeeds', async () => {
     const channel = buildChannel();
     prisma.pushSubscription.findMany.mockResolvedValue([
-      { id: 's1', userId: 'user_1', kind: 'WEB', endpoint: 'https://push.example/1', p256dh: 'p', auth: 'a' },
+      {
+        id: 's1',
+        userId: 'user_1',
+        kind: 'WEB',
+        endpoint: 'https://push.example/1',
+        p256dh: 'p',
+        auth: 'a',
+      },
     ]);
-    (webpush.sendNotification as jest.Mock).mockResolvedValue({ statusCode: 201 });
+    (webpush.sendNotification as jest.Mock).mockResolvedValue({
+      statusCode: 201,
+    });
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: true });
     expect(webpush.sendNotification).toHaveBeenCalledTimes(1);
@@ -99,10 +128,17 @@ describe('WebPushReminderChannel', () => {
     error.statusCode = 410;
     (webpush.sendNotification as jest.Mock).mockRejectedValue(error);
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: false, subscriptionGone: true });
-    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith('user_1', subscription.endpoint);
+    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith(
+      'user_1',
+      subscription.endpoint,
+    );
   });
 
   it('deletes the subscription on a 404 response too', async () => {
@@ -120,10 +156,17 @@ describe('WebPushReminderChannel', () => {
     error.statusCode = 404;
     (webpush.sendNotification as jest.Mock).mockRejectedValue(error);
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: false, subscriptionGone: true });
-    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith('user_1', subscription.endpoint);
+    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith(
+      'user_1',
+      subscription.endpoint,
+    );
   });
 
   it('returns ok:false without deleting anything when a send fails for a non-gone reason', async () => {
@@ -141,7 +184,11 @@ describe('WebPushReminderChannel', () => {
     error.statusCode = 500;
     (webpush.sendNotification as jest.Mock).mockRejectedValue(error);
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: false });
     expect(pushSubscriptionsService.deleteByEndpoint).not.toHaveBeenCalled();
@@ -150,16 +197,39 @@ describe('WebPushReminderChannel', () => {
   it('returns ok:true when one of several subscriptions succeeds', async () => {
     const channel = buildChannel();
     prisma.pushSubscription.findMany.mockResolvedValue([
-      { id: 's1', userId: 'user_1', kind: 'WEB', endpoint: 'https://push.example/1', p256dh: 'p', auth: 'a' },
-      { id: 's2', userId: 'user_1', kind: 'WEB', endpoint: 'https://push.example/2', p256dh: 'p', auth: 'a' },
+      {
+        id: 's1',
+        userId: 'user_1',
+        kind: 'WEB',
+        endpoint: 'https://push.example/1',
+        p256dh: 'p',
+        auth: 'a',
+      },
+      {
+        id: 's2',
+        userId: 'user_1',
+        kind: 'WEB',
+        endpoint: 'https://push.example/2',
+        p256dh: 'p',
+        auth: 'a',
+      },
     ]);
     const gone: any = new Error('gone');
     gone.statusCode = 410;
-    (webpush.sendNotification as jest.Mock).mockRejectedValueOnce(gone).mockResolvedValueOnce({ statusCode: 201 });
+    (webpush.sendNotification as jest.Mock)
+      .mockRejectedValueOnce(gone)
+      .mockResolvedValueOnce({ statusCode: 201 });
 
-    const result = await channel.send({ userId: 'user_1', title: 'Hi', body: 'Body' });
+    const result = await channel.send({
+      userId: 'user_1',
+      title: 'Hi',
+      body: 'Body',
+    });
 
     expect(result).toEqual({ ok: true });
-    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith('user_1', 'https://push.example/1');
+    expect(pushSubscriptionsService.deleteByEndpoint).toHaveBeenCalledWith(
+      'user_1',
+      'https://push.example/1',
+    );
   });
 });

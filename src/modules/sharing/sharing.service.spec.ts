@@ -93,9 +93,12 @@ function makeShare(overrides: Partial<any> & { inviteToken: string }) {
     isAccepted: overrides.isAccepted ?? false,
     createdAt: overrides.createdAt ?? new Date('2026-01-01T00:00:00Z'),
     updatedAt: overrides.updatedAt ?? new Date('2026-01-01T00:00:00Z'),
-    owner:
-      overrides.owner ??
-      { id: 'owner_1', email: 'owner@example.com', name: 'Owner', avatar: null },
+    owner: overrides.owner ?? {
+      id: 'owner_1',
+      email: 'owner@example.com',
+      name: 'Owner',
+      avatar: null,
+    },
   };
 }
 
@@ -137,7 +140,10 @@ class FakeEmailService {}
 
 function buildPublicTokenService() {
   const prisma = new FakePrismaForPublicToken();
-  const service = new SharingService(prisma as any, new FakeEmailService() as any);
+  const service = new SharingService(
+    prisma as any,
+    new FakeEmailService() as any,
+  );
   return { prisma, service };
 }
 

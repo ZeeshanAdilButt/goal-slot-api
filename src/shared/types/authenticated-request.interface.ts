@@ -12,6 +12,7 @@ export interface AuthenticatedUser {
   sub: string;
   email: string;
   role: UserRole;
+  isDisabled: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {

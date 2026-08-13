@@ -37,7 +37,8 @@ export class TimeEntriesService {
       const goal = await this.prisma.goal.findFirst({
         where: { id: goalId, userId },
       });
-      if (!goal) throw new ForbiddenException('Goal not found or access denied');
+      if (!goal)
+        throw new ForbiddenException('Goal not found or access denied');
     }
 
     if (scheduleBlockId) {
@@ -45,7 +46,9 @@ export class TimeEntriesService {
         where: { id: scheduleBlockId, userId },
       });
       if (!block) {
-        throw new ForbiddenException('Schedule block not found or access denied');
+        throw new ForbiddenException(
+          'Schedule block not found or access denied',
+        );
       }
     }
 
@@ -53,7 +56,8 @@ export class TimeEntriesService {
       const task = await this.prisma.task.findFirst({
         where: { id: taskId, userId },
       });
-      if (!task) throw new ForbiddenException('Task not found or access denied');
+      if (!task)
+        throw new ForbiddenException('Task not found or access denied');
     }
   }
 

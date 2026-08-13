@@ -47,7 +47,12 @@ export class AuthController {
 
   @Get('check-email')
   @UseGuards(ThrottlerGuard)
-  @Throttle({ 'check-email': { limit: CHECK_EMAIL_THROTTLE_LIMIT, ttl: CHECK_EMAIL_THROTTLE_TTL_MS } })
+  @Throttle({
+    'check-email': {
+      limit: CHECK_EMAIL_THROTTLE_LIMIT,
+      ttl: CHECK_EMAIL_THROTTLE_TTL_MS,
+    },
+  })
   @ApiOperation({ summary: 'Check if email is already registered' })
   @ApiQuery({ name: 'email', type: String })
   @ApiResponse({ status: 200, description: 'Email existence check result' })

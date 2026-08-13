@@ -178,7 +178,9 @@ describe('EmailService.sendReminderEmail', () => {
 
     // No raw tag or attribute survives into the HTML part.
     expect(call.html).not.toContain('<img src=x onerror=alert(1)>');
-    expect(call.html).not.toContain('<a href="https://evil.example/phish">here</a>');
+    expect(call.html).not.toContain(
+      '<a href="https://evil.example/phish">here</a>',
+    );
 
     // The escaped, inert form is present instead.
     expect(call.html).toContain('Reminder: &lt;img src=x onerror=alert(1)&gt;');
@@ -211,7 +213,9 @@ describe('EmailService.sendReminderEmail', () => {
 
     const call = lastCallArgs(sendMock);
     expect(call.html).toContain('Reminder: Log time daily this week');
-    expect(call.html).toContain('Your mentor is waiting on: Log time daily this week');
+    expect(call.html).toContain(
+      'Your mentor is waiting on: Log time daily this week',
+    );
   });
 
   it('sends the subject and Resend call with the expected recipient', async () => {

@@ -1,4 +1,11 @@
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -21,22 +28,34 @@ class AttributionFieldsDto {
   @MaxLength(500)
   taskName?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Goal to attribute the time to' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Goal to attribute the time to',
+  })
   @IsOptional()
   @IsUUID()
   goalId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Task to attribute the time to' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Task to attribute the time to',
+  })
   @IsOptional()
   @IsUUID()
   taskId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Schedule block to attribute the time to' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Schedule block to attribute the time to',
+  })
   @IsOptional()
   @IsUUID()
   scheduleBlockId?: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Notes carried onto the resulting time entry' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Notes carried onto the resulting time entry',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(5000)
@@ -63,7 +82,8 @@ export class StartTimerSessionDto extends AttributionFieldsDto {
   @ApiPropertyOptional({
     example: 'web',
     enum: ['web', 'ios', 'android', 'unknown'],
-    description: 'Which client started this, purely so the takeover prompt can name it',
+    description:
+      'Which client started this, purely so the takeover prompt can name it',
   })
   @IsOptional()
   @IsIn(['web', 'ios', 'android', 'unknown'])
@@ -71,14 +91,20 @@ export class StartTimerSessionDto extends AttributionFieldsDto {
 }
 
 export class UpdateTimerSessionDto extends AttributionFieldsDto {
-  @ApiPropertyOptional({ example: 'web', enum: ['web', 'ios', 'android', 'unknown'] })
+  @ApiPropertyOptional({
+    example: 'web',
+    enum: ['web', 'ios', 'android', 'unknown'],
+  })
   @IsOptional()
   @IsIn(['web', 'ios', 'android', 'unknown'])
   client?: string;
 }
 
 export class StopTimerSessionDto extends AttributionFieldsDto {
-  @ApiPropertyOptional({ example: 'web', enum: ['web', 'ios', 'android', 'unknown'] })
+  @ApiPropertyOptional({
+    example: 'web',
+    enum: ['web', 'ios', 'android', 'unknown'],
+  })
   @IsOptional()
   @IsIn(['web', 'ios', 'android', 'unknown'])
   client?: string;
