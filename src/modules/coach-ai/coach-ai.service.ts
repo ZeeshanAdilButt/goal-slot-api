@@ -139,7 +139,8 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`DELETE_GOAL\`             id=<goalId>
 - \`CREATE_SCHEDULE_BLOCK\`   payload: { title, startTime "HH:mm", endTime "HH:mm", dayOfWeek 0-6, category, goalId? }
                               MULTI-DAY: when the SAME block repeats on several days, emit ONE action with \`daysOfWeek\` as an array (e.g. { title, startTime, endTime, daysOfWeek: [0,1,2,3,4,5,6], category }) INSTEAD of one action per day. The backend creates the whole recurring series in one go. This is REQUIRED for anything week-shaped: a 7-day week of ~13 distinct blocks must be ~13 actions, NOT ~90. Emitting one-action-per-day for a full week will overflow and fail — always collapse repeats with daysOfWeek. Only fall back to a single \`dayOfWeek\` when a block truly occurs on just one day.
-- \`UPDATE_SCHEDULE_BLOCK\`   id=<blockId>, payload: any subset of the above
+- \`UPDATE_SCHEDULE_BLOCK\`   id=<blockId>, expectedTitle=<that block's CURRENT title, verbatim from context>, payload: any subset of the above
+                              expectedTitle is REQUIRED whenever the user identified the target block by name (as opposed to "my next block" or similar). It is NOT the same as payload.title: expectedTitle is what the block is CURRENTLY called (a read-only identity check, never written), payload.title is only set when you are actually renaming the block. See MATCHING A NAMED BLOCK ACROSS A DAY RANGE below — this is how the backend catches you having picked the wrong block.
 - \`DELETE_SCHEDULE_BLOCK\`   id=<blockId>
                               NEVER emit DELETE_SCHEDULE_BLOCK (or any DELETE_*) for an id that is not present in the user's context (the \`scheduleBlocks\` list, Recent time entries, etc). Do not invent ids and do not "clear" blocks you cannot see. When the user asks you to BUILD or ADD a schedule, only CREATE — do not delete anything unless they explicitly asked to remove specific existing blocks that appear in context.
 - \`CREATE_TIME_ENTRY\`       payload: { taskName (required, the work description e.g. "Ampwise development"), duration (required, MINUTES not hours, e.g. 60 for 1 hour), date (required, "YYYY-MM-DD"), notes?, goalId?, taskId?, scheduleBlockId? }
@@ -233,9 +234,35 @@ USE UPDATE, NOT CREATE, FOR EDITS
 When the user says "change", "move", "shift", "reschedule", "edit", "make it earlier/later/longer/shorter", "rename", or any other verb that mutates a specific existing item, you MUST emit UPDATE_* (or RENAME_*) on that item's existing id. NEVER emit CREATE_* for an edit ask, that produces a duplicate and is a bug. Look up the id from "This week's context" before emitting. If you cannot identify the target item with confidence, ask one short clarifying question with 2-3 options grounded in what you see; do not guess by creating a new one.
 
 Examples:
-  User: "change Qur'an Reading to 5:30 to 6:00 AM"  -> emit one UPDATE_SCHEDULE_BLOCK per matching block id with payload { startTime: "05:30", endTime: "06:00" }. NEVER CREATE_SCHEDULE_BLOCK.
+  User: "change Qur'an Reading to 5:30 to 6:00 AM"  -> emit one UPDATE_SCHEDULE_BLOCK per matching block id, each with expectedTitle: "Qur'an Reading" and payload { startTime: "05:30", endTime: "06:00" }. NEVER CREATE_SCHEDULE_BLOCK.
   User: "rename my OloStep goal to LeafCompute"      -> emit RENAME_GOAL with that goal's id and payload { title: "LeafCompute" }. NEVER CREATE_GOAL.
-  User: "move my deep work block to Tuesday"        -> emit UPDATE_SCHEDULE_BLOCK with payload { dayOfWeek: 2 }. NEVER CREATE_SCHEDULE_BLOCK.
+  User: "move my deep work block to Tuesday"        -> emit UPDATE_SCHEDULE_BLOCK with expectedTitle: "Deep Work" and payload { dayOfWeek: 2 }. NEVER CREATE_SCHEDULE_BLOCK.
+
+MATCHING A NAMED BLOCK ACROSS A DAY RANGE — read this twice, this has caused real bugs
+When the user names a specific block by title and asks you to change it across several days ("change the Dinner, Arabic and Family time blocks to 7-8PM Monday to Friday", "move my Deep Work block earlier every weekday"), you are editing ONE recurring block concept that happens to appear under the SAME title (allowing only trivial case/whitespace differences) on multiple rows in \`scheduleBlocks\`. You MUST:
+  1. Find every block in \`scheduleBlocks\` whose title is an exact match (ignoring case and leading/trailing/double whitespace only) to what the user named. NEVER treat a differently-worded title as the same block, even if it shares a word or a theme. "Family Time" is a DIFFERENT block from "Dinner, Arabic and Family time" — shorter, different title, do not touch it for a request about the latter. A block from an unrelated category ("LeafCompute", "Read Paper and Take notes") is never a match just because it happens to sit on a day you need.
+  2. Emit UPDATE_SCHEDULE_BLOCK ONLY for the ids found in step 1 that also fall inside the day range the user asked for. Set \`expectedTitle\` on every one of these actions to that exact current title — the backend rejects the action if the id you gave doesn't actually have that title, as a safety net for exactly this mistake.
+  3. If the day range includes a day where NO block with that title exists, leave that day out of the actions entirely. Do NOT substitute a different, unrelated block that happens to occupy that day just to have something to emit. Say so plainly in your prose reply, e.g. "there's no 'Dinner, Arabic and Family time' block on Thursday, so I only updated Mon/Tue/Wed/Fri."
+  4. Never widen scope beyond the named block's own ids. A request about one title touches only that title's ids, nothing else, no matter how full the day range is.
+
+RENAMING OR EDITING A SINGLE NAMED BLOCK — the SAME rule applies with one block
+A request naming exactly one block ("rename Work to 'Work & Infra'", "rename Open Source to 'OSS, Internals & Platforms'") has no day or time in the ask to cross-check against, which makes an id mistake here worse: the id is the ONLY thing tying the action to a real block, and a wrong or malformed one produces an approval card with nothing to render (no name, no day, no time) and a hard failure on apply. To get this right every time:
+  1. Find the block in the "## Full weekly schedule" plain-text list above by its \`id=...\` line — do not try to read the id out of the JSON dump further down, that's a wall of text and copying a UUID wrong out of it is exactly how this bug happens.
+  2. Copy that id character-for-character into the action's \`id\`. Set \`expectedTitle\` to that same line's current title.
+  3. If you cannot find an exact (or trivial case/whitespace-variant) title match in that list, do NOT emit an action with a guessed or partial id. Ask the user to confirm the exact block name, or say you don't see a block by that name.
+  Example — user has a block \`id=3fa1... | "Work" | Mon-Fri 09:00 AM to 05:00 PM | category=DEEP_WORK | goalId=none\` in the Full weekly schedule list, and asks "rename work schedule block to 'Work & Infra'":
+  \`\`\`coach-proposal
+  { "summary": "Rename 'Work' to 'Work & Infra'", "actions": [ { "type": "UPDATE_SCHEDULE_BLOCK", "id": "3fa1...", "expectedTitle": "Work", "payload": { "title": "Work & Infra" } } ] }
+  \`\`\`
+
+DAY RANGES — PARSE EXACTLY, DO NOT GUESS
+  - "M-F", "Mon-Fri", "Monday to Friday", "weekdays" -> dayOfWeek 1, 2, 3, 4, 5 ONLY. NEVER include 0 (Sunday) or 6 (Saturday) in a weekday/M-F request.
+  - "weekend" -> dayOfWeek 0 and 6 only.
+  - "every day", "daily", "all week" -> dayOfWeek 0 through 6.
+  - Reference: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday.
+  - If a day-range phrase is ambiguous, ask which days rather than guessing a wider range than intended.
+
+A card you emit may also sit unapplied in the chat for a while, and the user can edit their schedule directly outside the chat before clicking apply, which can make an id in an old card go stale by the time they click it. Always setting \`expectedTitle\` (per above) is also what lets the backend safely re-match a stale id to the right block instead of just failing — it is required for identification, not optional decoration.
 
 DO NOT DUPLICATE WHAT ALREADY EXISTS
 Before proposing a CREATE_* action, scan "This week's context" for an existing item that already covers the user's ask. Specifically:
@@ -1642,20 +1669,36 @@ function buildUserContextMessage(
   // The "rest of bundle" sent as JSON — exclude habitsProfile (already
   // formatted in Operator profile) and acceptedInsights (formatted as
   // memory) to keep the payload smaller and avoid duplication.
+  //
+  // scheduleBlocks is placed first (rather than last, its natural object-
+  // literal position) and ALSO gets its own dedicated plain-text listing
+  // below. capText hard-truncates this whole JSON blob at CONTEXT_JSON_CAP
+  // chars for accounts with a lot of journal/time-entry history, and
+  // schedule block ids are the thing every UPDATE/DELETE_SCHEDULE_BLOCK
+  // proposal depends on being copied correctly — they should never be the
+  // field silently cut off, or the last field an LLM has to eyeball out of
+  // a JSON wall to find a UUID in.
   const rest = {
     weekKey: ctx.weekKey,
+    scheduleBlocks: ctx.scheduleBlocks,
     recentCheckins: ctx.recentCheckins,
     recentJournal: ctx.recentJournal,
     activeGoals: ctx.activeGoals,
     weekReflections: ctx.weekReflections,
     hoursByGoalThisWeek: ctx.hoursByGoalThisWeek,
     recentTimeEntries: ctx.recentTimeEntries,
-    scheduleBlocks: ctx.scheduleBlocks,
   };
 
-  // Surface unlinked schedule blocks + linkable goals as plain-text sections
-  // so the model cannot bury them in the JSON dump. Drives the proactive
-  // "link blocks to goals" rule reliably.
+  // Surface the full schedule + linkable goals as plain-text sections so the
+  // model can copy an id verbatim off a short line instead of eyeballing a
+  // UUID out of the JSON dump below (which is also hard-capped and can, for
+  // an account with enough journal/time-entry history, truncate before it
+  // ever reaches scheduleBlocks). A block that's only reachable through that
+  // JSON blob is exactly the shape of a real bug: a plain "rename Work to
+  // Work & Infra" ask emitted an id that didn't correspond to any block,
+  // producing an empty, unrenderable proposal card and a 404 on apply. This
+  // full listing is the fix — every block gets a reliable id=... line,
+  // linked or not.
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const fmt12h = (t: string): string => {
     const [hStr, mStr] = (t || '').split(':');
@@ -1669,14 +1712,15 @@ function buildUserContextMessage(
   // Titles go through sanitizeSingleLine so a title containing a newline, a
   // `|`, or a quote cannot forge extra rows in these lists. A fabricated row
   // is how injected text would hand the model an id that isn't the user's.
-  const unlinkedBlocks = (ctx.scheduleBlocks ?? []).filter((b) => !b.goalId);
+  const scheduleLine = (b: ContextBundle['scheduleBlocks'][number]) =>
+    `  - id=${b.id} | "${sanitizeSingleLine(b.title)}" | ${dayNames[b.dayOfWeek] ?? '?'} ${fmt12h(b.startTime)} to ${fmt12h(b.endTime)} | category=${sanitizeSingleLine(b.category ?? 'none', 40)} | goalId=${b.goalId ?? 'none'}`;
+  const allBlocks = ctx.scheduleBlocks ?? [];
+  const allBlocksSection = allBlocks.length
+    ? allBlocks.map(scheduleLine).join('\n')
+    : '  (no schedule blocks yet)';
+  const unlinkedBlocks = allBlocks.filter((b) => !b.goalId);
   const unlinkedSection = unlinkedBlocks.length
-    ? unlinkedBlocks
-        .map(
-          (b) =>
-            `  - id=${b.id} | "${sanitizeSingleLine(b.title)}" | ${dayNames[b.dayOfWeek] ?? '?'} ${fmt12h(b.startTime)} to ${fmt12h(b.endTime)} | category=${sanitizeSingleLine(b.category ?? 'none', 40)}`,
-        )
-        .join('\n')
+    ? unlinkedBlocks.map(scheduleLine).join('\n')
     : '  (none, all blocks are linked to goals)';
   const goalsListSection = (ctx.activeGoals ?? []).length
     ? (ctx.activeGoals ?? [])
@@ -1723,6 +1767,9 @@ function buildUserContextMessage(
     '',
     "## What you've already suggested (and the user accepted)",
     fence(memorySection),
+    '',
+    '## Full weekly schedule (id, title, day, time, category, goalId — use these ids verbatim for ANY schedule block action, never invent or guess one)',
+    fence(allBlocksSection),
     '',
     '## UNLINKED schedule blocks (no goalId, user cannot log time against them)',
     fence(unlinkedSection),
