@@ -1,12 +1,18 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
 import { AssignInstructionDto } from './dto/instructions.dto';
 
 const BASIC_USER_SELECT = { id: true, name: true, email: true };
 
 @Injectable()
 export class InstructionsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(InstructionsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private reminderDispatchService: ReminderDispatchService,
+  ) {}
 
   async assign(assignerId: string, dto: AssignInstructionDto) {
     // Same direction as viewing reports: the assigner must be the sharedWith
@@ -25,7 +31,7 @@ export class InstructionsService {
       throw new ForbiddenException('You do not have accepted access to this user');
     }
 
-    return this.prisma.instruction.create({
+    const instruction = await this.prisma.instruction.create({
       data: {
         assignerId,
         assigneeId: dto.assigneeId,
@@ -34,6 +40,21 @@ export class InstructionsService {
         status: 'PENDING',
       },
     });
+
+    // Notify the assignee right away rather than making them wait for the
+    // next daily sweep. sendInstructionReminder already isolates its own
+    // failures and never throws, but it is wrapped here too - a hiccup in
+    // notification delivery must never fail instruction creation, which has
+    // already committed by this point. The sweep remains the safety net.
+    try {
+      await this.reminderDispatchService.sendInstructionReminder(instruction, new Date());
+    } catch (error) {
+      this.logger.error(
+        `Failed to send immediate reminder for instruction ${instruction.id}: ${(error as Error).message}`,
+      );
+    }
+
+    return instruction;
   }
 
   async listAssignedByMe(assignerId: string) {

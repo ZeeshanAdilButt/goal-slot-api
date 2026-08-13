@@ -1,9 +1,12 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InstructionsService } from './instructions.service';
+import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
+import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from '../reminders/reminder-channel.interface';
 
 class FakePrisma {
   shares: any[] = [];
   instructions = new Map<string, any>();
+  notifications: any[] = [];
   private nextId = 1;
 
   sharedAccess = {
@@ -14,6 +17,10 @@ class FakePrisma {
         ) ?? null
       );
     },
+    // Only used indirectly, via ReminderDispatchService.runDailySweep's
+    // report-staleness pass, which these instruction-focused tests don't
+    // exercise beyond making sure it doesn't blow up.
+    findMany: async () => [],
   };
 
   instruction = {
@@ -36,14 +43,41 @@ class FakePrisma {
       this.instructions.set(where.id, updated);
       return updated;
     },
-    findMany: async () => [],
+    findMany: async (): Promise<any[]> => [],
+  };
+
+  notification = {
+    create: async ({ data }: any) => {
+      const row = { id: `notif_${this.notifications.length + 1}`, ...data };
+      this.notifications.push(row);
+      return row;
+    },
   };
 }
 
-function buildService() {
+class RecordingChannel implements ReminderChannel {
+  calls: ReminderChannelInput[] = [];
+
+  constructor(
+    public readonly name: string,
+    private readonly result: ReminderChannelResult = { ok: true },
+    private readonly shouldReject = false,
+  ) {}
+
+  async send(input: ReminderChannelInput): Promise<ReminderChannelResult> {
+    this.calls.push(input);
+    if (this.shouldReject) {
+      throw new Error(`${this.name} exploded`);
+    }
+    return this.result;
+  }
+}
+
+function buildService(channels: ReminderChannel[] = [new RecordingChannel('email')]) {
   const prisma = new FakePrisma();
-  const service = new InstructionsService(prisma as any);
-  return { prisma, service };
+  const reminderDispatchService = new ReminderDispatchService(prisma as any, channels);
+  const service = new InstructionsService(prisma as any, reminderDispatchService);
+  return { prisma, service, channels };
 }
 
 describe('InstructionsService.assign', () => {
@@ -100,6 +134,91 @@ describe('InstructionsService.assign', () => {
     await expect(
       service.assign('mentor_1', { assigneeId: 'mentee_1', title: 'Log time' }),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('sends an immediate reminder across every channel and stamps lastReminderAt', async () => {
+    const email = new RecordingChannel('email');
+    const expoPush = new RecordingChannel('expo-push');
+    const webPush = new RecordingChannel('web-push');
+    const { prisma, service } = buildService([email, expoPush, webPush]);
+    prisma.shares.push({
+      ownerId: 'mentee_1',
+      sharedWithId: 'mentor_1',
+      isAccepted: true,
+    });
+
+    const NOW = new Date('2026-08-13T12:00:00.000Z');
+    jest.useFakeTimers().setSystemTime(NOW);
+    try {
+      const instruction = await service.assign('mentor_1', {
+        assigneeId: 'mentee_1',
+        title: 'Start tracking your time again',
+      });
+
+      for (const channel of [email, expoPush, webPush]) {
+        expect(channel.calls).toHaveLength(1);
+        expect(channel.calls[0].userId).toBe('mentee_1');
+        expect(channel.calls[0].title).toContain('Start tracking your time again');
+        expect(channel.calls[0].data).toEqual({ type: 'instruction', instructionId: instruction.id });
+      }
+
+      const stored = prisma.instructions.get(instruction.id);
+      expect(stored.lastReminderAt).toEqual(NOW);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('still creates the instruction when every notification channel fails', async () => {
+    const rejecting = new RecordingChannel('web-push', { ok: false }, true);
+    const { prisma, service } = buildService([rejecting]);
+    prisma.shares.push({
+      ownerId: 'mentee_1',
+      sharedWithId: 'mentor_1',
+      isAccepted: true,
+    });
+
+    const instruction = await service.assign('mentor_1', {
+      assigneeId: 'mentee_1',
+      title: 'Log time daily this week',
+    });
+
+    expect(instruction.status).toBe('PENDING');
+    expect(rejecting.calls).toHaveLength(1);
+    const stored = prisma.instructions.get(instruction.id);
+    expect(stored.lastReminderAt).toBeNull();
+  });
+
+  it('does not double-send when the daily sweep runs the same day an instruction was just assigned', async () => {
+    const email = new RecordingChannel('email');
+    const { prisma, service } = buildService([email]);
+    prisma.shares.push({
+      ownerId: 'mentee_1',
+      sharedWithId: 'mentor_1',
+      isAccepted: true,
+    });
+
+    const NOW = new Date('2026-08-13T12:00:00.000Z');
+    jest.useFakeTimers().setSystemTime(NOW);
+    try {
+      await service.assign('mentor_1', {
+        assigneeId: 'mentee_1',
+        title: 'Start tracking your time again',
+      });
+      expect(email.calls).toHaveLength(1);
+
+      // The daily sweep looks for PENDING instructions directly against the
+      // prisma layer, so make the stored row (with lastReminderAt now set)
+      // visible to findMany the way a real query would.
+      prisma.instruction.findMany = async () => Array.from(prisma.instructions.values());
+
+      const reminderDispatchService = (service as any).reminderDispatchService;
+      await reminderDispatchService.runDailySweep();
+
+      expect(email.calls).toHaveLength(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
