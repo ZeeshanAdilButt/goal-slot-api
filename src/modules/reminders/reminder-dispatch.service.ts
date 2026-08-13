@@ -92,26 +92,53 @@ export class ReminderDispatchService {
     );
 
     for (const instruction of dueInstructions) {
-      try {
-        const succeeded = await this.dispatchToUser(instruction.assigneeId, {
-          title: `Reminder: ${instruction.title}`,
-          body: `Your mentor is waiting on: ${instruction.title}`,
-          data: { type: 'instruction', instructionId: instruction.id },
-          notificationType: NotificationType.INSTRUCTION_ASSIGNED,
-        });
-
-        if (succeeded) {
-          await this.prisma.instruction.update({
-            where: { id: instruction.id },
-            data: { lastReminderAt: now },
-          });
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to dispatch instruction reminder for instruction ${instruction.id}: ${(error as Error).message}`,
-        );
-      }
+      await this.sendInstructionReminder(instruction, now);
     }
+  }
+
+  /**
+   * Sends a single pending-instruction reminder to its assignee across every
+   * channel and, on success, advances lastReminderAt so the daily sweep
+   * doesn't immediately re-notify about the same instruction. Shared by the
+   * daily sweep (one call per due instruction) and InstructionsService.assign
+   * (one immediate call right after creation), so the copy and channel
+   * fan-out can never drift between the two call sites.
+   *
+   * Never throws - a failed send (no channels configured, every provider
+   * down, an unexpected error) is logged and resolves to false rather than
+   * propagating, since neither the sweep loop nor instruction creation
+   * should be interrupted by a notification hiccup.
+   */
+  async sendInstructionReminder(
+    instruction: { id: string; assigneeId: string; title: string },
+    now: Date,
+  ): Promise<boolean> {
+    try {
+      const succeeded = await this.dispatchToUser(instruction.assigneeId, this.buildInstructionContent(instruction));
+
+      if (succeeded) {
+        await this.prisma.instruction.update({
+          where: { id: instruction.id },
+          data: { lastReminderAt: now },
+        });
+      }
+
+      return succeeded;
+    } catch (error) {
+      this.logger.error(
+        `Failed to dispatch instruction reminder for instruction ${instruction.id}: ${(error as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  private buildInstructionContent(instruction: { id: string; title: string }): ReminderDispatchContent {
+    return {
+      title: `Reminder: ${instruction.title}`,
+      body: `Your mentor is waiting on: ${instruction.title}`,
+      data: { type: 'instruction', instructionId: instruction.id },
+      notificationType: NotificationType.INSTRUCTION_ASSIGNED,
+    };
   }
 
   /**

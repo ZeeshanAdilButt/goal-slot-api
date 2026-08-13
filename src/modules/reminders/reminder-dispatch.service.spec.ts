@@ -216,6 +216,71 @@ describe('ReminderDispatchService.runDailySweep - pending instructions', () => {
   });
 });
 
+describe('ReminderDispatchService.sendInstructionReminder', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('dispatches to every channel with the same content the sweep uses and stamps lastReminderAt', async () => {
+    const email = new RecordingChannel('email');
+    const expoPush = new RecordingChannel('expo-push');
+    const webPush = new RecordingChannel('web-push');
+    const { prisma, service } = buildService([email, expoPush, webPush]);
+    prisma.instructions.push({
+      id: 'instr_5',
+      assigneeId: 'mentee_5',
+      title: 'Start tracking your time again',
+      status: 'PENDING',
+      lastReminderAt: null,
+    });
+
+    const succeeded = await service.sendInstructionReminder(
+      { id: 'instr_5', assigneeId: 'mentee_5', title: 'Start tracking your time again' },
+      NOW,
+    );
+
+    expect(succeeded).toBe(true);
+    for (const channel of [email, expoPush, webPush]) {
+      expect(channel.calls).toHaveLength(1);
+      expect(channel.calls[0].userId).toBe('mentee_5');
+      expect(channel.calls[0].title).toContain('Start tracking your time again');
+      expect(channel.calls[0].data).toEqual({ type: 'instruction', instructionId: 'instr_5' });
+    }
+    expect(prisma.instructions[0].lastReminderAt).toEqual(NOW);
+  });
+
+  it('resolves false and does not throw when every channel fails, and leaves lastReminderAt untouched', async () => {
+    const rejecting = new RecordingChannel('web-push', { ok: false }, true);
+    const { prisma, service } = buildService([rejecting]);
+    prisma.instructions.push({
+      id: 'instr_6',
+      assigneeId: 'mentee_6',
+      title: 'Log your hours',
+      status: 'PENDING',
+      lastReminderAt: null,
+    });
+
+    const succeeded = await service.sendInstructionReminder(
+      { id: 'instr_6', assigneeId: 'mentee_6', title: 'Log your hours' },
+      NOW,
+    );
+
+    expect(succeeded).toBe(false);
+    expect(prisma.instructions[0].lastReminderAt).toBeNull();
+  });
+
+  it('never throws even when the prisma update itself fails', async () => {
+    const email = new RecordingChannel('email');
+    const { service } = buildService([email]);
+    // No matching row in prisma.instructions, so the update call inside
+    // FakePrisma will operate on undefined and throw when merging fields -
+    // sendInstructionReminder must still resolve rather than propagate.
+    await expect(
+      service.sendInstructionReminder({ id: 'does_not_exist', assigneeId: 'mentee_7', title: 'Ghost' }, NOW),
+    ).resolves.toBe(false);
+  });
+});
+
 describe('ReminderDispatchService.dispatchToUser', () => {
   afterEach(() => {
     jest.useRealTimers();
