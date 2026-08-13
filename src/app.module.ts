@@ -24,6 +24,7 @@ import { CoachProposalsModule } from './modules/coach-proposals/coach-proposals.
 import { CoachReflectionModule } from './modules/coach-reflection/coach-reflection.module';
 import { HealthModule } from './modules/health/health.module';
 import { LabelsModule } from './modules/labels/labels.module';
+import { MessagingModule } from './modules/messaging/messaging.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { EmailModule } from './modules/email/email.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
@@ -76,6 +77,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     CoachProposalsModule,
     CoachReflectionModule,
     LabelsModule,
+    MessagingModule,
     NotesModule,
     FeedbackModule,
     NotificationsModule,
