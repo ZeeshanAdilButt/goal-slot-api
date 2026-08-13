@@ -21,6 +21,11 @@ async function bootstrap() {
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
+  // getOrThrow is safe here because CORS_ORIGIN is required in
+  // env.validation.ts, so a missing value is caught during validation with a
+  // message naming the variable, rather than here after Nest has started.
+  // Keep the two in step: making the schema optional again puts the failure
+  // back where it cannot be read.
   const corsOrigin = configService.getOrThrow<string>('CORS_ORIGIN');
   const corsOrigins = corsOrigin.split(',').map((url) => url.trim());
 
@@ -79,4 +84,14 @@ async function bootstrap() {
   `);
 }
 
-bootstrap();
+// Without this, anything bootstrap throws surfaces as an unhandled rejection
+// with no context, which is how a configuration problem ends up looking like
+// a runtime crash in the service logs.
+bootstrap().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Failed to start the API: ${message}`);
+  if (error instanceof Error && error.stack) {
+    console.error(error.stack);
+  }
+  process.exit(1);
+});

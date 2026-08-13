@@ -35,7 +35,19 @@ export const envValidationSchema = Joi.object({
   STRIPE_PRICE_ID: Joi.string().required(),
   STRIPE_WEBHOOK_SECRET: Joi.string().required(),
 
-  // CORS - accepts comma-separated list of URIs
+  // Per-tier Stripe prices. Required rather than optional on purpose: when
+  // they were missing, StripeService fell back to the single STRIPE_PRICE_ID
+  // and every tier quietly billed at the same amount. A boot failure is far
+  // easier to notice than a month of wrong invoices.
+  STRIPE_PRICE_ID_BASIC: Joi.string().required(),
+  STRIPE_PRICE_ID_PRO: Joi.string().required(),
+
+  // CORS - accepts comma-separated list of URIs.
+  //
+  // Required, because main.ts reads it with getOrThrow. Leaving it optional
+  // here meant validation passed and bootstrap then threw an unhandled
+  // rejection after Nest had already started, which reads like a runtime
+  // crash rather than the configuration error it is.
   CORS_ORIGIN: Joi.string()
     .custom((value, helpers) => {
       // Split by comma and validate each URL
@@ -52,10 +64,12 @@ export const envValidationSchema = Joi.object({
       }
       return value; // Return the original string, we'll parse it in main.ts
     }, 'CORS origin validation')
-    .optional(),
+    .required(),
 
-  // PostHog
-  POSTHOG_API_KEY: Joi.string().optional(),
+  // PostHog. An empty POSTHOG_API_KEY is allowed and means "analytics off",
+  // which is what a fresh clone wants; PostHogService already treats a blank
+  // key that way.
+  POSTHOG_API_KEY: Joi.string().optional().allow(''),
   POSTHOG_HOST: Joi.string().uri().optional(),
 
   // Coach feature — AES-256-GCM master key for encrypting user BYOK keys at rest
