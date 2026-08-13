@@ -195,6 +195,14 @@ export class SharingService {
     return { goals, recentEntries, scheduleBlocks };
   }
 
+  // revokeAccess and removeMyAccess both delete the SharedAccess row
+  // outright, with nothing else to do for messaging: MessagingService's
+  // canMessage (and the internal conversation-gate endpoint it backs) both
+  // query this same table live, so any existing jiffy-messaging
+  // conversation between these two users stops accepting new messages the
+  // next time either of them tries to send one — jiffy-messaging re-runs
+  // the gate check on every send, not only when the conversation was
+  // created. No explicit "close the conversation" call is needed here.
   async revokeAccess(ownerId: string, shareId: string) {
     const share = await this.prisma.sharedAccess.findFirst({
       where: { id: shareId, ownerId },

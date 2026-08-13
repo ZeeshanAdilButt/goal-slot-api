@@ -128,7 +128,14 @@ SUPABASE_URL
 # Optional shared Coach free tier
 GOOGLE_AI_SHARED_API_KEY       # operator-owned Gemini key for users with no BYOK
 SHARED_COACH_DAILY_LIMIT       # default 20 per user per UTC day
+
+# Optional jiffy-messaging integration (user-to-user chat)
+JIFFY_MESSAGING_URL
+JIFFY_MESSAGING_JWT_SECRET
+CONVERSATION_GATE_SECRET       # required for jiffy-messaging's authorization callback, see .env.example
 ```
+
+`CONVERSATION_GATE_SECRET` backs `POST /internal/messaging/can-create-conversation`, which the jiffy-messaging deployment calls back to before creating a conversation and before every message send. If messaging is enabled, deploy this alongside `CONVERSATION_GATE_URL` and a matching `CONVERSATION_GATE_SECRET` on jiffy-messaging's own VPS/host — see that repo's README for its side of the configuration. Leaving it unset does not break GoalSlot's own boot, but it does leave jiffy-messaging's conversation creation unrestricted if jiffy-messaging is not also configured to call this endpoint.
 
 `GOOGLE_AI_SHARED_API_KEY` is optional. When set, users who have not added their own BYOK key can still chat with the Coach using this key, gated by a per-user daily message count. Get a free Gemini key at https://aistudio.google.com/apikey (no credit card needed). Leave the var blank to disable the shared free tier and require every user to add their own key.
 

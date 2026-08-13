@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from 'crypto';
+
 /**
  * Configuration for the jiffy-messaging integration.
  *
@@ -84,4 +86,30 @@ export function readMessagingConfig(read: EnvReader): MessagingConfig | null {
       MESSAGING_CONFIG_DEFAULTS.requestTimeoutMs,
     ),
   };
+}
+
+/**
+ * The credential jiffy-messaging's ConversationGate callback presents on
+ * POST /internal/messaging/can-create-conversation. Independent of
+ * everything above: this API can receive that callback whether or not it
+ * is itself configured to call out to jiffy-messaging, and the outbound
+ * JIFFY_MESSAGING_* variables are not required for it to be set. Returns
+ * null (rather than throwing) for the same boot-safety reason the rest of
+ * this file does — an internal endpoint with no secret configured simply
+ * stays unreachable instead of taking the process down.
+ */
+export function readConversationGateSecret(read: EnvReader): string | null {
+  return readTrimmed(read, 'CONVERSATION_GATE_SECRET') ?? null;
+}
+
+/**
+ * Constant-time comparison that never throws on a length mismatch.
+ * `timingSafeEqual` requires equal-length buffers, so both sides are
+ * hashed to a fixed 32-byte digest first — that also means the secret's
+ * own length leaks nothing through timing, not just its content.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const digestA = createHash('sha256').update(a).digest();
+  const digestB = createHash('sha256').update(b).digest();
+  return timingSafeEqual(digestA, digestB);
 }

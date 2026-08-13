@@ -4,7 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { MessagingConfigService } from '../messaging-config.service';
 import {
   MESSAGING_CONFIG_DEFAULTS,
+  readConversationGateSecret,
   readMessagingConfig,
+  safeEqual,
 } from '../messaging.config';
 
 function reader(env: Record<string, unknown>) {
@@ -115,5 +117,83 @@ describe('MessagingConfigService', () => {
 
     expect(service.isEnabled).toBe(true);
     expect(service.require().baseUrl).toBe('https://messaging.example.com');
+  });
+});
+
+describe('readConversationGateSecret', () => {
+  it('returns null when unset', () => {
+    expect(readConversationGateSecret(reader({}))).toBeNull();
+  });
+
+  it('returns null for a blank value', () => {
+    expect(readConversationGateSecret(reader({ CONVERSATION_GATE_SECRET: '   ' }))).toBeNull();
+  });
+
+  it('returns the trimmed secret when set', () => {
+    expect(
+      readConversationGateSecret(reader({ CONVERSATION_GATE_SECRET: '  shared-secret  ' })),
+    ).toBe('shared-secret');
+  });
+});
+
+describe('safeEqual', () => {
+  it('returns true for identical strings', () => {
+    expect(safeEqual('shared-secret', 'shared-secret')).toBe(true);
+  });
+
+  it('returns false for different strings of the same length', () => {
+    expect(safeEqual('shared-secreu', 'shared-secret')).toBe(false);
+  });
+
+  it('returns false for strings of different lengths without throwing', () => {
+    expect(() => safeEqual('short', 'a-much-longer-secret-value')).not.toThrow();
+    expect(safeEqual('short', 'a-much-longer-secret-value')).toBe(false);
+  });
+
+  it('returns false against an empty string', () => {
+    expect(safeEqual('', 'shared-secret')).toBe(false);
+  });
+});
+
+describe('MessagingConfigService.verifyGateSecret', () => {
+  it('rejects every credential when CONVERSATION_GATE_SECRET is unset', () => {
+    const service = new MessagingConfigService(configService({}));
+
+    expect(service.verifyGateSecret('anything')).toBe(false);
+    expect(service.verifyGateSecret(undefined)).toBe(false);
+  });
+
+  it('rejects an undefined credential even when a secret is configured', () => {
+    const service = new MessagingConfigService(
+      configService({ CONVERSATION_GATE_SECRET: 'shared-secret' }),
+    );
+
+    expect(service.verifyGateSecret(undefined)).toBe(false);
+  });
+
+  it('rejects a mismatched credential', () => {
+    const service = new MessagingConfigService(
+      configService({ CONVERSATION_GATE_SECRET: 'shared-secret' }),
+    );
+
+    expect(service.verifyGateSecret('wrong-secret')).toBe(false);
+  });
+
+  it('accepts the exact configured credential', () => {
+    const service = new MessagingConfigService(
+      configService({ CONVERSATION_GATE_SECRET: 'shared-secret' }),
+    );
+
+    expect(service.verifyGateSecret('shared-secret')).toBe(true);
+  });
+
+  it('is independent of the outbound JIFFY_MESSAGING_* configuration', () => {
+    const service = new MessagingConfigService(
+      configService({ CONVERSATION_GATE_SECRET: 'shared-secret' }),
+    );
+
+    // Outbound messaging is off, but the inbound gate secret still works.
+    expect(service.isEnabled).toBe(false);
+    expect(service.verifyGateSecret('shared-secret')).toBe(true);
   });
 });

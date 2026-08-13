@@ -85,4 +85,12 @@ export const envValidationSchema = Joi.object({
   JIFFY_MESSAGING_JWT_AUDIENCE: Joi.string().optional().allow(''),
   JIFFY_MESSAGING_TOKEN_TTL: Joi.string().optional().allow(''),
   JIFFY_MESSAGING_TIMEOUT_MS: Joi.string().optional().allow(''),
+
+  // Credential jiffy-messaging's ConversationGate callback presents to
+  // POST /internal/messaging/can-create-conversation (see
+  // MessagingConfigService.verifyGateSecret). Independent of the
+  // JIFFY_MESSAGING_* block above — loose and optional for the same
+  // boot-safety reason: unset means that endpoint rejects every request,
+  // never that ConfigModule refuses to start.
+  CONVERSATION_GATE_SECRET: Joi.string().optional().allow(''),
 });

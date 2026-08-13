@@ -1,8 +1,10 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 
 import { PrismaService } from '../../../prisma/prisma.service';
+import { ConversationGateSecretGuard } from '../guards/conversation-gate-secret.guard';
+import { InternalMessagingController } from '../internal-messaging.controller';
 import { JiffyMessagingClient } from '../jiffy-messaging.client';
 import { MessagingConfigService } from '../messaging-config.service';
 import { MessagingController } from '../messaging.controller';
@@ -19,12 +21,13 @@ import { MessagingTokenService } from '../messaging-token.service';
  */
 async function compileWith(env: Record<string, unknown>) {
   return Test.createTestingModule({
-    controllers: [MessagingController],
+    controllers: [MessagingController, InternalMessagingController],
     providers: [
       MessagingConfigService,
       MessagingTokenService,
       JiffyMessagingClient,
       MessagingService,
+      ConversationGateSecretGuard,
       { provide: PrismaService, useValue: {} },
       { provide: ConfigService, useValue: { get: (key: string) => env[key] } },
     ],
@@ -69,5 +72,39 @@ describe('MessagingModule wiring', () => {
       .issueToken({ user: { sub: 'user_1' } });
 
     expect(token.messagingUrl).toBe('https://messaging.example.com');
+  });
+
+  it('registers the internal conversation-gate controller regardless of outbound messaging config', async () => {
+    const moduleRef = await compileWith({});
+
+    expect(moduleRef.get(InternalMessagingController)).toBeInstanceOf(
+      InternalMessagingController,
+    );
+  });
+
+  it('rejects the internal endpoint via its guard when no gate secret is configured', async () => {
+    const moduleRef = await compileWith({});
+    const guard = moduleRef.get(ConversationGateSecretGuard);
+
+    const context = {
+      switchToHttp: () => ({ getRequest: () => ({ headers: { authorization: 'Bearer anything' } }) }),
+    } as any;
+
+    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
+  });
+
+  it('accepts the internal endpoint via its guard once CONVERSATION_GATE_SECRET is set, independent of outbound messaging config', async () => {
+    const moduleRef = await compileWith({ CONVERSATION_GATE_SECRET: 'shared-secret' });
+
+    expect(moduleRef.get(MessagingConfigService).isEnabled).toBe(false);
+
+    const guard = moduleRef.get(ConversationGateSecretGuard);
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { authorization: 'Bearer shared-secret' } }),
+      }),
+    } as any;
+
+    expect(guard.canActivate(context)).toBe(true);
   });
 });

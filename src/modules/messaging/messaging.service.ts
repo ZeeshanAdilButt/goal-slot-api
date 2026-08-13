@@ -93,6 +93,34 @@ export class MessagingService {
     return share !== null;
   }
 
+  /**
+   * Backs POST /internal/messaging/can-create-conversation — the
+   * ConversationGate callback jiffy-messaging invokes before creating a
+   * conversation, and again before every message send, so a relationship
+   * revoked after a conversation was opened stops working on the next
+   * send rather than lingering as a permanent back door.
+   *
+   * jiffy-messaging's gate contract is participantIds-shaped because it
+   * has no idea a conversation here is ever anything but two people; this
+   * translates that generic shape into the pairwise canMessage check
+   * above. Anything that is not exactly requesterId plus one other id is
+   * rejected outright — GoalSlot never creates a group conversation, so a
+   * request shaped like one is already outside what this relationship
+   * model has an opinion on, and the safe default for "outside the model"
+   * is no.
+   */
+  async canCreateConversation(
+    requesterId: string,
+    participantIds: string[],
+  ): Promise<boolean> {
+    if (!participantIds.includes(requesterId)) return false;
+
+    const others = [...new Set(participantIds.filter((id) => id !== requesterId))];
+    if (others.length !== 1) return false;
+
+    return this.canMessage(requesterId, others[0]);
+  }
+
   async openConversation(
     userId: string,
     counterpartId: string,

@@ -5,7 +5,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { MessagingConfig, readMessagingConfig } from './messaging.config';
+import {
+  MessagingConfig,
+  readConversationGateSecret,
+  readMessagingConfig,
+  safeEqual,
+} from './messaging.config';
 
 /**
  * Holds the messaging config for the process, and is the single place
@@ -21,14 +26,24 @@ import { MessagingConfig, readMessagingConfig } from './messaging.config';
 export class MessagingConfigService {
   private readonly logger = new Logger(MessagingConfigService.name);
   private readonly config: MessagingConfig | null;
+  private readonly gateSecret: string | null;
 
   constructor(configService: ConfigService) {
-    this.config = readMessagingConfig((key) => configService.get(key));
+    const read = (key: string) => configService.get(key);
+    this.config = readMessagingConfig(read);
+    this.gateSecret = readConversationGateSecret(read);
 
     if (!this.config) {
       this.logger.warn(
         'JIFFY_MESSAGING_URL and/or JIFFY_MESSAGING_JWT_SECRET are not set. ' +
           'Messaging is disabled and the /messaging endpoints will answer 503.',
+      );
+    }
+
+    if (!this.gateSecret) {
+      this.logger.warn(
+        'CONVERSATION_GATE_SECRET is not set. ' +
+          'POST /internal/messaging/can-create-conversation will reject every request.',
       );
     }
   }
@@ -50,5 +65,18 @@ export class MessagingConfigService {
     }
 
     return this.config;
+  }
+
+  /**
+   * Checks a credential presented to the internal conversation-gate
+   * endpoint against CONVERSATION_GATE_SECRET. Fails closed: with no
+   * secret configured, or no credential presented, this is always false —
+   * there is no "disabled" state for this check the way there is for the
+   * rest of the messaging config, because the thing being disabled here
+   * is an authorization decision, not a feature.
+   */
+  verifyGateSecret(provided: string | undefined): boolean {
+    if (!this.gateSecret || !provided) return false;
+    return safeEqual(provided, this.gateSecret);
   }
 }
