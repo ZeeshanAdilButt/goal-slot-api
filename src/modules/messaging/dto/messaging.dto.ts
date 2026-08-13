@@ -25,7 +25,8 @@ export class OpenConversationDto {
 
 export class CanCreateConversationDto {
   @ApiProperty({
-    description: 'GoalSlot user id of the caller jiffy-messaging is authorizing',
+    description:
+      'GoalSlot user id of the caller jiffy-messaging is authorizing',
     example: '9f1b2c3d-4e5f-6789-abcd-ef0123456789',
   })
   @IsString()
@@ -34,8 +35,12 @@ export class CanCreateConversationDto {
   requesterId: string;
 
   @ApiProperty({
-    description: 'Every participant jiffy-messaging would put in the conversation, including requesterId',
-    example: ['9f1b2c3d-4e5f-6789-abcd-ef0123456789', 'a1b2c3d4-5e6f-7890-abcd-ef0123456789'],
+    description:
+      'Every participant jiffy-messaging would put in the conversation, including requesterId',
+    example: [
+      '9f1b2c3d-4e5f-6789-abcd-ef0123456789',
+      'a1b2c3d4-5e6f-7890-abcd-ef0123456789',
+    ],
   })
   @IsArray()
   @ArrayMinSize(1)

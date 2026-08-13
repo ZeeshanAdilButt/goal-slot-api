@@ -3,7 +3,10 @@ import { IsEnum, IsString, MinLength } from 'class-validator';
 import { CoachProvider } from '@prisma/client';
 
 export class SaveByokKeyDto {
-  @ApiProperty({ enum: CoachProvider, description: 'LLM provider for the BYOK key' })
+  @ApiProperty({
+    enum: CoachProvider,
+    description: 'LLM provider for the BYOK key',
+  })
   @IsEnum(CoachProvider)
   provider!: CoachProvider;
 

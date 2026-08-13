@@ -1,5 +1,22 @@
-import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Put,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import {
   UpdateUserDto,
@@ -14,6 +31,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('users')
 @Controller('users')
@@ -24,20 +42,23 @@ export class UsersController {
 
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
-  async getProfile(@Request() req: any) {
+  async getProfile(@Request() req: AuthenticatedRequest) {
     return this.usersService.findById(req.user.sub);
   }
 
   @Put('profile')
   @ApiOperation({ summary: 'Update current user profile' })
-  async updateProfile(@Request() req: any, @Body() dto: UpdateUserDto) {
+  async updateProfile(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: UpdateUserDto,
+  ) {
     return this.usersService.updateProfile(req.user.sub, dto);
   }
 
   @Delete('account')
   @ApiOperation({ summary: 'Delete current user account permanently' })
   @ApiResponse({ status: 200, description: 'Account deleted successfully' })
-  async deleteAccount(@Request() req: any) {
+  async deleteAccount(@Request() req: AuthenticatedRequest) {
     await this.usersService.deleteAccount(req.user.sub);
     return { success: true };
   }
@@ -51,7 +72,7 @@ export class UsersController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   async listUsers(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('search') search?: string,
@@ -63,7 +84,7 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Get user statistics (Admin only)' })
-  async getUserStats(@Request() req: any) {
+  async getUserStats(@Request() req: AuthenticatedRequest) {
     return this.usersService.getUserStats(req.user.sub);
   }
 
@@ -71,7 +92,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Get single user details (Admin only)' })
-  async getUserDetails(@Request() req: any, @Param('userId') userId: string) {
+  async getUserDetails(
+    @Request() req: AuthenticatedRequest,
+    @Param('userId') userId: string,
+  ) {
     return this.usersService.getUserDetails(req.user.sub, userId);
   }
 
@@ -79,15 +103,23 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Create internal user (Admin only)' })
-  async createInternalUser(@Request() req: any, @Body() dto: CreateInternalUserDto) {
+  async createInternalUser(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: CreateInternalUserDto,
+  ) {
     return this.usersService.createInternalUser(req.user.sub, dto);
   }
 
   @Post('admin/bulk-invite')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Bulk-invite many users by pasting a list of emails (Admin only)' })
-  async bulkInvite(@Request() req: any, @Body() dto: BulkInviteDto) {
+  @ApiOperation({
+    summary: 'Bulk-invite many users by pasting a list of emails (Admin only)',
+  })
+  async bulkInvite(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: BulkInviteDto,
+  ) {
     return this.usersService.bulkInvite(req.user.sub, dto);
   }
 
@@ -95,7 +127,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Grant free Pro access to user (Admin only)' })
-  async grantFreeAccess(@Request() req: any, @Param('userId') userId: string) {
+  async grantFreeAccess(
+    @Request() req: AuthenticatedRequest,
+    @Param('userId') userId: string,
+  ) {
     return this.usersService.grantFreeAccess(req.user.sub, userId);
   }
 
@@ -103,7 +138,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Revoke free access from user (Admin only)' })
-  async revokeFreeAccess(@Request() req: any, @Param('userId') userId: string) {
+  async revokeFreeAccess(
+    @Request() req: AuthenticatedRequest,
+    @Param('userId') userId: string,
+  ) {
     return this.usersService.revokeFreeAccess(req.user.sub, userId);
   }
 
@@ -112,7 +150,7 @@ export class UsersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Enable or disable a user account (Admin only)' })
   async toggleUserStatus(
-    @Request() req: any, 
+    @Request() req: AuthenticatedRequest,
     @Param('userId') userId: string,
     @Body() dto: AdminToggleUserStatusDto,
   ) {
@@ -122,9 +160,11 @@ export class UsersController {
   @Post('admin/bulk-assign-plan')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Bulk assign a subscription plan to users (Admin only)' })
+  @ApiOperation({
+    summary: 'Bulk assign a subscription plan to users (Admin only)',
+  })
   async bulkAssignPlan(
-    @Request() req: any, 
+    @Request() req: AuthenticatedRequest,
     @Body() dto: AdminBulkAssignPlanDto,
   ) {
     return this.usersService.bulkAssignPlan(req.user.sub, dto);
@@ -135,7 +175,7 @@ export class UsersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Assign a subscription plan to user (Admin only)' })
   async assignPlan(
-    @Request() req: any, 
+    @Request() req: AuthenticatedRequest,
     @Param('userId') userId: string,
     @Body() dto: AdminAssignPlanDto,
   ) {
@@ -147,7 +187,7 @@ export class UsersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @ApiOperation({ summary: 'Set email verification status (Admin only)' })
   async setEmailVerified(
-    @Request() req: any, 
+    @Request() req: AuthenticatedRequest,
     @Param('userId') userId: string,
     @Body() dto: AdminSetEmailVerifiedDto,
   ) {
@@ -158,7 +198,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Promote user to admin (Super Admin only)' })
-  async promoteToAdmin(@Request() req: any, @Param('userId') userId: string) {
+  async promoteToAdmin(
+    @Request() req: AuthenticatedRequest,
+    @Param('userId') userId: string,
+  ) {
     return this.usersService.promoteToAdmin(req.user.sub, userId);
   }
 
@@ -166,8 +209,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Demote admin to user (Super Admin only)' })
-  async demoteFromAdmin(@Request() req: any, @Param('userId') userId: string) {
+  async demoteFromAdmin(
+    @Request() req: AuthenticatedRequest,
+    @Param('userId') userId: string,
+  ) {
     return this.usersService.demoteFromAdmin(req.user.sub, userId);
   }
 }
-

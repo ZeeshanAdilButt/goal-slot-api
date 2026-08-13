@@ -6,7 +6,10 @@ import {
 import { CoachProvider } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../shared/services/encryption.service';
-import { LlmFactory, isAllowedModel } from '../../shared/services/llm/llm-factory';
+import {
+  LlmFactory,
+  isAllowedModel,
+} from '../../shared/services/llm/llm-factory';
 import { SaveByokKeyDto } from './dto/save-byok-key.dto';
 import { ByokStateDto } from './dto/byok-state.dto';
 import { UsageDto } from './dto/usage.dto';
@@ -49,7 +52,10 @@ export class CoachByokService {
       tokensLimit: row.tokensLimit,
       selectedModel: row.selectedModel,
       allowedModels: this.llmFactory.allowedModels(row.provider),
-      effectiveModel: this.llmFactory.resolveModel(row.provider, row.selectedModel),
+      effectiveModel: this.llmFactory.resolveModel(
+        row.provider,
+        row.selectedModel,
+      ),
       shared,
     };
   }

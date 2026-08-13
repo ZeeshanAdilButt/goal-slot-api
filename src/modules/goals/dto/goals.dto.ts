@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsNumber, IsEnum, IsDateString, Min, IsArray, ValidateNested, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsEnum,
+  IsDateString,
+  Min,
+  IsArray,
+  ValidateNested,
+  IsUUID,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { GoalStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -8,14 +18,19 @@ export class LabelInput {
   @IsString()
   name: string;
 
-  @ApiPropertyOptional({ example: '#E2E8F0', description: 'Hex color for the label' })
+  @ApiPropertyOptional({
+    example: '#E2E8F0',
+    description: 'Hex color for the label',
+  })
   @IsOptional()
   @IsString()
   color?: string;
 }
 
 export class CreateGoalDto {
-  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @ApiPropertyOptional({
+    description: 'Client-generated id, enabling stable offline creation',
+  })
   @IsOptional()
   @IsUUID()
   id?: string;
@@ -24,12 +39,17 @@ export class CreateGoalDto {
   @IsString()
   title: string;
 
-  @ApiPropertyOptional({ example: 'Complete React course and build 3 projects' })
+  @ApiPropertyOptional({
+    example: 'Complete React course and build 3 projects',
+  })
   @IsOptional()
   @IsString()
   description?: string;
 
-  @ApiProperty({ example: 'LEARNING', description: 'Category value from user\'s categories' })
+  @ApiProperty({
+    example: 'LEARNING',
+    description: "Category value from user's categories",
+  })
   @IsString()
   category: string;
 
@@ -48,9 +68,12 @@ export class CreateGoalDto {
   @IsString()
   color?: string;
 
-  @ApiPropertyOptional({ 
-    example: [{ name: 'Q1', color: '#FEE2E2' }, { name: 'High Priority', color: '#DBEAFE' }], 
-    description: 'Array of label objects with name and optional color' 
+  @ApiPropertyOptional({
+    example: [
+      { name: 'Q1', color: '#FEE2E2' },
+      { name: 'High Priority', color: '#DBEAFE' },
+    ],
+    description: 'Array of label objects with name and optional color',
   })
   @IsOptional()
   @IsArray()

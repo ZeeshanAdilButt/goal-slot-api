@@ -8,11 +8,16 @@ import { ThrottlerGuard } from '@nestjs/throttler';
  */
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
+  // Signature must match ThrottlerGuard#getTracker in @nestjs/throttler,
+  // which declares `req: Record<string, any>` — matching it exactly here
+  // keeps this a valid override.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected async getTracker(req: Record<string, any>): Promise<string> {
     const userId: string | undefined = req?.user?.sub;
     if (userId) return `user:${userId}`;
     // Fallback — ip can be string | string[] depending on proxy hops
-    const ip = Array.isArray(req?.ips) && req.ips.length > 0 ? req.ips[0] : req?.ip;
+    const ip =
+      Array.isArray(req?.ips) && req.ips.length > 0 ? req.ips[0] : req?.ip;
     return `ip:${ip ?? 'unknown'}`;
   }
 }

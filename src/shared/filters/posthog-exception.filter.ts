@@ -1,12 +1,25 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common'
-import { Request, Response } from 'express'
-import { inspect } from 'node:util'
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+import { inspect } from 'node:util';
 
-import { PostHogService } from '../services/posthog.service'
+import { PostHogService } from '../services/posthog.service';
+import { AuthenticatedUser } from '../types/authenticated-request.interface';
+
+// This filter runs for every exception, including ones thrown before
+// JwtAuthGuard ever attaches `user` to the request, so — unlike
+// AuthenticatedRequest — `user` here is genuinely optional.
+type RequestWithOptionalUser = Request & { user?: AuthenticatedUser };
 
 @Catch()
 export class PostHogExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(PostHogExceptionFilter.name)
+  private readonly logger = new Logger(PostHogExceptionFilter.name);
 
   constructor(private readonly posthogService: PostHogService) {}
 
@@ -17,37 +30,46 @@ export class PostHogExceptionFilter implements ExceptionFilter {
       maxArrayLength: null,
       maxStringLength: null,
       colors: false,
-    })
-    const serializedException = this.toSerializable(exception)
-    this.logger.error(`[Exception:raw] ${rawException}`)
-    this.logger.error(`[Exception:json] ${JSON.stringify(serializedException)}`)
+    });
+    const serializedException = this.toSerializable(exception);
+    this.logger.error(`[Exception:raw] ${rawException}`);
+    this.logger.error(
+      `[Exception:json] ${JSON.stringify(serializedException)}`,
+    );
 
-    const ctx = host.switchToHttp()
-    const response = ctx.getResponse<Response>()
-    const request = ctx.getRequest<Request>()
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<RequestWithOptionalUser>();
 
-    const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
     // Keep API response shape stable while logging full raw exception separately.
-    let message: string | string[]
+    let message: string | string[];
     if (exception instanceof HttpException) {
-      const exceptionResponse = exception.getResponse()
-      if (typeof exceptionResponse === 'object' && exceptionResponse !== null && 'message' in exceptionResponse) {
-        message = (exceptionResponse as any).message
+      const exceptionResponse = exception.getResponse();
+      if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null &&
+        'message' in exceptionResponse
+      ) {
+        message = (exceptionResponse as { message: string | string[] }).message;
       } else {
-        message = exception.message
+        message = exception.message;
       }
     } else if (exception instanceof Error) {
-      message = exception.message
+      message = exception.message;
     } else {
-      message = 'Internal server error'
+      message = 'Internal server error';
     }
 
     const error =
-      exception instanceof Error ? exception : new Error(rawException)
+      exception instanceof Error ? exception : new Error(rawException);
 
     // Extract user ID from JWT payload (JwtStrategy returns user as req.user with 'sub' property)
-    const userId = (request as any).user?.sub || undefined
+    const userId = request.user?.sub || undefined;
 
     // Capture full raw exception payload and request context in PostHog.
     try {
@@ -57,20 +79,20 @@ export class PostHogExceptionFilter implements ExceptionFilter {
         statusCode: status,
         userAgent: request.headers['user-agent'],
         ip: request.ip,
-        userEmail: (request as any).user?.email,
-        userRole: (request as any).user?.role,
+        userEmail: request.user?.email,
+        userRole: request.user?.role,
         queryParams: request.query,
         exceptionRaw: rawException,
         exceptionJson: serializedException,
-      })
+      });
     } catch (captureError) {
       if (captureError instanceof Error) {
-        this.logger.error(`[PostHogCaptureFailure] ${captureError.message}`)
+        this.logger.error(`[PostHogCaptureFailure] ${captureError.message}`);
         if (captureError.stack) {
-          this.logger.error(captureError.stack)
+          this.logger.error(captureError.stack);
         }
       } else {
-        this.logger.error(`[PostHogCaptureFailure] ${String(captureError)}`)
+        this.logger.error(`[PostHogCaptureFailure] ${String(captureError)}`);
       }
     }
 
@@ -80,43 +102,49 @@ export class PostHogExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       message,
-    })
+    });
   }
 
-  private toSerializable(value: unknown, seen = new WeakSet<object>()): unknown {
+  private toSerializable(
+    value: unknown,
+    seen = new WeakSet<object>(),
+  ): unknown {
     if (typeof value === 'bigint') {
-      return value.toString()
+      return value.toString();
     }
 
     if (value == null) {
-      return value
+      return value;
     }
 
     if (typeof value === 'function') {
-      return `[Function ${value.name || 'anonymous'}]`
+      return `[Function ${value.name || 'anonymous'}]`;
     }
 
     if (typeof value !== 'object') {
-      return value
+      return value;
     }
 
     if (seen.has(value)) {
-      return '[Circular]'
+      return '[Circular]';
     }
-    seen.add(value)
+    seen.add(value);
 
     if (Array.isArray(value)) {
-      return value.map((entry) => this.toSerializable(entry, seen))
+      return value.map((entry) => this.toSerializable(entry, seen));
     }
 
-    const output: Record<string, unknown> = {}
+    const output: Record<string, unknown> = {};
     for (const key of Object.getOwnPropertyNames(value)) {
       try {
-        output[key] = this.toSerializable((value as Record<string, unknown>)[key], seen)
+        output[key] = this.toSerializable(
+          (value as Record<string, unknown>)[key],
+          seen,
+        );
       } catch (error) {
-        output[key] = `[Unserializable property: ${String(error)}]`
+        output[key] = `[Unserializable property: ${String(error)}]`;
       }
     }
-    return output
+    return output;
   }
 }

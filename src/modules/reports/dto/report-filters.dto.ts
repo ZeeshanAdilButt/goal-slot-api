@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsEnum, IsDateString, IsArray } from 'class-validator';
+import { IsOptional, IsString, IsEnum, IsDateString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export enum ReportViewType {
@@ -33,30 +33,46 @@ export enum ExportFormat {
 }
 
 export class ReportFiltersDto {
-  @ApiProperty({ description: 'Start date for the report', example: '2026-01-01' })
+  @ApiProperty({
+    description: 'Start date for the report',
+    example: '2026-01-01',
+  })
   @IsDateString()
   startDate: string;
 
-  @ApiProperty({ description: 'End date for the report', example: '2026-01-31' })
+  @ApiProperty({
+    description: 'End date for the report',
+    example: '2026-01-31',
+  })
   @IsDateString()
   endDate: string;
 
-  @ApiPropertyOptional({ enum: ReportViewType, description: 'View type: detailed or summary' })
+  @ApiPropertyOptional({
+    enum: ReportViewType,
+    description: 'View type: detailed or summary',
+  })
   @IsOptional()
   @IsEnum(ReportViewType)
   viewType?: ReportViewType;
 
-  @ApiPropertyOptional({ enum: ReportGroupBy, description: 'Group by field for summary view' })
+  @ApiPropertyOptional({
+    enum: ReportGroupBy,
+    description: 'Group by field for summary view',
+  })
   @IsOptional()
   @IsEnum(ReportGroupBy)
   groupBy?: ReportGroupBy;
 
-  @ApiPropertyOptional({ description: 'Filter by specific goal IDs (comma-separated)' })
+  @ApiPropertyOptional({
+    description: 'Filter by specific goal IDs (comma-separated)',
+  })
   @IsOptional()
   @IsString()
   goalIds?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by specific task IDs (comma-separated)' })
+  @ApiPropertyOptional({
+    description: 'Filter by specific task IDs (comma-separated)',
+  })
   @IsOptional()
   @IsString()
   taskIds?: string;
@@ -66,22 +82,33 @@ export class ReportFiltersDto {
   @IsString()
   category?: string;
 
-  @ApiPropertyOptional({ enum: ReportSortBy, description: 'Sort order for entries' })
+  @ApiPropertyOptional({
+    enum: ReportSortBy,
+    description: 'Sort order for entries',
+  })
   @IsOptional()
   @IsEnum(ReportSortBy)
   sortBy?: ReportSortBy;
 
-  @ApiPropertyOptional({ description: 'Include billable information for invoicing' })
+  @ApiPropertyOptional({
+    description: 'Include billable information for invoicing',
+  })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   includeBillable?: boolean;
 
   @ApiPropertyOptional({ description: 'Hourly rate for invoice calculations' })
   @IsOptional()
-  @Transform(({ value }) => (value !== undefined && value !== null && value !== '') ? parseFloat(value) : undefined)
+  @Transform(({ value }) =>
+    value !== undefined && value !== null && value !== ''
+      ? parseFloat(value)
+      : undefined,
+  )
   hourlyRate?: number;
 
-  @ApiPropertyOptional({ description: 'Show schedule block context for entries' })
+  @ApiPropertyOptional({
+    description: 'Show schedule block context for entries',
+  })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   showScheduleContext?: boolean;
@@ -102,7 +129,9 @@ export class ExportReportDto extends ReportFiltersDto {
   @IsString()
   title?: string;
 
-  @ApiPropertyOptional({ description: 'Include header/footer with client info' })
+  @ApiPropertyOptional({
+    description: 'Include header/footer with client info',
+  })
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   includeClientInfo?: boolean;
@@ -363,4 +392,3 @@ export interface ScheduleReportResponse {
   }>;
   rows: ScheduleReportRow[];
 }
-

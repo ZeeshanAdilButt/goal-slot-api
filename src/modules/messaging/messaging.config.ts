@@ -48,7 +48,11 @@ function readTrimmed(read: EnvReader, key: string): string | undefined {
  * Falls back rather than throwing on a malformed number: a typo in an
  * optional tuning knob is not a reason to refuse to serve messaging.
  */
-function readPositiveInt(read: EnvReader, key: string, fallback: number): number {
+function readPositiveInt(
+  read: EnvReader,
+  key: string,
+  fallback: number,
+): number {
   const raw = readTrimmed(read, key);
   if (raw === undefined) return fallback;
 

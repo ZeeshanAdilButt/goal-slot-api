@@ -1,4 +1,8 @@
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -80,7 +84,8 @@ class FakePrisma {
             : update.lastValidatedAt,
         tokensUsedThisMonth:
           update.tokensUsedThisMonth ?? existing.tokensUsedThisMonth,
-        tokensWindowStart: update.tokensWindowStart ?? existing.tokensWindowStart,
+        tokensWindowStart:
+          update.tokensWindowStart ?? existing.tokensWindowStart,
         updatedAt: new Date(),
       };
       this.store.set(where.userId, updated);
@@ -280,4 +285,3 @@ describe('CoachByokModule (e2e)', () => {
     expect([401, 403]).toContain(res.status);
   });
 });
-

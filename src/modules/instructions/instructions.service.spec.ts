@@ -1,7 +1,11 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InstructionsService } from './instructions.service';
 import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
-import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from '../reminders/reminder-channel.interface';
+import {
+  ReminderChannel,
+  ReminderChannelInput,
+  ReminderChannelResult,
+} from '../reminders/reminder-channel.interface';
 
 class FakePrisma {
   shares: any[] = [];
@@ -36,7 +40,8 @@ class FakePrisma {
       this.instructions.set(row.id, row);
       return row;
     },
-    findUnique: async ({ where }: any) => this.instructions.get(where.id) ?? null,
+    findUnique: async ({ where }: any) =>
+      this.instructions.get(where.id) ?? null,
     update: async ({ where, data }: any) => {
       const existing = this.instructions.get(where.id);
       const updated = { ...existing, ...data };
@@ -73,10 +78,18 @@ class RecordingChannel implements ReminderChannel {
   }
 }
 
-function buildService(channels: ReminderChannel[] = [new RecordingChannel('email')]) {
+function buildService(
+  channels: ReminderChannel[] = [new RecordingChannel('email')],
+) {
   const prisma = new FakePrisma();
-  const reminderDispatchService = new ReminderDispatchService(prisma as any, channels);
-  const service = new InstructionsService(prisma as any, reminderDispatchService);
+  const reminderDispatchService = new ReminderDispatchService(
+    prisma as any,
+    channels,
+  );
+  const service = new InstructionsService(
+    prisma as any,
+    reminderDispatchService,
+  );
   return { prisma, service, channels };
 }
 
@@ -158,8 +171,13 @@ describe('InstructionsService.assign', () => {
       for (const channel of [email, expoPush, webPush]) {
         expect(channel.calls).toHaveLength(1);
         expect(channel.calls[0].userId).toBe('mentee_1');
-        expect(channel.calls[0].title).toContain('Start tracking your time again');
-        expect(channel.calls[0].data).toEqual({ type: 'instruction', instructionId: instruction.id });
+        expect(channel.calls[0].title).toContain(
+          'Start tracking your time again',
+        );
+        expect(channel.calls[0].data).toEqual({
+          type: 'instruction',
+          instructionId: instruction.id,
+        });
       }
 
       const stored = prisma.instructions.get(instruction.id);
@@ -210,7 +228,8 @@ describe('InstructionsService.assign', () => {
       // The daily sweep looks for PENDING instructions directly against the
       // prisma layer, so make the stored row (with lastReminderAt now set)
       // visible to findMany the way a real query would.
-      prisma.instruction.findMany = async () => Array.from(prisma.instructions.values());
+      prisma.instruction.findMany = async () =>
+        Array.from(prisma.instructions.values());
 
       const reminderDispatchService = (service as any).reminderDispatchService;
       await reminderDispatchService.runDailySweep();
@@ -253,15 +272,19 @@ describe('InstructionsService.complete', () => {
       title: 'Log time',
     });
 
-    await expect(service.complete(created.id, 'mentor_1')).rejects.toThrow(ForbiddenException);
-    await expect(service.complete(created.id, 'someone_else')).rejects.toThrow(ForbiddenException);
+    await expect(service.complete(created.id, 'mentor_1')).rejects.toThrow(
+      ForbiddenException,
+    );
+    await expect(service.complete(created.id, 'someone_else')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('rejects completion of a nonexistent instruction', async () => {
     const { service } = buildService();
 
-    await expect(service.complete('does_not_exist', 'mentee_1')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.complete('does_not_exist', 'mentee_1'),
+    ).rejects.toThrow(NotFoundException);
   });
 });

@@ -10,13 +10,23 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { FeedbackService } from './feedback.service';
-import { CreateFeedbackDto, ArchiveFeedbackDto, ReplyFeedbackDto } from './dto/feedback.dto';
+import {
+  CreateFeedbackDto,
+  ArchiveFeedbackDto,
+  ReplyFeedbackDto,
+} from './dto/feedback.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('feedback')
 @Controller('feedback')
@@ -27,7 +37,10 @@ export class FeedbackController {
 
   @Post()
   @ApiOperation({ summary: 'Submit feedback' })
-  async create(@Request() req: any, @Body() dto: CreateFeedbackDto) {
+  async create(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: CreateFeedbackDto,
+  ) {
     return this.feedbackService.create(req.user.sub, dto);
   }
 
@@ -64,21 +77,37 @@ export class FeedbackController {
 
   @Get(':id/thread')
   @ApiOperation({ summary: 'Get feedback thread (feedback owner or admin)' })
-  async getThread(@Request() req: any, @Param('id') id: string) {
+  async getThread(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     return this.feedbackService.getThread(id, req.user.sub, req.user.role);
   }
 
   @Post(':id/responses')
   @ApiOperation({ summary: 'Reply to feedback (feedback owner or admin)' })
-  async addResponse(@Request() req: any, @Param('id') id: string, @Body() dto: ReplyFeedbackDto) {
-    return this.feedbackService.addResponse(id, req.user.sub, req.user.role, dto);
+  async addResponse(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: ReplyFeedbackDto,
+  ) {
+    return this.feedbackService.addResponse(
+      id,
+      req.user.sub,
+      req.user.role,
+      dto,
+    );
   }
 
   @Put(':id/archive')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Archive or unarchive feedback (Admin only)' })
-  async archive(@Request() req: any, @Param('id') id: string, @Body() dto: ArchiveFeedbackDto) {
+  async archive(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: ArchiveFeedbackDto,
+  ) {
     return this.feedbackService.archive(id, req.user.sub, dto);
   }
 

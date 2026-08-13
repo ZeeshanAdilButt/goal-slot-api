@@ -115,7 +115,9 @@ export class MessagingService {
   ): Promise<boolean> {
     if (!participantIds.includes(requesterId)) return false;
 
-    const others = [...new Set(participantIds.filter((id) => id !== requesterId))];
+    const others = [
+      ...new Set(participantIds.filter((id) => id !== requesterId)),
+    ];
     if (others.length !== 1) return false;
 
     return this.canMessage(requesterId, others[0]);

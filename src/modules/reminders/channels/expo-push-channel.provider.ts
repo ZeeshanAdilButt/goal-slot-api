@@ -1,12 +1,16 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk";
+import { Injectable, Logger } from '@nestjs/common';
+import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 
-import { PrismaService } from "../../../prisma/prisma.service";
-import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from "../reminder-channel.interface";
+import { PrismaService } from '../../../prisma/prisma.service';
+import {
+  ReminderChannel,
+  ReminderChannelInput,
+  ReminderChannelResult,
+} from '../reminder-channel.interface';
 
 @Injectable()
 export class ExpoPushReminderChannel implements ReminderChannel {
-  readonly name = "expo-push";
+  readonly name = 'expo-push';
 
   private readonly logger = new Logger(ExpoPushReminderChannel.name);
   private readonly expo = new Expo();
@@ -27,7 +31,7 @@ export class ExpoPushReminderChannel implements ReminderChannel {
   async send(input: ReminderChannelInput): Promise<ReminderChannelResult> {
     try {
       const subscriptions = await this.prisma.pushSubscription.findMany({
-        where: { userId: input.userId, kind: "EXPO" },
+        where: { userId: input.userId, kind: 'EXPO' },
       });
 
       if (subscriptions.length === 0) {
@@ -41,7 +45,7 @@ export class ExpoPushReminderChannel implements ReminderChannel {
       // failure.
       const validSubscriptions = subscriptions.filter(
         (subscription) =>
-          typeof subscription.expoToken === "string" &&
+          typeof subscription.expoToken === 'string' &&
           Expo.isExpoPushToken(subscription.expoToken),
       );
 
@@ -75,12 +79,12 @@ export class ExpoPushReminderChannel implements ReminderChannel {
       tickets.forEach((ticket, index) => {
         const subscription = validSubscriptions[index];
 
-        if (ticket.status === "ok") {
+        if (ticket.status === 'ok') {
           anySucceeded = true;
           return;
         }
 
-        if (ticket.details?.error === "DeviceNotRegistered") {
+        if (ticket.details?.error === 'DeviceNotRegistered') {
           deadSubscriptionIds.push(subscription.id);
         } else {
           this.logger.warn(
@@ -93,8 +97,11 @@ export class ExpoPushReminderChannel implements ReminderChannel {
         try {
           await this.prisma.pushSubscription.delete({ where: { id } });
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.logger.warn(`Failed to delete dead push subscription ${id}: ${message}`);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            `Failed to delete dead push subscription ${id}: ${message}`,
+          );
         }
       }
 
@@ -102,7 +109,8 @@ export class ExpoPushReminderChannel implements ReminderChannel {
       // nothing left to reach them on via this channel - if they had other
       // subscriptions, this channel still has somewhere to try next time.
       const subscriptionGone =
-        subscriptions.length === 1 && deadSubscriptionIds.includes(subscriptions[0].id);
+        subscriptions.length === 1 &&
+        deadSubscriptionIds.includes(subscriptions[0].id);
 
       return {
         ok: anySucceeded,
@@ -110,7 +118,9 @@ export class ExpoPushReminderChannel implements ReminderChannel {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Expo push send failed for userId=${input.userId}: ${message}`);
+      this.logger.warn(
+        `Expo push send failed for userId=${input.userId}: ${message}`,
+      );
       return { ok: false };
     }
   }

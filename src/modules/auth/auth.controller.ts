@@ -1,9 +1,36 @@
-import { Controller, Post, Body, Get, UseGuards, Request, HttpCode, HttpStatus, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  UseGuards,
+  Request,
+  HttpCode,
+  HttpStatus,
+  Query,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, SSOLoginDto, SendOTPDto, VerifyOTPDto, ForgotPasswordDto, ResetPasswordDto, SendChangePasswordOTPDto, ChangePasswordDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  SSOLoginDto,
+  SendOTPDto,
+  VerifyOTPDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  SendChangePasswordOTPDto,
+  ChangePasswordDto,
+} from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 // check-email is unauthenticated by design (it runs before the user has any
 // token) and its {exists} response is a direct account-existence oracle, so
@@ -20,7 +47,12 @@ export class AuthController {
 
   @Get('check-email')
   @UseGuards(ThrottlerGuard)
-  @Throttle({ 'check-email': { limit: CHECK_EMAIL_THROTTLE_LIMIT, ttl: CHECK_EMAIL_THROTTLE_TTL_MS } })
+  @Throttle({
+    'check-email': {
+      limit: CHECK_EMAIL_THROTTLE_LIMIT,
+      ttl: CHECK_EMAIL_THROTTLE_TTL_MS,
+    },
+  })
   @ApiOperation({ summary: 'Check if email is already registered' })
   @ApiQuery({ name: 'email', type: String })
   @ApiResponse({ status: 200, description: 'Email existence check result' })
@@ -33,8 +65,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send OTP verification code' })
   @ApiResponse({ status: 200, description: 'OTP sent successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request - rate limit or cooldown' })
-  @ApiResponse({ status: 409, description: 'Email already registered (signup only)' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - rate limit or cooldown',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Email already registered (signup only)',
+  })
   async sendOTP(@Body() dto: SendOTPDto) {
     return this.authService.sendOTP(dto);
   }
@@ -100,7 +138,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Current user data' })
-  async getProfile(@Request() req: any) {
+  async getProfile(@Request() req: AuthenticatedRequest) {
     return this.authService.validateUser(req.user.sub);
   }
 
@@ -109,7 +147,7 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token' })
-  async refreshToken(@Request() req: any) {
+  async refreshToken(@Request() req: AuthenticatedRequest) {
     return this.authService.refreshToken(req.user.sub);
   }
 
@@ -119,10 +157,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send OTP for password change' })
   @ApiResponse({ status: 200, description: 'OTP sent successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request - SSO user or rate limit' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - SSO user or rate limit',
+  })
   @ApiResponse({ status: 401, description: 'Invalid current password' })
-  async sendChangePasswordOTP(@Request() req: any, @Body() dto: SendChangePasswordOTPDto) {
-    return this.authService.sendChangePasswordOTP(req.user.sub, dto.currentPassword);
+  async sendChangePasswordOTP(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: SendChangePasswordOTPDto,
+  ) {
+    return this.authService.sendChangePasswordOTP(
+      req.user.sub,
+      dto.currentPassword,
+    );
   }
 
   @Post('change-password')
@@ -131,9 +178,20 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Change password with OTP verification' })
   @ApiResponse({ status: 200, description: 'Password changed successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request - SSO user or invalid OTP' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - SSO user or invalid OTP',
+  })
   @ApiResponse({ status: 401, description: 'Invalid current password' })
-  async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
-    return this.authService.changePassword(req.user.sub, dto.currentPassword, dto.otp, dto.newPassword);
+  async changePassword(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(
+      req.user.sub,
+      dto.currentPassword,
+      dto.otp,
+      dto.newPassword,
+    );
   }
 }

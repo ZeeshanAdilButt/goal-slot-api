@@ -1,15 +1,11 @@
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import {
   CoachInsight,
   CoachInsightKind,
   CoachInsightStatus,
   CoachRole,
   CoachScope,
+  GoalStatus,
   HabitsProfile,
   Prisma,
   ReligiousContext,
@@ -399,12 +395,13 @@ function startOfUtcDay(d: Date): Date {
  * (Gemini RESOURCE_EXHAUSTED / HTTP 429) is the common one on large multi-step
  * requests, so it gets its own actionable message.
  */
-function humanizeLlmError(err: any, raw: string): string {
+function humanizeLlmError(err: unknown, raw: string): string {
+  const errObj = err as { status?: unknown; code?: unknown } | null | undefined;
   const status =
-    (typeof err?.status === 'number' && err.status) ||
-    (typeof err?.code === 'number' && err.code) ||
+    (typeof errObj?.status === 'number' && errObj.status) ||
+    (typeof errObj?.code === 'number' && errObj.code) ||
     undefined;
-  const code = typeof err?.code === 'string' ? err.code : '';
+  const code = typeof errObj?.code === 'string' ? errObj.code : '';
   const text = `${code} ${raw}`.toLowerCase();
 
   const isRateLimited =
@@ -414,7 +411,7 @@ function humanizeLlmError(err: any, raw: string): string {
       text,
     );
   if (isRateLimited) {
-    return "The AI is getting more requests than the provider allows right now. Wait a few seconds and try again. Large multi-step changes are the most likely to hit this, so breaking the request into smaller pieces usually helps.";
+    return 'The AI is getting more requests than the provider allows right now. Wait a few seconds and try again. Large multi-step changes are the most likely to hit this, so breaking the request into smaller pieces usually helps.';
   }
 
   const isAuth =
@@ -494,7 +491,11 @@ export class CoachAiService {
   async getLatestNarrative(userId: string, scopeKey: string) {
     const conv = await this.prisma.coachConversation.findUnique({
       where: {
-        userId_scope_scopeKey: { userId, scope: CoachScope.NARRATIVE, scopeKey },
+        userId_scope_scopeKey: {
+          userId,
+          scope: CoachScope.NARRATIVE,
+          scopeKey,
+        },
       },
     });
     if (!conv) {
@@ -613,7 +614,8 @@ export class CoachAiService {
         ? firstSentence.slice(0, 77) + '...'
         : firstSentence;
     })();
-    const title = (titleOverride ?? fallbackTitle).slice(0, 100) || 'Saved from chat';
+    const title =
+      (titleOverride ?? fallbackTitle).slice(0, 100) || 'Saved from chat';
     const body = trimmed.length > 600 ? trimmed.slice(0, 597) + '...' : trimmed;
 
     const insight = await this.prisma.coachInsight.create({
@@ -669,9 +671,7 @@ export class CoachAiService {
         orderBy: { createdAt: 'desc' },
       });
       if (cached) {
-        this.logger.log(
-          `narrative cache hit scope=${scopeKey} user=${userId}`,
-        );
+        this.logger.log(`narrative cache hit scope=${scopeKey} user=${userId}`);
         yield { delta: cached.content, done: false };
         yield { delta: '', done: true };
         return;
@@ -695,7 +695,9 @@ export class CoachAiService {
     const activeProvider =
       resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
     const activeSelectedModel =
-      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
+      resolved.kind === 'byok'
+        ? resolved.byok.selectedModel
+        : resolved.selectedModel;
 
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
@@ -783,7 +785,9 @@ export class CoachAiService {
     const activeProvider =
       resolved.kind === 'byok' ? resolved.byok.provider : resolved.provider;
     const activeSelectedModel =
-      resolved.kind === 'byok' ? resolved.byok.selectedModel : resolved.selectedModel;
+      resolved.kind === 'byok'
+        ? resolved.byok.selectedModel
+        : resolved.selectedModel;
 
     const result: { messageId?: string; fullText: string } = { fullText: '' };
 
@@ -821,7 +825,10 @@ export class CoachAiService {
     isShared?: boolean;
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
-    const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
+    const model = this.llmFactory.resolveModel(
+      args.provider,
+      args.selectedModel,
+    );
 
     let fullText = '';
     let usage: { promptTokens: number; completionTokens: number } | undefined;
@@ -837,7 +844,7 @@ export class CoachAiService {
           yield { delta: chunk.delta, done: false };
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       // SECURITY: never surface the raw provider error to the client — it can
       // carry the key, internal URLs, or noisy stack text. Log the raw message,
       // send the user a clean, actionable one.
@@ -862,7 +869,7 @@ export class CoachAiService {
     const totalTokens = promptTokens + completionTokens;
 
     try {
-      const ops: any[] = [
+      const ops: Prisma.PrismaPromise<unknown>[] = [
         this.prisma.coachMessage.create({
           data: {
             conversationId: args.conversationId,
@@ -900,7 +907,7 @@ export class CoachAiService {
           `prompt=${promptTokens} completion=${completionTokens} model=${model}` +
           (args.isShared ? ' (shared)' : ''),
       );
-    } catch (err: any) {
+    } catch (err) {
       this.logger.error(
         `failed to persist coach message scope=${args.scopeKey} user=${args.userId}: ${err?.message ?? err}`,
       );
@@ -1038,7 +1045,7 @@ export class CoachAiService {
         where: { userId_day: { userId, day } },
         data: { messageCount: { decrement: 1 } },
       });
-    } catch (err: any) {
+    } catch (err) {
       // Best effort. Losing a refund costs the user one message off today's
       // allowance; failing the request over it would be worse.
       this.logger.warn(
@@ -1185,7 +1192,7 @@ export class CoachAiService {
     }));
 
     const activeGoals = await this.prisma.goal.findMany({
-      where: { userId, status: 'ACTIVE' as any },
+      where: { userId, status: GoalStatus.ACTIVE },
       select: {
         id: true,
         title: true,
@@ -1381,11 +1388,11 @@ export class CoachAiService {
     selectedModel?: string | null;
   }): Promise<void> {
     try {
-      const provider = this.llmFactory.create(
+      const provider = this.llmFactory.create(args.provider, args.decryptedKey);
+      const model = this.llmFactory.resolveModel(
         args.provider,
-        args.decryptedKey,
+        args.selectedModel,
       );
-      const model = this.llmFactory.resolveModel(args.provider, args.selectedModel);
 
       // The extraction call reads the same user-authored content as the
       // narrative, so it gets the same boundary. Its output is schema-bound
@@ -1421,8 +1428,8 @@ export class CoachAiService {
         schema: INSIGHT_SCHEMA,
       });
 
-      const rawInsights = Array.isArray((data as any)?.insights)
-        ? ((data as any).insights as unknown[])
+      const rawInsights = Array.isArray(data?.insights)
+        ? (data.insights as unknown[])
         : [];
 
       const validated: ExtractedInsight[] = [];
@@ -1472,9 +1479,9 @@ export class CoachAiService {
             evidence: item.evidence,
             suggestedAction: item.suggestedAction ?? null,
             mediaSlot:
-              item.kind === 'MEDIA_PROMPT' ? item.mediaSlot ?? null : null,
+              item.kind === 'MEDIA_PROMPT' ? (item.mediaSlot ?? null) : null,
             mediaTopic:
-              item.kind === 'MEDIA_PROMPT' ? item.mediaTopic ?? null : null,
+              item.kind === 'MEDIA_PROMPT' ? (item.mediaTopic ?? null) : null,
           },
         }),
       );
@@ -1490,7 +1497,7 @@ export class CoachAiService {
       this.logger.log(
         `insight extraction persisted=${survivors.length} dropped=${validated.length - survivors.length} user=${args.userId} scope=${args.scopeKey} prompt=${usage.promptTokens} completion=${usage.completionTokens} model=${model}`,
       );
-    } catch (err: any) {
+    } catch (err) {
       // NEVER rethrow — narrative is already saved and SSE closed.
       this.logger.warn(
         `extractInsightsAsync threw user=${args.userId} scope=${args.scopeKey}: ${err?.message ?? err}`,
@@ -1595,7 +1602,10 @@ function currentIsoWeekRange(): { from: Date; to: Date } {
 
 // ----- Memory + prompt construction helpers -----
 
-function weeksAgoLabel(when: Date | null | undefined, now: Date = new Date()): string {
+function weeksAgoLabel(
+  when: Date | null | undefined,
+  now: Date = new Date(),
+): string {
   if (!when) return 'recently';
   const ms = now.getTime() - when.getTime();
   const weeks = Math.max(0, Math.round(ms / (7 * 24 * 60 * 60 * 1000)));
@@ -1879,11 +1889,7 @@ function levenshtein(a: string, b: string): number {
     const ca = a.charCodeAt(i - 1);
     for (let j = 1; j <= n; j++) {
       const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
-      curr[j] = Math.min(
-        prev[j] + 1,
-        curr[j - 1] + 1,
-        prev[j - 1] + cost,
-      );
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
     }
     [prev, curr] = [curr, prev];
   }

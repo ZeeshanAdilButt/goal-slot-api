@@ -1,4 +1,15 @@
-import { IsString, IsOptional, IsEmail, MinLength, MaxLength, IsEnum, IsBoolean, IsArray, ArrayMinSize, IsIn } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEmail,
+  MinLength,
+  MaxLength,
+  IsEnum,
+  IsBoolean,
+  IsArray,
+  ArrayMinSize,
+  IsIn,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, PlanType } from '@prisma/client';
 
@@ -50,11 +61,17 @@ export class CreateInternalUserDto {
 
 // Admin: Disable/Enable User
 export class AdminToggleUserStatusDto {
-  @ApiProperty({ example: true, description: 'Whether to disable or enable the user' })
+  @ApiProperty({
+    example: true,
+    description: 'Whether to disable or enable the user',
+  })
   @IsBoolean()
   isDisabled: boolean;
 
-  @ApiPropertyOptional({ example: 'Violation of terms of service', description: 'Reason for disabling (required when disabling)' })
+  @ApiPropertyOptional({
+    example: 'Violation of terms of service',
+    description: 'Reason for disabling (required when disabling)',
+  })
   @IsOptional()
   @IsString()
   reason?: string;
@@ -62,11 +79,18 @@ export class AdminToggleUserStatusDto {
 
 // Admin: Assign Plan to User
 export class AdminAssignPlanDto {
-  @ApiProperty({ enum: PlanType, example: PlanType.PRO, description: 'The plan to assign to the user' })
+  @ApiProperty({
+    enum: PlanType,
+    example: PlanType.PRO,
+    description: 'The plan to assign to the user',
+  })
   @IsEnum(PlanType)
   plan: PlanType;
 
-  @ApiPropertyOptional({ example: 'Early adopter reward', description: 'Note about why the plan was assigned' })
+  @ApiPropertyOptional({
+    example: 'Early adopter reward',
+    description: 'Note about why the plan was assigned',
+  })
   @IsOptional()
   @IsString()
   note?: string;
@@ -80,11 +104,18 @@ export class AdminBulkAssignPlanDto {
   @IsString({ each: true })
   userIds: string[];
 
-  @ApiProperty({ enum: PlanType, example: PlanType.PRO, description: 'The plan to assign to the users' })
+  @ApiProperty({
+    enum: PlanType,
+    example: PlanType.PRO,
+    description: 'The plan to assign to the users',
+  })
   @IsEnum(PlanType)
   plan: PlanType;
 
-  @ApiPropertyOptional({ example: 'Bulk update', description: 'Note about why the plan was assigned' })
+  @ApiPropertyOptional({
+    example: 'Bulk update',
+    description: 'Note about why the plan was assigned',
+  })
   @IsOptional()
   @IsString()
   note?: string;
@@ -99,7 +130,11 @@ export class AdminSetEmailVerifiedDto {
 
 // Admin: Demote User from Admin
 export class AdminDemoteUserDto {
-  @ApiProperty({ enum: UserRole, example: UserRole.USER, description: 'The role to demote to (USER only)' })
+  @ApiProperty({
+    enum: UserRole,
+    example: UserRole.USER,
+    description: 'The role to demote to (USER only)',
+  })
   @IsEnum(UserRole)
   role: UserRole;
 }
@@ -113,24 +148,24 @@ export class AdminUserDetailDto {
   role: UserRole;
   userType: string;
   plan: PlanType;
-  
+
   // Account status
   isDisabled: boolean;
   disabledAt?: Date;
   disabledReason?: string;
   emailVerified: boolean;
   emailVerifiedAt?: Date;
-  
+
   // Subscription info
   subscriptionStatus?: string;
   subscriptionEndDate?: Date;
   unlimitedAccess: boolean;
-  
+
   // Admin-assigned plan
   adminAssignedPlan?: PlanType;
   adminAssignedPlanAt?: Date;
   adminAssignedPlanNote?: string;
-  
+
   // Timestamps
   createdAt: Date;
   updatedAt: Date;

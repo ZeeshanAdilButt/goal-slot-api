@@ -41,15 +41,19 @@ export class CoachProposedAction {
   @IsIn(COACH_ACTION_TYPES as unknown as string[])
   type: CoachActionType;
 
-  @ApiPropertyOptional({ description: 'Target entity id (for UPDATE/DELETE/RENAME)' })
+  @ApiPropertyOptional({
+    description: 'Target entity id (for UPDATE/DELETE/RENAME)',
+  })
   @IsOptional()
   @IsString()
   id?: string;
 
-  @ApiPropertyOptional({ description: 'Action payload — shape depends on type' })
+  @ApiPropertyOptional({
+    description: 'Action payload — shape depends on type',
+  })
   @IsOptional()
   @IsObject()
-  payload?: Record<string, any>;
+  payload?: Record<string, unknown>;
 
   @ApiPropertyOptional({
     description:

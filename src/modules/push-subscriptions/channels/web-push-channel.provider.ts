@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as webpush from 'web-push';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PushSubscriptionsService } from '../push-subscriptions.service';
-import { ReminderChannel, ReminderChannelInput, ReminderChannelResult } from '../../reminders/reminder-channel.interface';
+import {
+  ReminderChannel,
+  ReminderChannelInput,
+  ReminderChannelResult,
+} from '../../reminders/reminder-channel.interface';
 
 @Injectable()
 export class WebPushReminderChannel implements ReminderChannel {
@@ -23,7 +27,9 @@ export class WebPushReminderChannel implements ReminderChannel {
     // not an error — degrade to a no-op sender rather than throwing at
     // bootstrap, mirroring how PostHogService treats a missing API key.
     if (!publicKey || !privateKey || !subject) {
-      this.logger.warn('VAPID keys are not set. Web push reminders are disabled.');
+      this.logger.warn(
+        'VAPID keys are not set. Web push reminders are disabled.',
+      );
       this.configured = false;
       return;
     }
@@ -45,13 +51,21 @@ export class WebPushReminderChannel implements ReminderChannel {
       return { ok: false };
     }
 
-    const payload = JSON.stringify({ title: input.title, body: input.body, data: input.data });
+    const payload = JSON.stringify({
+      title: input.title,
+      body: input.body,
+      data: input.data,
+    });
 
     let anySucceeded = false;
     let goneCount = 0;
 
     for (const subscription of subscriptions) {
-      if (!subscription.endpoint || !subscription.p256dh || !subscription.auth) {
+      if (
+        !subscription.endpoint ||
+        !subscription.p256dh ||
+        !subscription.auth
+      ) {
         continue;
       }
 
@@ -64,15 +78,20 @@ export class WebPushReminderChannel implements ReminderChannel {
           payload,
         );
         anySucceeded = true;
-      } catch (error: any) {
+      } catch (error) {
         const statusCode = error?.statusCode;
         if (statusCode === 404 || statusCode === 410) {
           goneCount += 1;
           // Clean up immediately rather than waiting for the caller —
           // a dead endpoint retried daily by the sweep is pure waste.
-          await this.pushSubscriptionsService.deleteByEndpoint(input.userId, subscription.endpoint);
+          await this.pushSubscriptionsService.deleteByEndpoint(
+            input.userId,
+            subscription.endpoint,
+          );
         } else {
-          this.logger.warn(`web push send failed for user ${input.userId}: ${error?.message ?? error}`);
+          this.logger.warn(
+            `web push send failed for user ${input.userId}: ${error?.message ?? error}`,
+          );
         }
       }
     }
@@ -85,6 +104,8 @@ export class WebPushReminderChannel implements ReminderChannel {
     // died — with multiple subscriptions a mix of failure reasons doesn't
     // mean the user has no reachable device, just that this attempt failed.
     const soleSubscriptionDied = subscriptions.length === 1 && goneCount === 1;
-    return soleSubscriptionDied ? { ok: false, subscriptionGone: true } : { ok: false };
+    return soleSubscriptionDied
+      ? { ok: false, subscriptionGone: true }
+      : { ok: false };
   }
 }

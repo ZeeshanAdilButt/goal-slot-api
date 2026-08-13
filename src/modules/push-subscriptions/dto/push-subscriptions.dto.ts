@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsUrl, registerDecorator, ValidationOptions } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsUrl,
+  registerDecorator,
+  ValidationOptions,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 // A web push endpoint is minted by the browser's Push API and only ever
@@ -56,7 +62,10 @@ function IsAllowedPushEndpoint(validationOptions?: ValidationOptions) {
 // (everything optional) so the shape check can live in the service and
 // produce one clear error message instead of class-validator's generic one.
 export class RegisterPushSubscriptionDto {
-  @ApiProperty({ required: false, description: 'Web push subscription endpoint URL' })
+  @ApiProperty({
+    required: false,
+    description: 'Web push subscription endpoint URL',
+  })
   @IsOptional()
   @IsUrl({ protocols: ['https'], require_protocol: true })
   @IsAllowedPushEndpoint()

@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NotesService } from './notes.service';
 import { CreateNoteDto, UpdateNoteDto, ReorderNotesDto } from './dto/notes.dto';
 import { InviteNoteShareDto } from './dto/note-share.dto';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('notes')
 @Controller('notes')
@@ -24,7 +25,7 @@ export class NotesController {
 
   @Get()
   @ApiOperation({ summary: 'Get all notes owned by the user' })
-  async findAll(@Request() req: any) {
+  async findAll(@Request() req: AuthenticatedRequest) {
     return this.notesService.findAll(req.user.sub);
   }
 
@@ -32,7 +33,7 @@ export class NotesController {
   // sidebar can group them by who shared them.
   @Get('shared-with-me')
   @ApiOperation({ summary: 'List notes shared with the current user' })
-  async sharedWithMe(@Request() req: any) {
+  async sharedWithMe(@Request() req: AuthenticatedRequest) {
     return this.notesService.findSharedWithMe(req.user.sub);
   }
 
@@ -40,19 +41,25 @@ export class NotesController {
   // readOnly: true so the editor disables saves.
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific note (owner or share recipient)' })
-  async findOne(@Param('id') id: string, @Request() req: any) {
+  async findOne(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     return this.notesService.findOneAccessible(id, req.user.sub);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new note' })
-  async create(@Body() dto: CreateNoteDto, @Request() req: any) {
+  async create(
+    @Body() dto: CreateNoteDto,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.notesService.create(req.user.sub, dto);
   }
 
   @Put('reorder')
   @ApiOperation({ summary: 'Reorder notes' })
-  async reorder(@Body() items: ReorderNotesDto[], @Request() req: any) {
+  async reorder(
+    @Body() items: ReorderNotesDto[],
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.notesService.reorder(req.user.sub, items);
   }
 
@@ -61,14 +68,14 @@ export class NotesController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateNoteDto,
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
   ) {
     return this.notesService.update(id, req.user.sub, dto);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a note' })
-  async delete(@Param('id') id: string, @Request() req: any) {
+  async delete(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     return this.notesService.delete(id, req.user.sub);
   }
 
@@ -76,19 +83,28 @@ export class NotesController {
 
   @Get(':id/share')
   @ApiOperation({ summary: 'Get the share state for a note (owner only)' })
-  async getShareState(@Param('id') id: string, @Request() req: any) {
+  async getShareState(
+    @Param('id') id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.notesService.getShareState(id, req.user.sub);
   }
 
   @Post(':id/share/public-link')
   @ApiOperation({ summary: 'Enable a public link for a note' })
-  async enablePublicLink(@Param('id') id: string, @Request() req: any) {
+  async enablePublicLink(
+    @Param('id') id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.notesService.enablePublicLink(id, req.user.sub);
   }
 
   @Delete(':id/share/public-link')
   @ApiOperation({ summary: 'Revoke the public link for a note' })
-  async revokePublicLink(@Param('id') id: string, @Request() req: any) {
+  async revokePublicLink(
+    @Param('id') id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.notesService.revokePublicLink(id, req.user.sub);
   }
 
@@ -97,7 +113,7 @@ export class NotesController {
   async invite(
     @Param('id') id: string,
     @Body() dto: InviteNoteShareDto,
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
   ) {
     return this.notesService.invite(id, req.user.sub, dto.email);
   }
@@ -107,7 +123,7 @@ export class NotesController {
   async revokeInvite(
     @Param('id') id: string,
     @Param('shareId') shareId: string,
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
   ) {
     return this.notesService.revokeInvite(id, req.user.sub, shareId);
   }

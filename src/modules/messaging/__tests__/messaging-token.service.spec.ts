@@ -84,8 +84,8 @@ describe('MessagingTokenService', () => {
       get: () => undefined,
     } as unknown as ConfigService);
 
-    await expect(new MessagingTokenService(config).mint('user_1')).rejects.toThrow(
-      ServiceUnavailableException,
-    );
+    await expect(
+      new MessagingTokenService(config).mint('user_1'),
+    ).rejects.toThrow(ServiceUnavailableException);
   });
 });

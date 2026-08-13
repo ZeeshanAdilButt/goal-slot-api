@@ -90,19 +90,16 @@ describe('CoachProposalsService payload validation', () => {
     ['UPDATE_TIME_ENTRY', 'timeEntries'],
     ['UPDATE_TASK', 'tasks'],
     ['UPDATE_SCHEDULE_BLOCK', 'schedule'],
-  ] as const)(
-    'rejects %s carrying a userId',
-    async (type, serviceKey) => {
-      const built = buildService();
+  ] as const)('rejects %s carrying a userId', async (type, serviceKey) => {
+    const built = buildService();
 
-      const results = await built.service.apply(ATTACKER, [
-        { type, id: OWN_GOAL, payload: { userId: VICTIM } } as any,
-      ]);
+    const results = await built.service.apply(ATTACKER, [
+      { type, id: OWN_GOAL, payload: { userId: VICTIM } } as any,
+    ]);
 
-      expect(results[0].ok).toBe(false);
-      expect((built as any)[serviceKey].calls).toHaveLength(0);
-    },
-  );
+    expect(results[0].ok).toBe(false);
+    expect((built as any)[serviceKey].calls).toHaveLength(0);
+  });
 
   it('rejects CREATE_GOAL carrying a userId', async () => {
     const { service, goals } = buildService();
@@ -149,7 +146,10 @@ describe('CoachProposalsService payload validation', () => {
       {
         type: 'UPDATE_GOAL',
         id: OWN_GOAL,
-        payload: { title: 'Renamed', id: '99999999-9999-4999-8999-999999999999' },
+        payload: {
+          title: 'Renamed',
+          id: '99999999-9999-4999-8999-999999999999',
+        },
       } as CoachProposedAction,
     ]);
 
@@ -209,7 +209,11 @@ describe('CoachProposalsService still applies legitimate proposals', () => {
       {
         type: 'UPDATE_GOAL',
         id: OWN_GOAL,
-        payload: { title: 'New title', targetHours: 20, deadline: '2026-09-01' },
+        payload: {
+          title: 'New title',
+          targetHours: 20,
+          deadline: '2026-09-01',
+        },
       } as CoachProposedAction,
     ]);
 

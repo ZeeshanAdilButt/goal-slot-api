@@ -115,6 +115,8 @@ export function sanitizeUntrusted(value: string): string {
       // readable while making it inert.
       .replace(/coach-proposal/gi, 'coach proposal')
       // C0 and C1 control characters, tab/newline/carriage-return excepted.
+      // Matching control characters is the point of this line, not an accident.
+      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
   );
 }

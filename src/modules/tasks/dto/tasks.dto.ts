@@ -1,9 +1,19 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsString, IsOptional, IsUUID, IsEnum, IsNumber, Min, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsUUID,
+  IsEnum,
+  IsNumber,
+  Min,
+  IsDateString,
+} from 'class-validator';
 import { TaskStatus } from '@prisma/client';
 
 export class CreateTaskDto {
-  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @ApiPropertyOptional({
+    description: 'Client-generated id, enabling stable offline creation',
+  })
   @IsOptional()
   @IsUUID()
   id?: string;
@@ -67,12 +77,11 @@ export class CompleteTaskDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ example: '2025-12-07', description: 'Date to log the completion' })
+  @ApiPropertyOptional({
+    example: '2025-12-07',
+    description: 'Date to log the completion',
+  })
   @IsOptional()
   @IsDateString()
   date?: string;
 }
-
-
-
-

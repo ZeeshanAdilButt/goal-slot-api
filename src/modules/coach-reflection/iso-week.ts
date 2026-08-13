@@ -8,11 +8,7 @@
 export function isoWeekKey(input: Date = new Date()): string {
   // Copy in UTC so DST does not shift day-of-week boundaries.
   const d = new Date(
-    Date.UTC(
-      input.getUTCFullYear(),
-      input.getUTCMonth(),
-      input.getUTCDate(),
-    ),
+    Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()),
   );
   // Shift to Thursday of the current ISO week.
   const dayNum = d.getUTCDay() || 7; // Sun=0 → 7

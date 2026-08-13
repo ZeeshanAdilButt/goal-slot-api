@@ -135,7 +135,8 @@ export function assertProposalBatchSafe(
   // Per-item confirmation. Supplying the field at all opts into strict mode:
   // a client that knows about confirmations must account for every delete in
   // the batch, otherwise a partial list would be worse than none.
-  const strict = opts.confirmedDeleteIds !== undefined || deleteConfirmationRequired();
+  const strict =
+    opts.confirmedDeleteIds !== undefined || deleteConfirmationRequired();
   if (!strict) return;
 
   const confirmed = new Set(opts.confirmedDeleteIds ?? []);

@@ -1,4 +1,8 @@
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import * as http from 'http';
@@ -267,14 +271,13 @@ describe('CoachJournalModule (e2e)', () => {
       userId: USER_A,
       body: { date: D, content: 'private' },
     });
-    const res = await request(
-      baseUrl,
-      'GET',
-      `/coach/journal/entries/${D}`,
-      { userId: USER_B },
-    );
+    const res = await request(baseUrl, 'GET', `/coach/journal/entries/${D}`, {
+      userId: USER_B,
+    });
     expect(res.status).toBe(200);
-    expect(res.body === null || res.body === '' || res.rawBody === '').toBe(true);
+    expect(res.body === null || res.body === '' || res.rawBody === '').toBe(
+      true,
+    );
   });
 
   it('rejects out-of-range mood with 400', async () => {

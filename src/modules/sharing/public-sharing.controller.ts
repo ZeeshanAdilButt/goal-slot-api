@@ -8,7 +8,9 @@ export class PublicSharingController {
   constructor(private sharingService: SharingService) {}
 
   @Get('view/:token')
-  @ApiOperation({ summary: 'View shared data via public token (no auth required)' })
+  @ApiOperation({
+    summary: 'View shared data via public token (no auth required)',
+  })
   async viewSharedData(@Param('token') token: string) {
     return this.sharingService.getPublicSharedData(token);
   }
@@ -22,7 +24,11 @@ export class PublicSharingController {
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
-    return this.sharingService.getPublicSharedTimeEntries(token, startDate, endDate);
+    return this.sharingService.getPublicSharedTimeEntries(
+      token,
+      startDate,
+      endDate,
+    );
   }
 
   @Get('view/:token/goals')

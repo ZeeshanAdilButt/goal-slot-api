@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, ResponseSchema } from '@google/generative-ai';
 import {
   CoachLlmProvider,
   LlmChatMessage,
@@ -71,7 +71,7 @@ export class GeminiProvider implements CoachLlmProvider {
     // Final aggregated response carries usageMetadata. Await it AFTER
     // the stream is fully drained — accessing earlier returns nothing.
     const final = await stream.response;
-    const usageMeta: any = (final as any).usageMetadata;
+    const usageMeta = final.usageMetadata;
     const usage: LlmUsage | undefined = usageMeta
       ? {
           promptTokens: usageMeta.promptTokenCount ?? 0,
@@ -98,14 +98,14 @@ export class GeminiProvider implements CoachLlmProvider {
         // will reject some advanced keywords (oneOf etc.), so callers
         // should keep schemas to the basic types/properties/required set.
         responseMimeType: 'application/json',
-        responseSchema: args.schema as any,
+        responseSchema: args.schema as unknown as ResponseSchema,
         temperature: 0.2,
       },
     });
 
     const result = await m.generateContent({ contents: history });
     const text = result.response.text();
-    const usageMeta: any = (result.response as any).usageMetadata;
+    const usageMeta = result.response.usageMetadata;
     const usage: LlmUsage = {
       promptTokens: usageMeta?.promptTokenCount ?? 0,
       completionTokens: usageMeta?.candidatesTokenCount ?? 0,

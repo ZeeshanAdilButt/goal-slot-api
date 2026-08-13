@@ -17,8 +17,7 @@ export class SupabaseService {
   private readonly serviceRoleKey: string;
 
   constructor(private configService: ConfigService) {
-    this.supabaseUrl =
-      this.configService.getOrThrow<string>('SUPABASE_URL');
+    this.supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
     this.serviceRoleKey = this.configService.getOrThrow<string>(
       'SUPABASE_SERVICE_ROLE_KEY',
     );
@@ -94,12 +93,15 @@ export class SupabaseService {
   }
 
   // Verify SSO token from platform
-  async verifySSOToken(token: string): Promise<{ valid: boolean; user?: any }> {
+  async verifySSOToken(token: string): Promise<{
+    valid: boolean;
+    user?: { id: string; email?: string; name?: string };
+  }> {
     try {
       // In production, this would validate against the DW platform
       // For now, we'll decode and verify the JWT structure
       const { data, error } = await this.supabase.auth.getUser(token);
-      
+
       if (error || !data.user) {
         return { valid: false };
       }

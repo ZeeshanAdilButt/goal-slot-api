@@ -6,7 +6,9 @@ import { ReminderDispatchService } from './reminder-dispatch.service';
 export class ReminderCronService {
   private readonly logger = new Logger(ReminderCronService.name);
 
-  constructor(private readonly reminderDispatchService: ReminderDispatchService) {}
+  constructor(
+    private readonly reminderDispatchService: ReminderDispatchService,
+  ) {}
 
   // First scheduled job in this API - see the design spec's "Cron" section
   // for why there is no prior pattern to follow. A thrown error here would
@@ -17,7 +19,9 @@ export class ReminderCronService {
     try {
       await this.reminderDispatchService.runDailySweep();
     } catch (error) {
-      this.logger.error(`Daily reminder sweep failed: ${(error as Error).message}`);
+      this.logger.error(
+        `Daily reminder sweep failed: ${(error as Error).message}`,
+      );
     }
   }
 }

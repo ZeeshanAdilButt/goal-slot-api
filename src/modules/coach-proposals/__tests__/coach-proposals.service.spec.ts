@@ -124,7 +124,9 @@ class FakePrisma {
 
 function buildServices() {
   const prisma = new FakePrisma();
-  const authService = { checkPlanLimit: jest.fn().mockResolvedValue(undefined) };
+  const authService = {
+    checkPlanLimit: jest.fn().mockResolvedValue(undefined),
+  };
   const schedule = new ScheduleService(prisma as any, authService as any);
   const service = new CoachProposalsService(
     prisma as any,
@@ -210,7 +212,12 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
       category: 'DEEP_WORK',
     });
     // A decoy that must never be touched.
-    prisma.addBlock({ title: 'Open Source', dayOfWeek: 2, startTime: '18:00', endTime: '19:00' });
+    prisma.addBlock({
+      title: 'Open Source',
+      dayOfWeek: 2,
+      startTime: '18:00',
+      endTime: '19:00',
+    });
 
     const results = await service.apply(USER, [
       {
@@ -237,7 +244,12 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
       endTime: '11:30',
     });
     // An unrelated block on a different day should never be considered.
-    prisma.addBlock({ title: 'Other', dayOfWeek: 4, startTime: '10:30', endTime: '11:30' });
+    prisma.addBlock({
+      title: 'Other',
+      dayOfWeek: 4,
+      startTime: '10:30',
+      endTime: '11:30',
+    });
 
     const results = await service.apply(USER, [
       {
@@ -278,8 +290,18 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
     const staleId = 'stale-id-4';
     // Two blocks share the same title + day at different times - title+day
     // alone can't disambiguate which one the Coach meant.
-    prisma.addBlock({ title: 'Deep Work', dayOfWeek: 1, startTime: '09:00', endTime: '10:00' });
-    prisma.addBlock({ title: 'Deep Work', dayOfWeek: 1, startTime: '14:00', endTime: '15:00' });
+    prisma.addBlock({
+      title: 'Deep Work',
+      dayOfWeek: 1,
+      startTime: '09:00',
+      endTime: '10:00',
+    });
+    prisma.addBlock({
+      title: 'Deep Work',
+      dayOfWeek: 1,
+      startTime: '14:00',
+      endTime: '15:00',
+    });
 
     const results = await service.apply(USER, [
       {
@@ -299,8 +321,18 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
     // and Family time" - matching here is exact (normalized) only, never
     // substring or fuzzy.
     const { prisma, service } = buildServices();
-    prisma.addBlock({ title: 'Family Time', dayOfWeek: 5, startTime: '05:00', endTime: '06:00' });
-    prisma.addBlock({ title: 'FAMILY TIME', dayOfWeek: 0, startTime: '10:00', endTime: '11:00' });
+    prisma.addBlock({
+      title: 'Family Time',
+      dayOfWeek: 5,
+      startTime: '05:00',
+      endTime: '06:00',
+    });
+    prisma.addBlock({
+      title: 'FAMILY TIME',
+      dayOfWeek: 0,
+      startTime: '10:00',
+      endTime: '11:00',
+    });
 
     const results = await service.apply(USER, [
       {
@@ -349,8 +381,18 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
     // bug: several unrelated blocks share a day with the target. Without an
     // exact title match, dayOfWeek by itself must never pick one of them.
     const { prisma, service } = buildServices();
-    prisma.addBlock({ title: 'LeafCompute', dayOfWeek: 4, startTime: '17:00', endTime: '19:00' });
-    prisma.addBlock({ title: 'Read Paper and Take notes', dayOfWeek: 4, startTime: '09:00', endTime: '10:00' });
+    prisma.addBlock({
+      title: 'LeafCompute',
+      dayOfWeek: 4,
+      startTime: '17:00',
+      endTime: '19:00',
+    });
+    prisma.addBlock({
+      title: 'Read Paper and Take notes',
+      dayOfWeek: 4,
+      startTime: '09:00',
+      endTime: '10:00',
+    });
 
     const results = await service.apply(USER, [
       {
@@ -366,9 +408,24 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
 
   it('does not throw out of apply() for a stale action, and does not affect other actions in the batch', async () => {
     const { prisma, service } = buildServices();
-    const validBlockA = prisma.addBlock({ title: 'A', dayOfWeek: 0, startTime: '08:00', endTime: '09:00' });
-    const validBlockB = prisma.addBlock({ title: 'B', dayOfWeek: 2, startTime: '08:00', endTime: '09:00' });
-    const recreated = prisma.addBlock({ title: 'Recoverable', dayOfWeek: 5, startTime: '10:00', endTime: '11:00' });
+    const validBlockA = prisma.addBlock({
+      title: 'A',
+      dayOfWeek: 0,
+      startTime: '08:00',
+      endTime: '09:00',
+    });
+    const validBlockB = prisma.addBlock({
+      title: 'B',
+      dayOfWeek: 2,
+      startTime: '08:00',
+      endTime: '09:00',
+    });
+    const recreated = prisma.addBlock({
+      title: 'Recoverable',
+      dayOfWeek: 5,
+      startTime: '10:00',
+      endTime: '11:00',
+    });
 
     const actions = [
       {
@@ -397,11 +454,23 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () =
     const resolved = await service.apply(USER, actions as any);
 
     expect(resolved).toHaveLength(4);
-    expect(resolved[0]).toMatchObject({ index: 0, ok: true, resultId: validBlockA.id });
+    expect(resolved[0]).toMatchObject({
+      index: 0,
+      ok: true,
+      resultId: validBlockA.id,
+    });
     expect(resolved[1]).toMatchObject({ index: 1, ok: false });
     expect(resolved[1].error).not.toBe('Schedule block not found');
-    expect(resolved[2]).toMatchObject({ index: 2, ok: true, resultId: validBlockB.id });
-    expect(resolved[3]).toMatchObject({ index: 3, ok: true, resultId: recreated.id });
+    expect(resolved[2]).toMatchObject({
+      index: 2,
+      ok: true,
+      resultId: validBlockB.id,
+    });
+    expect(resolved[3]).toMatchObject({
+      index: 3,
+      ok: true,
+      resultId: recreated.id,
+    });
   });
 
   it("does not resolve a stale id against another user's blocks", async () => {

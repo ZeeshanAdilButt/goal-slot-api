@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ImportTemplateDto } from './dto/import-template.dto';
 import { TemplatesService } from './templates.service';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('templates')
 @Controller('templates')
@@ -30,7 +31,9 @@ export class TemplatesController {
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get one template with full schedule, goals, tasks' })
+  @ApiOperation({
+    summary: 'Get one template with full schedule, goals, tasks',
+  })
   getOne(@Param('id') id: string) {
     return this.templates.getOne(id);
   }
@@ -43,7 +46,7 @@ export class TemplatesController {
       'Import a template into the current user account. Each section is opt-in.',
   })
   import(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Body() dto: ImportTemplateDto,
   ) {
@@ -65,7 +68,7 @@ export class TemplatesController {
     summary:
       'Sync new tasks from a curated template into the current user account',
   })
-  sync(@Request() req: any, @Param('id') id: string) {
+  sync(@Request() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.templates.syncTasks(req.user.sub, id);
   }
 }

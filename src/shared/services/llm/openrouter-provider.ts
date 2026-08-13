@@ -90,10 +90,13 @@ export class OpenRouterProvider implements CoachLlmProvider {
           json_schema: {
             name: args.schemaName,
             strict: true,
-            schema: args.schema as any,
+            schema: args.schema,
           },
-        } as any,
-        messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
+        },
+        messages: args.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
       });
       const raw = completion.choices[0]?.message?.content ?? '{}';
       const usage: LlmUsage = {
@@ -106,7 +109,10 @@ export class OpenRouterProvider implements CoachLlmProvider {
       const completion = await this.client.chat.completions.create({
         model: args.model,
         temperature: 0.2,
-        messages: args.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: args.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
       });
       const raw = completion.choices[0]?.message?.content ?? '{}';
       const usage: LlmUsage = {

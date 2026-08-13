@@ -40,7 +40,8 @@ export class ByokStateDto {
   @ApiProperty({
     required: false,
     nullable: true,
-    description: 'Model actually used by Coach (resolves selectedModel or default)',
+    description:
+      'Model actually used by Coach (resolves selectedModel or default)',
   })
   effectiveModel?: string | null;
 

@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
-import { CreateScheduleBlockDto, UpdateScheduleBlockDto } from './dto/schedule.dto';
+import {
+  CreateScheduleBlockDto,
+  UpdateScheduleBlockDto,
+} from './dto/schedule.dto';
 
 @Injectable()
 export class ScheduleService {
@@ -12,13 +19,26 @@ export class ScheduleService {
 
   async create(userId: string, dto: CreateScheduleBlockDto) {
     // Check plan limits
-    const currentSchedules = await this.prisma.scheduleBlock.count({ where: { userId } });
-    await this.authService.checkPlanLimit(userId, 'schedules', currentSchedules);
+    const currentSchedules = await this.prisma.scheduleBlock.count({
+      where: { userId },
+    });
+    await this.authService.checkPlanLimit(
+      userId,
+      'schedules',
+      currentSchedules,
+    );
 
     // Check for time conflicts
-    const hasConflict = await this.checkTimeConflict(userId, dto.dayOfWeek, dto.startTime, dto.endTime);
+    const hasConflict = await this.checkTimeConflict(
+      userId,
+      dto.dayOfWeek,
+      dto.startTime,
+      dto.endTime,
+    );
     if (hasConflict) {
-      throw new BadRequestException('Time slot conflicts with an existing schedule block');
+      throw new BadRequestException(
+        'Time slot conflicts with an existing schedule block',
+      );
     }
 
     return this.prisma.scheduleBlock.create({
@@ -64,16 +84,25 @@ export class ScheduleService {
       throw new NotFoundException('Schedule block not found');
     }
 
-    const { id: _id, updateScope = 'single', seriesId: _ignoredSeriesId, ...changes } = dto;
+    const {
+      id: _id,
+      updateScope = 'single',
+      seriesId: _ignoredSeriesId,
+      ...changes
+    } = dto;
     const updateData = this.removeUndefined(changes);
 
     if (updateScope === 'series' && block.seriesId) {
-      const sanitizedSeriesData = { ...updateData } as Partial<CreateScheduleBlockDto>;
+      const sanitizedSeriesData = {
+        ...updateData,
+      } as Partial<CreateScheduleBlockDto>;
       if ('dayOfWeek' in sanitizedSeriesData) {
         delete sanitizedSeriesData.dayOfWeek;
       }
 
-      const hasTimeUpdate = Boolean(sanitizedSeriesData.startTime || sanitizedSeriesData.endTime);
+      const hasTimeUpdate = Boolean(
+        sanitizedSeriesData.startTime || sanitizedSeriesData.endTime,
+      );
 
       if (Object.keys(sanitizedSeriesData).length === 0) {
         return block;
@@ -86,11 +115,20 @@ export class ScheduleService {
 
         for (const seriesBlock of seriesBlocks) {
           const targetDay = seriesBlock.dayOfWeek;
-          const nextStart = sanitizedSeriesData.startTime ?? seriesBlock.startTime;
+          const nextStart =
+            sanitizedSeriesData.startTime ?? seriesBlock.startTime;
           const nextEnd = sanitizedSeriesData.endTime ?? seriesBlock.endTime;
-          const conflict = await this.checkTimeConflict(userId, targetDay, nextStart, nextEnd, seriesBlock.id);
+          const conflict = await this.checkTimeConflict(
+            userId,
+            targetDay,
+            nextStart,
+            nextEnd,
+            seriesBlock.id,
+          );
           if (conflict) {
-            throw new BadRequestException('Time slot conflicts with an existing schedule block in this series');
+            throw new BadRequestException(
+              'Time slot conflicts with an existing schedule block in this series',
+            );
           }
         }
       }
@@ -106,7 +144,11 @@ export class ScheduleService {
       });
     }
 
-    if (updateData.startTime || updateData.endTime || updateData.dayOfWeek !== undefined) {
+    if (
+      updateData.startTime ||
+      updateData.endTime ||
+      updateData.dayOfWeek !== undefined
+    ) {
       const hasConflict = await this.checkTimeConflict(
         userId,
         updateData.dayOfWeek ?? block.dayOfWeek,
@@ -115,7 +157,9 @@ export class ScheduleService {
         blockId,
       );
       if (hasConflict) {
-        throw new BadRequestException('Time slot conflicts with an existing schedule block');
+        throw new BadRequestException(
+          'Time slot conflicts with an existing schedule block',
+        );
       }
     }
 
@@ -185,10 +229,10 @@ export class ScheduleService {
     return hours * 60 + minutes;
   }
 
-  private removeUndefined<T extends Record<string, any>>(data: T): T {
+  private removeUndefined<T extends Record<string, unknown>>(data: T): T {
     return Object.entries(data).reduce((acc, [key, value]) => {
       if (value !== undefined) {
-        acc[key as keyof T] = value;
+        acc[key as keyof T] = value as T[keyof T];
       }
       return acc;
     }, {} as T);
@@ -196,10 +240,19 @@ export class ScheduleService {
 
   async getWeeklySchedule(userId: string) {
     const blocks = await this.findAll(userId);
-    
+
     // Group by day
-    const weekSchedule: Record<number, any[]> = {
-      0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [],
+    const weekSchedule: Record<
+      number,
+      Awaited<ReturnType<typeof this.findAll>>
+    > = {
+      0: [],
+      1: [],
+      2: [],
+      3: [],
+      4: [],
+      5: [],
+      6: [],
     };
 
     blocks.forEach((block) => {

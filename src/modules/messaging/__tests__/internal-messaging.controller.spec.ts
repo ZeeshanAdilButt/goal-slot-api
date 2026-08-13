@@ -26,14 +26,16 @@ class FakePrisma {
 
   sharedAccess = {
     findFirst: async ({ where }: any) => {
-      const clauses: Array<{ ownerId: string; sharedWithId: string }> = where.OR;
+      const clauses: Array<{ ownerId: string; sharedWithId: string }> =
+        where.OR;
 
       const match = this.shares.find(
         (share) =>
           share.isAccepted === where.isAccepted &&
           clauses.some(
             (clause) =>
-              share.ownerId === clause.ownerId && share.sharedWithId === clause.sharedWithId,
+              share.ownerId === clause.ownerId &&
+              share.sharedWithId === clause.sharedWithId,
           ),
       );
 
@@ -54,7 +56,13 @@ class FakePrisma {
 function buildController() {
   const prisma = new FakePrisma();
   const config = new MessagingConfigService({
-    get: (key: string) => ({ CONVERSATION_GATE_SECRET: 'shared-secret' } as Record<string, unknown>)[key],
+    get: (key: string) =>
+      (
+        ({ CONVERSATION_GATE_SECRET: 'shared-secret' }) as Record<
+          string,
+          unknown
+        >
+      )[key],
   } as unknown as ConfigService);
   const tokens = new MessagingTokenService(config);
   // Unused by canCreateConversation - never mints a token or calls out to
@@ -72,7 +80,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     const { controller } = buildController();
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, STRANGER] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, STRANGER],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -81,7 +92,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(ME, STRANGER, false);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, STRANGER] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, STRANGER],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -91,7 +105,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(STRANGER, null, false);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, STRANGER] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, STRANGER],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -100,7 +117,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(ME, FRIEND, true);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, FRIEND] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, FRIEND],
+      }),
     ).resolves.toEqual({ allowed: true });
   });
 
@@ -109,7 +129,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(FRIEND, ME, true);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, FRIEND] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, FRIEND],
+      }),
     ).resolves.toEqual({ allowed: true });
   });
 
@@ -118,7 +141,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(FRIEND, STRANGER, true);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME, STRANGER] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME, STRANGER],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -127,7 +153,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     prisma.addShare(ME, FRIEND, true);
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [FRIEND, STRANGER] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [FRIEND, STRANGER],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -147,7 +176,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     const { controller } = buildController();
 
     await expect(
-      controller.canCreateConversation({ requesterId: ME, participantIds: [ME] }),
+      controller.canCreateConversation({
+        requesterId: ME,
+        participantIds: [ME],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 
@@ -159,7 +191,10 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
     // victim's id was learned from an invite response, not consent.
 
     await expect(
-      controller.canCreateConversation({ requesterId: attacker, participantIds: [attacker, victim] }),
+      controller.canCreateConversation({
+        requesterId: attacker,
+        participantIds: [attacker, victim],
+      }),
     ).resolves.toEqual({ allowed: false });
   });
 });

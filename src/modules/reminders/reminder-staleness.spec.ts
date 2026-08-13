@@ -1,4 +1,7 @@
-import { isInstructionReminderDue, isReportViewReminderDue } from './reminder-staleness';
+import {
+  isInstructionReminderDue,
+  isReportViewReminderDue,
+} from './reminder-staleness';
 
 const NOW = new Date('2026-08-11T00:00:00Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -25,13 +28,17 @@ describe('isReportViewReminderDue', () => {
   it('is not due when viewed 8 days ago but a reminder already went out 2 days ago', () => {
     const lastViewedAt = new Date('2026-08-03T00:00:00Z'); // 8 days before NOW
     const lastViewReminderAt = new Date('2026-08-09T00:00:00Z'); // 2 days before NOW
-    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(false);
+    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(
+      false,
+    );
   });
 
   it('is due again when viewed 8 days ago and the last reminder was itself 8 days ago', () => {
     const lastViewedAt = new Date('2026-08-03T00:00:00Z'); // 8 days before NOW
     const lastViewReminderAt = new Date('2026-08-03T00:00:00Z'); // 8 days before NOW
-    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(true);
+    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(
+      true,
+    );
   });
 
   // The staleness check is a >= comparison against 7 days, so the sweep
@@ -52,13 +59,17 @@ describe('isReportViewReminderDue', () => {
   it('is not due when the last reminder was 6.99 days ago, even though the view is long stale', () => {
     const lastViewedAt = new Date('2026-07-01T00:00:00Z'); // well past the 7-day staleness threshold
     const lastViewReminderAt = daysBeforeNow(6.99);
-    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(false);
+    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(
+      false,
+    );
   });
 
   it('is due when the last reminder was exactly 7.0 days ago', () => {
     const lastViewedAt = new Date('2026-07-01T00:00:00Z'); // well past the 7-day staleness threshold
     const lastViewReminderAt = daysBeforeNow(7);
-    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(true);
+    expect(isReportViewReminderDue(NOW, lastViewedAt, lastViewReminderAt)).toBe(
+      true,
+    );
   });
 });
 

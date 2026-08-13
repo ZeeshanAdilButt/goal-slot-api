@@ -126,12 +126,16 @@ describe('readConversationGateSecret', () => {
   });
 
   it('returns null for a blank value', () => {
-    expect(readConversationGateSecret(reader({ CONVERSATION_GATE_SECRET: '   ' }))).toBeNull();
+    expect(
+      readConversationGateSecret(reader({ CONVERSATION_GATE_SECRET: '   ' })),
+    ).toBeNull();
   });
 
   it('returns the trimmed secret when set', () => {
     expect(
-      readConversationGateSecret(reader({ CONVERSATION_GATE_SECRET: '  shared-secret  ' })),
+      readConversationGateSecret(
+        reader({ CONVERSATION_GATE_SECRET: '  shared-secret  ' }),
+      ),
     ).toBe('shared-secret');
   });
 });
@@ -146,7 +150,9 @@ describe('safeEqual', () => {
   });
 
   it('returns false for strings of different lengths without throwing', () => {
-    expect(() => safeEqual('short', 'a-much-longer-secret-value')).not.toThrow();
+    expect(() =>
+      safeEqual('short', 'a-much-longer-secret-value'),
+    ).not.toThrow();
     expect(safeEqual('short', 'a-much-longer-secret-value')).toBe(false);
   });
 

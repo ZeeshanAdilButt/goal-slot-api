@@ -17,13 +17,23 @@ export function isReportViewReminderDue(
   lastViewedAt: Date | null,
   lastViewReminderAt: Date | null,
 ): boolean {
-  const viewedStale = lastViewedAt === null || daysBetween(now, lastViewedAt) >= REPORT_STALE_AFTER_DAYS;
+  const viewedStale =
+    lastViewedAt === null ||
+    daysBetween(now, lastViewedAt) >= REPORT_STALE_AFTER_DAYS;
   if (!viewedStale) return false;
-  const reminderDue = lastViewReminderAt === null || daysBetween(now, lastViewReminderAt) >= REPORT_REMINDER_INTERVAL_DAYS;
+  const reminderDue =
+    lastViewReminderAt === null ||
+    daysBetween(now, lastViewReminderAt) >= REPORT_REMINDER_INTERVAL_DAYS;
   return reminderDue;
 }
 
 // True when a pending instruction is due its next nudge.
-export function isInstructionReminderDue(now: Date, lastReminderAt: Date | null): boolean {
-  return lastReminderAt === null || daysBetween(now, lastReminderAt) >= INSTRUCTION_REMINDER_INTERVAL_DAYS;
+export function isInstructionReminderDue(
+  now: Date,
+  lastReminderAt: Date | null,
+): boolean {
+  return (
+    lastReminderAt === null ||
+    daysBetween(now, lastReminderAt) >= INSTRUCTION_REMINDER_INTERVAL_DAYS
+  );
 }

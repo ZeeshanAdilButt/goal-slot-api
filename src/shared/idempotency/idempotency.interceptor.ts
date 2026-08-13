@@ -16,7 +16,10 @@ const HEADER = 'idempotency-key';
 export class IdempotencyInterceptor implements NestInterceptor {
   constructor(private readonly idempotency: IdempotencyService) {}
 
-  async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
+  async intercept(
+    context: ExecutionContext,
+    next: CallHandler,
+  ): Promise<Observable<unknown>> {
     const req = context.switchToHttp().getRequest();
     const key = req.headers?.[HEADER];
     const userId = req.user?.sub;
@@ -26,14 +29,19 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     const routePattern = `${req.method} ${req.route?.path ?? req.path}`;
-    const requestHash = this.idempotency.hashRequest(req.method, routePattern, req.body);
+    const requestHash = this.idempotency.hashRequest(
+      req.method,
+      routePattern,
+      req.body,
+    );
 
     const existing = await this.idempotency.find(key, userId);
     if (existing) {
       if (existing.requestHash !== requestHash) {
         throw new ConflictException({
           code: 'idempotency_key_reuse_with_different_payload',
-          message: 'This idempotency key was already used with a different request payload.',
+          message:
+            'This idempotency key was already used with a different request payload.',
         });
       }
       const res = context.switchToHttp().getResponse();

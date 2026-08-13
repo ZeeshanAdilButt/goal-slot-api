@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
@@ -10,8 +16,12 @@ import {
   AdminBulkAssignPlanDto,
   AdminSetEmailVerifiedDto,
 } from './dto/users.dto';
-import { BulkInviteDto, BulkInviteRow, BulkInviteResponse } from './dto/bulk-invite.dto';
-import { UserRole, UserType, PlanType } from '@prisma/client';
+import {
+  BulkInviteDto,
+  BulkInviteRow,
+  BulkInviteResponse,
+} from './dto/bulk-invite.dto';
+import { Prisma, User, UserRole, UserType, PlanType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { resolvePlanLimits } from '../auth/plan-limits';
 
@@ -24,7 +34,7 @@ export class UsersService {
     private emailService: EmailService,
   ) {}
 
-  private sanitizeUser(user: any) {
+  private sanitizeUser(user: User) {
     const { password, ...rest } = user;
     return {
       ...rest,
@@ -41,7 +51,11 @@ export class UsersService {
     if (requireSuperAdmin && admin.role !== UserRole.SUPER_ADMIN) {
       throw new ForbiddenException('Only super admin can perform this action');
     }
-    if (!requireSuperAdmin && admin.role !== UserRole.SUPER_ADMIN && admin.role !== UserRole.ADMIN) {
+    if (
+      !requireSuperAdmin &&
+      admin.role !== UserRole.SUPER_ADMIN &&
+      admin.role !== UserRole.ADMIN
+    ) {
       throw new ForbiddenException('Only admins can perform this action');
     }
     return admin;
@@ -101,7 +115,9 @@ export class UsersService {
     // allowed to mint a peer/superior account for themselves.
     await this.verifyAdmin(adminId, requestedRole === UserRole.SUPER_ADMIN);
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
     if (existingUser) {
       throw new BadRequestException('User with this email already exists');
     }
@@ -350,7 +366,11 @@ export class UsersService {
   }
 
   // Admin: Toggle user disabled status
-  async toggleUserStatus(adminId: string, userId: string, dto: AdminToggleUserStatusDto) {
+  async toggleUserStatus(
+    adminId: string,
+    userId: string,
+    dto: AdminToggleUserStatusDto,
+  ) {
     await this.verifyAdmin(adminId);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -392,7 +412,7 @@ export class UsersService {
 
   // Admin: Assign plan to user
   async assignPlan(adminId: string, userId: string, dto: AdminAssignPlanDto) {
-    const admin = await this.verifyAdmin(adminId);
+    await this.verifyAdmin(adminId);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -402,7 +422,7 @@ export class UsersService {
       throw new ForbiddenException('Internal users must remain on PRO plan');
     }
 
-    const updateData: any = {
+    const updateData: Prisma.UserUpdateInput = {
       plan: dto.plan,
       adminAssignedPlan: dto.plan,
       adminAssignedPlanAt: new Date(),
@@ -433,23 +453,25 @@ export class UsersService {
 
   // Admin: Bulk assign plan to users
   async bulkAssignPlan(adminId: string, dto: AdminBulkAssignPlanDto) {
-    const admin = await this.verifyAdmin(adminId);
+    await this.verifyAdmin(adminId);
 
     // Validate no internal users are being downgraded
     if (dto.plan !== PlanType.PRO) {
       const internalUsers = await this.prisma.user.findMany({
-        where: { 
+        where: {
           id: { in: dto.userIds },
-          userType: UserType.INTERNAL 
-        }
+          userType: UserType.INTERNAL,
+        },
       });
-      
+
       if (internalUsers.length > 0) {
-        throw new ForbiddenException(`Cannot downgrade internal users: ${internalUsers.map(u => u.email).join(', ')}`);
+        throw new ForbiddenException(
+          `Cannot downgrade internal users: ${internalUsers.map((u) => u.email).join(', ')}`,
+        );
       }
     }
 
-    const updateData: any = {
+    const updateData: Prisma.UserUpdateManyMutationInput = {
       plan: dto.plan,
       adminAssignedPlan: dto.plan,
       adminAssignedPlanAt: new Date(),
@@ -471,7 +493,11 @@ export class UsersService {
   }
 
   // Admin: Set email verification status
-  async setEmailVerified(adminId: string, userId: string, dto: AdminSetEmailVerifiedDto) {
+  async setEmailVerified(
+    adminId: string,
+    userId: string,
+    dto: AdminSetEmailVerifiedDto,
+  ) {
     await this.verifyAdmin(adminId);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -497,21 +523,25 @@ export class UsersService {
   async getUserStats(adminId: string) {
     await this.verifyAdmin(adminId);
 
-    const [totalUsers, activeUsers, disabledUsers, verifiedUsers, planCounts] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.user.count({ where: { isDisabled: false } }),
-      this.prisma.user.count({ where: { isDisabled: true } }),
-      this.prisma.user.count({ where: { emailVerified: true } }),
-      this.prisma.user.groupBy({
-        by: ['plan'],
-        _count: { plan: true },
-      }),
-    ]);
+    const [totalUsers, activeUsers, disabledUsers, verifiedUsers, planCounts] =
+      await Promise.all([
+        this.prisma.user.count(),
+        this.prisma.user.count({ where: { isDisabled: false } }),
+        this.prisma.user.count({ where: { isDisabled: true } }),
+        this.prisma.user.count({ where: { emailVerified: true } }),
+        this.prisma.user.groupBy({
+          by: ['plan'],
+          _count: { plan: true },
+        }),
+      ]);
 
-    const planCountsMap = planCounts.reduce((acc, curr) => {
-      acc[curr.plan] = curr._count.plan;
-      return acc;
-    }, {} as Record<string, number>);
+    const planCountsMap = planCounts.reduce(
+      (acc, curr) => {
+        acc[curr.plan] = curr._count.plan;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     return {
       totalUsers,
@@ -539,7 +569,7 @@ export class UsersService {
   private parseEmails(text: string): { valid: string[]; invalid: string[] } {
     // Split on any non-email-char boundary
     const tokens = text
-      .split(/[\s,;<>()\[\]"'\\]+/u)
+      .split(/[\s,;<>()[\]"'\\]+/u)
       .map((t) => t.trim().toLowerCase())
       .filter(Boolean);
     const valid = new Set<string>();
@@ -560,7 +590,10 @@ export class UsersService {
     return { valid: Array.from(valid), invalid };
   }
 
-  async bulkInvite(adminId: string, dto: BulkInviteDto): Promise<BulkInviteResponse> {
+  async bulkInvite(
+    adminId: string,
+    dto: BulkInviteDto,
+  ): Promise<BulkInviteResponse> {
     const targetRole = dto.role || UserRole.USER;
     // Same rule as createInternalUser: only a genuine SUPER_ADMIN can hand
     // out SUPER_ADMIN through this path. A plain ADMIN batch-inviting a
@@ -619,7 +652,10 @@ export class UsersService {
         // vouched, and grant unlimited PRO access (fellowship pattern).
         const tempPassword = randomBytes(24).toString('base64url');
         const hashed = await bcrypt.hash(tempPassword, 10);
-        const namePrefix = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        const namePrefix = email
+          .split('@')[0]
+          .replace(/[._-]+/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase());
 
         const created = await this.prisma.user.create({
           data: {
@@ -664,7 +700,10 @@ export class UsersService {
         rows.push({
           email,
           status: 'failed',
-          reason: err instanceof Error ? err.message : 'Unknown failure creating the account',
+          reason:
+            err instanceof Error
+              ? err.message
+              : 'Unknown failure creating the account',
         });
       }
     }

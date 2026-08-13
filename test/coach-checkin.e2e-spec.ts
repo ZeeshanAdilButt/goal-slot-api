@@ -1,4 +1,8 @@
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import * as http from 'http';
@@ -33,7 +37,10 @@ class FakePrisma {
       where,
     }: {
       where: { userId_date: { userId: string; date: string } };
-    }) => this.store.get(this.key(where.userId_date.userId, where.userId_date.date)) ?? null,
+    }) =>
+      this.store.get(
+        this.key(where.userId_date.userId, where.userId_date.date),
+      ) ?? null,
     findMany: async ({
       where,
       orderBy: _orderBy,
@@ -215,7 +222,9 @@ describe('CoachCheckinModule (e2e)', () => {
       userId: USER_B,
     });
     expect(today.status).toBe(200);
-    expect(today.body === null || today.body === '' || today.rawBody === '').toBe(true);
+    expect(
+      today.body === null || today.body === '' || today.rawBody === '',
+    ).toBe(true);
   });
 
   it('GET / returns user A check-ins only', async () => {

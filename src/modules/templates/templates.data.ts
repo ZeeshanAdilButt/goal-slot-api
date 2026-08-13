@@ -1,7 +1,4 @@
-import {
-  TemplateDefinition,
-  TemplateScheduleBlock,
-} from './templates.types';
+import { TemplateDefinition, TemplateScheduleBlock } from './templates.types';
 
 type BlockShape = Omit<TemplateScheduleBlock, 'dayOfWeek'>;
 
@@ -29,33 +26,153 @@ const SAT_SUN = [6, 0];
 // evening) map cleanly to the five Muslim daily prayers for users who want
 // to read them that way; the template does not assume anyone else has to.
 const WEEKDAY_SHAPE: BlockShape[] = [
-  { startTime: '03:30', endTime: '04:00', title: 'Wake Up + Gratitude + Cold Shower', goalRef: 'gratitude' },
-  { startTime: '04:00', endTime: '05:00', title: 'Dawn Practice + Sacred Reading', goalRef: 'spiritual' },
-  { startTime: '05:00', endTime: '09:00', title: 'Deep Focus: DSA + Problem Solving (Intermittent Fasting)', goalRef: 'dsa' },
-  { startTime: '09:00', endTime: '09:30', title: 'Breakfast + Mindset Talk', goalRef: 'mindset' },
-  { startTime: '09:30', endTime: '13:00', title: 'Tech Learning Block 1 (Course / Track)', goalRef: 'tech' },
-  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'writing' },
-  { startTime: '13:15', endTime: '13:45', title: 'Lunch + Engineering Conversation', goalRef: 'engineering' },
-  { startTime: '13:45', endTime: '17:00', title: 'Tech Learning Block 2 (Project Work)', goalRef: 'tech' },
-  { startTime: '17:00', endTime: '18:00', title: 'Late Afternoon Pause + Family Time', goalRef: 'family' },
-  { startTime: '18:00', endTime: '18:30', title: 'Dinner + Reflection Talk', goalRef: 'spiritual' },
-  { startTime: '18:30', endTime: '19:00', title: 'Evening Reflection + Writing Thoughts', goalRef: 'writing' },
-  { startTime: '19:00', endTime: '19:30', title: 'Sleep Like a Baby (wind down)', goalRef: 'gratitude' },
+  {
+    startTime: '03:30',
+    endTime: '04:00',
+    title: 'Wake Up + Gratitude + Cold Shower',
+    goalRef: 'gratitude',
+  },
+  {
+    startTime: '04:00',
+    endTime: '05:00',
+    title: 'Dawn Practice + Sacred Reading',
+    goalRef: 'spiritual',
+  },
+  {
+    startTime: '05:00',
+    endTime: '09:00',
+    title: 'Deep Focus: DSA + Problem Solving (Intermittent Fasting)',
+    goalRef: 'dsa',
+  },
+  {
+    startTime: '09:00',
+    endTime: '09:30',
+    title: 'Breakfast + Mindset Talk',
+    goalRef: 'mindset',
+  },
+  {
+    startTime: '09:30',
+    endTime: '13:00',
+    title: 'Tech Learning Block 1 (Course / Track)',
+    goalRef: 'tech',
+  },
+  {
+    startTime: '13:00',
+    endTime: '13:15',
+    title: 'Midday Pause + 15-min Walk in Sunlight',
+    goalRef: 'writing',
+  },
+  {
+    startTime: '13:15',
+    endTime: '13:45',
+    title: 'Lunch + Engineering Conversation',
+    goalRef: 'engineering',
+  },
+  {
+    startTime: '13:45',
+    endTime: '17:00',
+    title: 'Tech Learning Block 2 (Project Work)',
+    goalRef: 'tech',
+  },
+  {
+    startTime: '17:00',
+    endTime: '18:00',
+    title: 'Late Afternoon Pause + Family Time',
+    goalRef: 'family',
+  },
+  {
+    startTime: '18:00',
+    endTime: '18:30',
+    title: 'Dinner + Reflection Talk',
+    goalRef: 'spiritual',
+  },
+  {
+    startTime: '18:30',
+    endTime: '19:00',
+    title: 'Evening Reflection + Writing Thoughts',
+    goalRef: 'writing',
+  },
+  {
+    startTime: '19:00',
+    endTime: '19:30',
+    title: 'Sleep Like a Baby (wind down)',
+    goalRef: 'gratitude',
+  },
 ];
 
 const WEEKEND_SHAPE: BlockShape[] = [
-  { startTime: '03:30', endTime: '04:00', title: 'Wake Up + Gratitude + Cold Shower', goalRef: 'gratitude' },
-  { startTime: '04:00', endTime: '05:00', title: 'Dawn Practice + Sacred Reading', goalRef: 'spiritual' },
-  { startTime: '05:00', endTime: '08:00', title: 'Personal Time / DSA Revision', goalRef: 'dsa' },
-  { startTime: '08:00', endTime: '08:30', title: 'Breakfast + Mindset Talk', goalRef: 'mindset' },
-  { startTime: '08:30', endTime: '13:00', title: 'Tech Grind Block 1 (Course / Track)', goalRef: 'tech' },
-  { startTime: '13:00', endTime: '13:15', title: 'Midday Pause + 15-min Walk in Sunlight', goalRef: 'writing' },
-  { startTime: '13:15', endTime: '13:45', title: 'Lunch + Engineering Conversation', goalRef: 'engineering' },
-  { startTime: '13:45', endTime: '15:30', title: 'Tech Grind Block 2 (Project / Open Source)', goalRef: 'tech' },
-  { startTime: '15:30', endTime: '17:00', title: 'Late Afternoon Pause + Family Time', goalRef: 'family' },
-  { startTime: '17:00', endTime: '18:00', title: 'Dinner + Reflection Talk', goalRef: 'spiritual' },
-  { startTime: '18:00', endTime: '18:30', title: 'Evening Reflection + Writing Thoughts', goalRef: 'writing' },
-  { startTime: '18:30', endTime: '19:00', title: 'Sleep Like a Baby (wind down)', goalRef: 'gratitude' },
+  {
+    startTime: '03:30',
+    endTime: '04:00',
+    title: 'Wake Up + Gratitude + Cold Shower',
+    goalRef: 'gratitude',
+  },
+  {
+    startTime: '04:00',
+    endTime: '05:00',
+    title: 'Dawn Practice + Sacred Reading',
+    goalRef: 'spiritual',
+  },
+  {
+    startTime: '05:00',
+    endTime: '08:00',
+    title: 'Personal Time / DSA Revision',
+    goalRef: 'dsa',
+  },
+  {
+    startTime: '08:00',
+    endTime: '08:30',
+    title: 'Breakfast + Mindset Talk',
+    goalRef: 'mindset',
+  },
+  {
+    startTime: '08:30',
+    endTime: '13:00',
+    title: 'Tech Grind Block 1 (Course / Track)',
+    goalRef: 'tech',
+  },
+  {
+    startTime: '13:00',
+    endTime: '13:15',
+    title: 'Midday Pause + 15-min Walk in Sunlight',
+    goalRef: 'writing',
+  },
+  {
+    startTime: '13:15',
+    endTime: '13:45',
+    title: 'Lunch + Engineering Conversation',
+    goalRef: 'engineering',
+  },
+  {
+    startTime: '13:45',
+    endTime: '15:30',
+    title: 'Tech Grind Block 2 (Project / Open Source)',
+    goalRef: 'tech',
+  },
+  {
+    startTime: '15:30',
+    endTime: '17:00',
+    title: 'Late Afternoon Pause + Family Time',
+    goalRef: 'family',
+  },
+  {
+    startTime: '17:00',
+    endTime: '18:00',
+    title: 'Dinner + Reflection Talk',
+    goalRef: 'spiritual',
+  },
+  {
+    startTime: '18:00',
+    endTime: '18:30',
+    title: 'Evening Reflection + Writing Thoughts',
+    goalRef: 'writing',
+  },
+  {
+    startTime: '18:30',
+    endTime: '19:00',
+    title: 'Sleep Like a Baby (wind down)',
+    goalRef: 'gratitude',
+  },
 ];
 
 const DEV_WEEKENDS_WINNER_STUDY: TemplateDefinition = {
@@ -166,7 +283,7 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
       ref: 'writing',
       title: '100 Days of Writing',
       description:
-        'Capture one thought during the midday walk in sunlight. Write evening reflection nightly: today\'s wins, lessons, and intent for tomorrow. Target: 100 consecutive days of writing.',
+        "Capture one thought during the midday walk in sunlight. Write evening reflection nightly: today's wins, lessons, and intent for tomorrow. Target: 100 consecutive days of writing.",
       category: 'CREATIVE',
       color: '#dc2626',
       targetHours: 15,
@@ -187,44 +304,98 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
   tasks: [
     // ----- Cracking DSA: weekly cadence -----
     { goalRef: 'dsa', title: 'This week: solve 15 DSA problems --placeholder' },
-    { goalRef: 'dsa', title: 'This week: enter one weekend contest --placeholder' },
+    {
+      goalRef: 'dsa',
+      title: 'This week: enter one weekend contest --placeholder',
+    },
 
     // ----- Cracking Tech: 4 mega projects + slim curriculum + one stretch -----
     { goalRef: 'tech', title: 'Mega Project 1 of 4 --placeholder' },
     { goalRef: 'tech', title: 'Mega Project 2 of 4 --placeholder' },
     { goalRef: 'tech', title: 'Mega Project 3 of 4 --placeholder' },
-    { goalRef: 'tech', title: 'Mega Project 4 of 4 (capstone + case study) --placeholder' },
-    { goalRef: 'tech', title: 'Foundations: full stack basics (HTML / CSS / JS / React / Node / MongoDB) --placeholder' },
-    { goalRef: 'tech', title: 'Stretch: pick one (TypeScript, Next.js, DevOps, Prisma) --placeholder' },
+    {
+      goalRef: 'tech',
+      title: 'Mega Project 4 of 4 (capstone + case study) --placeholder',
+    },
+    {
+      goalRef: 'tech',
+      title:
+        'Foundations: full stack basics (HTML / CSS / JS / React / Node / MongoDB) --placeholder',
+    },
+    {
+      goalRef: 'tech',
+      title:
+        'Stretch: pick one (TypeScript, Next.js, DevOps, Prisma) --placeholder',
+    },
 
     // ----- Cracking Mindset (curator-picked talks + Book of the Month) -----
     { goalRef: 'mindset', title: 'This week: 5 mindset talks at breakfast' },
-    { goalRef: 'mindset', title: 'Book of the Month: Atomic Habits by James Clear' },
-    { goalRef: 'mindset', title: 'Talk of the Week: Build a Mind So Strong It Scares People' },
-    { goalRef: 'mindset', title: 'Talk of the Month: Bodybuilding for the Brain' },
+    {
+      goalRef: 'mindset',
+      title: 'Book of the Month: Atomic Habits by James Clear',
+    },
+    {
+      goalRef: 'mindset',
+      title: 'Talk of the Week: Build a Mind So Strong It Scares People',
+    },
+    {
+      goalRef: 'mindset',
+      title: 'Talk of the Month: Bodybuilding for the Brain',
+    },
     { goalRef: 'mindset', title: 'Watch: Junior Developers are Dead!' },
     { goalRef: 'mindset', title: 'Watch: The Power of Morning Routines' },
-    { goalRef: 'mindset', title: 'Watch: Exploring Life, Faith and Self (MindMaster Fridays EP 01)' },
+    {
+      goalRef: 'mindset',
+      title: 'Watch: Exploring Life, Faith and Self (MindMaster Fridays EP 01)',
+    },
     { goalRef: 'mindset', title: 'Watch: One Hour a Day Can Change Your Life' },
-    { goalRef: 'mindset', title: 'Watch: How to Achieve Your Most Ambitious Goals' },
-    { goalRef: 'mindset', title: 'Watch: The Puzzle of Motivation (Dan Pink, TED)' },
+    {
+      goalRef: 'mindset',
+      title: 'Watch: How to Achieve Your Most Ambitious Goals',
+    },
+    {
+      goalRef: 'mindset',
+      title: 'Watch: The Puzzle of Motivation (Dan Pink, TED)',
+    },
     { goalRef: 'mindset', title: 'Watch: The Purpose of Life' },
     { goalRef: 'mindset', title: 'Watch: Types of Hearts' },
     { goalRef: 'mindset', title: 'Capture one insight per talk' },
 
     // ----- Engineering Mastery (curator-picked shows) -----
-    { goalRef: 'engineering', title: 'This week: 5 engineering talks at lunch' },
+    {
+      goalRef: 'engineering',
+      title: 'This week: 5 engineering talks at lunch',
+    },
     { goalRef: 'engineering', title: 'Watch: Node.js Documentary' },
-    { goalRef: 'engineering', title: 'Watch: Hussein Nasser Backend Engineering Show (one episode per week)' },
-    { goalRef: 'engineering', title: 'Watch: NDC Conferences (rotating picks)' },
-    { goalRef: 'engineering', title: 'Watch: GOTO Conferences (rotating picks)' },
-    { goalRef: 'engineering', title: 'Watch: Day in life @ Google / Amazon / Meta' },
-    { goalRef: 'engineering', title: 'Write a one-paragraph takeaway after each talk' },
+    {
+      goalRef: 'engineering',
+      title:
+        'Watch: Hussein Nasser Backend Engineering Show (one episode per week)',
+    },
+    {
+      goalRef: 'engineering',
+      title: 'Watch: NDC Conferences (rotating picks)',
+    },
+    {
+      goalRef: 'engineering',
+      title: 'Watch: GOTO Conferences (rotating picks)',
+    },
+    {
+      goalRef: 'engineering',
+      title: 'Watch: Day in life @ Google / Amazon / Meta',
+    },
+    {
+      goalRef: 'engineering',
+      title: 'Write a one-paragraph takeaway after each talk',
+    },
 
     // ----- Spiritual Growth (curator-picked talks + daily practice) -----
     { goalRef: 'spiritual', title: 'This week: 5 spiritual talks at dinner' },
     { goalRef: 'spiritual', title: 'Watch: A Life of Khushu' },
-    { goalRef: 'spiritual', title: 'Watch: Quranic Gems by Nouman Ali Khan (one episode per week)' },
+    {
+      goalRef: 'spiritual',
+      title: 'Watch: Quranic Gems by Nouman Ali Khan (one episode per week)',
+    },
     { goalRef: 'spiritual', title: 'Watch: Sahaba Series by Omar Suleiman' },
     { goalRef: 'spiritual', title: 'Daily sacred reading' },
     { goalRef: 'spiritual', title: 'Weekly deeper study / commentary' },
@@ -232,8 +403,14 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     // ----- Amazing Family Relationships -----
     { goalRef: 'family', title: 'Daily: one intentional conversation' },
     { goalRef: 'family', title: 'Daily family dinner with a topic' },
-    { goalRef: 'family', title: 'Weekly: a small thing with a younger sibling' },
-    { goalRef: 'family', title: 'Monthly: a thoughtful message to a family member' },
+    {
+      goalRef: 'family',
+      title: 'Weekly: a small thing with a younger sibling',
+    },
+    {
+      goalRef: 'family',
+      title: 'Monthly: a thoughtful message to a family member',
+    },
 
     // ----- 100 Days of Gratitude -----
     { goalRef: 'gratitude', title: 'Daily morning: 3 things grateful for' },
@@ -244,7 +421,7 @@ All three sections (schedule, goals, tasks) are independent checkboxes on the im
     // ----- 100 Days of Writing -----
     { goalRef: 'writing', title: 'Daily midday: capture a walk thought' },
     { goalRef: 'writing', title: 'Daily evening: reflection writing' },
-    { goalRef: 'writing', title: 'Weekly: re-read the week\'s entries' },
+    { goalRef: 'writing', title: "Weekly: re-read the week's entries" },
   ],
 };
 

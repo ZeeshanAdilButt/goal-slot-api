@@ -212,11 +212,19 @@ export class ActiveTimerService {
     const openMs = session.segmentStartedAt
       ? Math.max(0, now.getTime() - session.segmentStartedAt.getTime())
       : 0;
-    const accumulatedMs = Math.min(session.accumulatedMs + openMs, MAX_ACCUMULATED_MS);
+    const accumulatedMs = Math.min(
+      session.accumulatedMs + openMs,
+      MAX_ACCUMULATED_MS,
+    );
 
     const { count } = await this.prisma.activeTimerSession.updateMany({
       where: { id: session.id, userId, status: 'RUNNING' },
-      data: { status: 'PAUSED', segmentStartedAt: null, pausedAt: now, accumulatedMs },
+      data: {
+        status: 'PAUSED',
+        segmentStartedAt: null,
+        pausedAt: now,
+        accumulatedMs,
+      },
     });
 
     // count === 0 means another request paused (or stopped) it between our
@@ -257,7 +265,8 @@ export class ActiveTimerService {
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.goalId !== undefined) data.goalId = dto.goalId;
     if (dto.taskId !== undefined) data.taskId = dto.taskId;
-    if (dto.scheduleBlockId !== undefined) data.scheduleBlockId = dto.scheduleBlockId;
+    if (dto.scheduleBlockId !== undefined)
+      data.scheduleBlockId = dto.scheduleBlockId;
     if (dto.client !== undefined) data.lastClient = dto.client;
 
     if (Object.keys(data).length === 0) return this.toResponse(session);
@@ -295,7 +304,9 @@ export class ActiveTimerService {
     const goalId = dto.goalId !== undefined ? dto.goalId : session.goalId;
     const taskId = dto.taskId !== undefined ? dto.taskId : session.taskId;
     const scheduleBlockId =
-      dto.scheduleBlockId !== undefined ? dto.scheduleBlockId : session.scheduleBlockId;
+      dto.scheduleBlockId !== undefined
+        ? dto.scheduleBlockId
+        : session.scheduleBlockId;
     const notes = dto.notes !== undefined ? dto.notes : session.notes;
 
     let taskTitle: string | null = null;
@@ -307,7 +318,8 @@ export class ActiveTimerService {
       taskTitle = task?.title ?? null;
     }
 
-    const explicitName = dto.taskName !== undefined ? dto.taskName : session.taskName;
+    const explicitName =
+      dto.taskName !== undefined ? dto.taskName : session.taskName;
     const taskName = explicitName?.trim() || taskTitle || DEFAULT_TASK_NAME;
 
     // `date` is the LOCAL CALENDAR DATE the session STARTED on, not the
@@ -375,7 +387,9 @@ export class ActiveTimerService {
    * the user a junk entry to go and delete.
    */
   async discard(userId: string) {
-    const { count } = await this.prisma.activeTimerSession.deleteMany({ where: { userId } });
+    const { count } = await this.prisma.activeTimerSession.deleteMany({
+      where: { userId },
+    });
     return { discarded: count > 0 };
   }
 
@@ -404,7 +418,11 @@ export class ActiveTimerService {
    */
   private async assertAttributionOwned(
     userId: string,
-    dto: { goalId?: string | null; taskId?: string | null; scheduleBlockId?: string | null },
+    dto: {
+      goalId?: string | null;
+      taskId?: string | null;
+      scheduleBlockId?: string | null;
+    },
   ) {
     const checks: Promise<void>[] = [];
 
@@ -431,7 +449,8 @@ export class ActiveTimerService {
         this.prisma.scheduleBlock
           .count({ where: { id: dto.scheduleBlockId, userId } })
           .then((n) => {
-            if (n === 0) throw new BadRequestException('Schedule block not found');
+            if (n === 0)
+              throw new BadRequestException('Schedule block not found');
           }),
       );
     }

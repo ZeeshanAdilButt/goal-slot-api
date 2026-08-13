@@ -1,12 +1,23 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateFeedbackDto, ArchiveFeedbackDto, ReplyFeedbackDto } from './dto/feedback.dto';
+import {
+  CreateFeedbackDto,
+  ArchiveFeedbackDto,
+  ReplyFeedbackDto,
+} from './dto/feedback.dto';
 import { Prisma, UserRole } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class FeedbackService {
-  constructor(private prisma: PrismaService, private notificationsService: NotificationsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async create(userId: string, dto: CreateFeedbackDto) {
     return this.prisma.feedback.create({
@@ -79,11 +90,17 @@ export class FeedbackService {
     return feedback;
   }
 
-  private assertCanAccessFeedback(feedback: any, userId: string, role: UserRole) {
+  private assertCanAccessFeedback(
+    feedback: Awaited<ReturnType<typeof this.findOne>>,
+    userId: string,
+    role: UserRole,
+  ) {
     const isOwner = feedback.userId === userId;
     const isAdmin = role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
     if (!isOwner && !isAdmin) {
-      throw new ForbiddenException('You are not allowed to access this feedback');
+      throw new ForbiddenException(
+        'You are not allowed to access this feedback',
+      );
     }
     return { isOwner, isAdmin };
   }
@@ -105,7 +122,12 @@ export class FeedbackService {
     return { feedback, responses };
   }
 
-  async addResponse(feedbackId: string, userId: string, role: UserRole, dto: ReplyFeedbackDto) {
+  async addResponse(
+    feedbackId: string,
+    userId: string,
+    role: UserRole,
+    dto: ReplyFeedbackDto,
+  ) {
     const feedback = await this.findOne(feedbackId);
     const { isAdmin } = this.assertCanAccessFeedback(feedback, userId, role);
 
@@ -135,7 +157,7 @@ export class FeedbackService {
   }
 
   async archive(id: string, adminUserId: string, dto: ArchiveFeedbackDto) {
-    const feedback = await this.findOne(id);
+    await this.findOne(id);
 
     return this.prisma.feedback.update({
       where: { id },
@@ -158,7 +180,7 @@ export class FeedbackService {
   }
 
   async delete(id: string) {
-    const feedback = await this.findOne(id);
+    await this.findOne(id);
 
     await this.prisma.feedback.delete({
       where: { id },

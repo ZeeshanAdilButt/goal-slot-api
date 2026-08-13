@@ -80,9 +80,7 @@ export class HealthController {
     const result = await this.healthService.getDetailedHealth();
 
     res.status(
-      result.status === 'down'
-        ? HttpStatus.SERVICE_UNAVAILABLE
-        : HttpStatus.OK,
+      result.status === 'down' ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.OK,
     );
 
     return result;

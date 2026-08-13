@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { CreateGoalDto, UpdateGoalDto, LabelInput } from './dto/goals.dto';
@@ -38,8 +38,15 @@ export class GoalsService {
    * categories like "SPIRITUAL" or "COMMUNITY" (that may not be on every
    * legacy user's default list) don't drop into a missing-category limbo.
    */
-  private async ensureCategoryExists(userId: string, value: string): Promise<void> {
-    const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  private async ensureCategoryExists(
+    userId: string,
+    value: string,
+  ): Promise<void> {
+    const normalized = value
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
     if (!normalized) return;
     const existing = await this.prisma.category.findFirst({
       where: { userId, value: normalized },
@@ -58,7 +65,9 @@ export class GoalsService {
       HEALTH: '#22C55E',
       EXERCISE: '#F97316',
     };
-    const color = PRESET_COLORS[normalized] || LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
+    const color =
+      PRESET_COLORS[normalized] ||
+      LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
     await this.prisma.category.create({
       data: {
         userId,
@@ -80,13 +89,17 @@ export class GoalsService {
   ): Promise<string> {
     const prisma = tx || this.prisma;
     const { name: labelName, color: providedColor } = labelInput;
-    const value = labelName.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-    
+    const value = labelName
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+
     // Check if label exists
     let label = await prisma.label.findFirst({
       where: { userId, value },
     });
-    
+
     if (!label) {
       // Auto-create the label with provided color or random Notion color
       const maxOrder = await prisma.label.findFirst({
@@ -94,9 +107,11 @@ export class GoalsService {
         orderBy: { order: 'desc' },
         select: { order: true },
       });
-      
-      const color = providedColor || LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
-      
+
+      const color =
+        providedColor ||
+        LABEL_COLORS[Math.floor(Math.random() * LABEL_COLORS.length)];
+
       label = await prisma.label.create({
         data: {
           name: labelName.trim(),
@@ -114,7 +129,7 @@ export class GoalsService {
         data: { color: providedColor },
       });
     }
-    
+
     return label.id;
   }
 
@@ -156,9 +171,11 @@ export class GoalsService {
       // Use transaction to ensure data integrity when creating labels and associations
       await this.prisma.$transaction(async (tx) => {
         const labelIds = await Promise.all(
-          labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput, tx))
+          labels.map((labelInput) =>
+            this.getOrCreateLabel(userId, labelInput, tx),
+          ),
         );
-        
+
         if (labelIds.length > 0) {
           await tx.goalLabel.createMany({
             data: labelIds.map((labelId) => ({
@@ -175,10 +192,10 @@ export class GoalsService {
 
   async findAll(userId: string, options: FindAllOptions = {}) {
     const { status, category, categories, labelIds } = options;
-    
-    const where: any = { userId };
+
+    const where: Prisma.GoalWhereInput = { userId };
     if (status) where.status = status;
-    
+
     // Support both single category and multiple categories
     if (categories && categories.length > 0) {
       where.category = { in: categories };
@@ -197,7 +214,6 @@ export class GoalsService {
 
     return this.prisma.goal.findMany({
       where,
-      // @ts-ignore
       orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
       include: {
         _count: {
@@ -258,15 +274,17 @@ export class GoalsService {
     if (labels !== undefined) {
       // Remove all existing labels
       await this.prisma.goalLabel.deleteMany({ where: { goalId } });
-      
+
       // Add new labels (auto-create if needed)
       if (labels.length > 0) {
         // Use transaction to ensure data integrity when creating labels and associations
         await this.prisma.$transaction(async (tx) => {
           const labelIds = await Promise.all(
-            labels.map((labelInput) => this.getOrCreateLabel(userId, labelInput, tx))
+            labels.map((labelInput) =>
+              this.getOrCreateLabel(userId, labelInput, tx),
+            ),
           );
-          
+
           if (labelIds.length > 0) {
             await tx.goalLabel.createMany({
               data: labelIds.map((labelId) => ({
@@ -332,7 +350,9 @@ export class GoalsService {
   async getStats(userId: string) {
     const [active, completed, paused] = await Promise.all([
       this.prisma.goal.count({ where: { userId, status: GoalStatus.ACTIVE } }),
-      this.prisma.goal.count({ where: { userId, status: GoalStatus.COMPLETED } }),
+      this.prisma.goal.count({
+        where: { userId, status: GoalStatus.COMPLETED },
+      }),
       this.prisma.goal.count({ where: { userId, status: GoalStatus.PAUSED } }),
     ]);
 
@@ -342,7 +362,6 @@ export class GoalsService {
   async reorder(userId: string, ids: string[]) {
     return this.prisma.$transaction(
       ids.map((id, index) =>
-        // @ts-ignore
         this.prisma.goal.updateMany({
           where: { id, userId },
           data: { order: index },

@@ -1,8 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { REMINDER_CHANNELS, ReminderChannel } from './reminder-channel.interface';
-import { isInstructionReminderDue, isReportViewReminderDue } from './reminder-staleness';
+import {
+  REMINDER_CHANNELS,
+  ReminderChannel,
+} from './reminder-channel.interface';
+import {
+  isInstructionReminderDue,
+  isReportViewReminderDue,
+} from './reminder-staleness';
 
 export interface ReminderDispatchContent {
   title: string;
@@ -32,13 +38,17 @@ export class ReminderDispatchService {
     try {
       await this.sweepStaleReports(now);
     } catch (error) {
-      this.logger.error(`Report-staleness sweep failed: ${(error as Error).message}`);
+      this.logger.error(
+        `Report-staleness sweep failed: ${(error as Error).message}`,
+      );
     }
 
     try {
       await this.sweepPendingInstructions(now);
     } catch (error) {
-      this.logger.error(`Pending-instructions sweep failed: ${(error as Error).message}`);
+      this.logger.error(
+        `Pending-instructions sweep failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -53,18 +63,25 @@ export class ReminderDispatchService {
     });
 
     const dueShares = shares.filter((share) =>
-      isReportViewReminderDue(now, share.lastViewedAt, share.lastViewReminderAt),
+      isReportViewReminderDue(
+        now,
+        share.lastViewedAt,
+        share.lastViewReminderAt,
+      ),
     );
 
     for (const share of dueShares) {
       try {
         const menteeName = share.owner?.name ?? 'a mentee';
-        const succeeded = await this.dispatchToUser(share.sharedWithId as string, {
-          title: `${menteeName}'s report needs a look`,
-          body: `You haven't checked ${menteeName}'s report in over a week.`,
-          data: { type: 'schedule', sharedAccessId: share.id },
-          notificationType: NotificationType.SHARED_REPORT_UNVIEWED,
-        });
+        const succeeded = await this.dispatchToUser(
+          share.sharedWithId as string,
+          {
+            title: `${menteeName}'s report needs a look`,
+            body: `You haven't checked ${menteeName}'s report in over a week.`,
+            data: { type: 'schedule', sharedAccessId: share.id },
+            notificationType: NotificationType.SHARED_REPORT_UNVIEWED,
+          },
+        );
 
         if (succeeded) {
           await this.prisma.sharedAccess.update({
@@ -114,7 +131,10 @@ export class ReminderDispatchService {
     now: Date,
   ): Promise<boolean> {
     try {
-      const succeeded = await this.dispatchToUser(instruction.assigneeId, this.buildInstructionContent(instruction));
+      const succeeded = await this.dispatchToUser(
+        instruction.assigneeId,
+        this.buildInstructionContent(instruction),
+      );
 
       if (succeeded) {
         await this.prisma.instruction.update({
@@ -132,7 +152,10 @@ export class ReminderDispatchService {
     }
   }
 
-  private buildInstructionContent(instruction: { id: string; title: string }): ReminderDispatchContent {
+  private buildInstructionContent(instruction: {
+    id: string;
+    title: string;
+  }): ReminderDispatchContent {
     return {
       title: `Reminder: ${instruction.title}`,
       body: `Your mentor is waiting on: ${instruction.title}`,
@@ -149,7 +172,10 @@ export class ReminderDispatchService {
    * not one of the injected channels - it is unconditional and does not
    * affect the return value.
    */
-  async dispatchToUser(userId: string, content: ReminderDispatchContent): Promise<boolean> {
+  async dispatchToUser(
+    userId: string,
+    content: ReminderDispatchContent,
+  ): Promise<boolean> {
     await this.createInAppNotification(userId, content);
 
     const results = await Promise.allSettled(
@@ -168,27 +194,36 @@ export class ReminderDispatchService {
       const channel = this.channels[index];
 
       if (result.status === 'rejected') {
-        this.logger.error(`Reminder channel "${channel.name}" threw for user ${userId}: ${result.reason}`);
+        this.logger.error(
+          `Reminder channel "${channel.name}" threw for user ${userId}: ${result.reason}`,
+        );
         return;
       }
 
       if (result.value.subscriptionGone) {
         // Deleting the dead subscription row belongs to the push-subscriptions
         // module in a later phase - this dispatcher only surfaces it.
-        this.logger.warn(`Reminder channel "${channel.name}" reports a gone subscription for user ${userId}`);
+        this.logger.warn(
+          `Reminder channel "${channel.name}" reports a gone subscription for user ${userId}`,
+        );
       }
 
       if (result.value.ok) {
         anySucceeded = true;
       } else {
-        this.logger.warn(`Reminder channel "${channel.name}" failed for user ${userId}`);
+        this.logger.warn(
+          `Reminder channel "${channel.name}" failed for user ${userId}`,
+        );
       }
     });
 
     return anySucceeded;
   }
 
-  private async createInAppNotification(userId: string, content: ReminderDispatchContent): Promise<void> {
+  private async createInAppNotification(
+    userId: string,
+    content: ReminderDispatchContent,
+  ): Promise<void> {
     try {
       await this.prisma.notification.create({
         data: {
@@ -202,7 +237,9 @@ export class ReminderDispatchService {
     } catch (error) {
       // The in-app row is a nice-to-have alongside the real channels, not a
       // gate on them - a failure here should not block email/push delivery.
-      this.logger.error(`Failed to create in-app notification for user ${userId}: ${(error as Error).message}`);
+      this.logger.error(
+        `Failed to create in-app notification for user ${userId}: ${(error as Error).message}`,
+      );
     }
   }
 }

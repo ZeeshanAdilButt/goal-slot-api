@@ -1,8 +1,17 @@
-import { IsString, IsNumber, IsOptional, IsDateString, IsUUID, Min } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsDateString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateTimeEntryDto {
-  @ApiPropertyOptional({ description: 'Client-generated id, enabling stable offline creation' })
+  @ApiPropertyOptional({
+    description: 'Client-generated id, enabling stable offline creation',
+  })
   @IsOptional()
   @IsUUID()
   id?: string;
@@ -25,12 +34,18 @@ export class CreateTimeEntryDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ example: '2025-12-02T09:00:00Z', description: 'When the work started' })
+  @ApiPropertyOptional({
+    example: '2025-12-02T09:00:00Z',
+    description: 'When the work started',
+  })
   @IsOptional()
   @IsDateString()
   startedAt?: string;
 
-  @ApiPropertyOptional({ example: 'Implement login page', description: 'Snapshot of task title' })
+  @ApiPropertyOptional({
+    example: 'Implement login page',
+    description: 'Snapshot of task title',
+  })
   @IsOptional()
   @IsString()
   taskTitle?: string;
@@ -45,7 +60,9 @@ export class CreateTimeEntryDto {
   @IsUUID()
   scheduleBlockId?: string;
 
-  @ApiPropertyOptional({ description: 'Link to a task (auto-set when completing tasks)' })
+  @ApiPropertyOptional({
+    description: 'Link to a task (auto-set when completing tasks)',
+  })
   @IsOptional()
   @IsUUID()
   taskId?: string;

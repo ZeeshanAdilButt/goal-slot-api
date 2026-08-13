@@ -45,4 +45,5 @@ export const DEFAULT_TASK_NAME = 'Untitled session';
 export const ACTIVE_SESSION_EXISTS = 'ACTIVE_TIMER_SESSION_EXISTS';
 
 /** Error code returned in the 409 body when a concurrent stop already won. */
-export const ACTIVE_SESSION_ALREADY_STOPPED = 'ACTIVE_TIMER_SESSION_ALREADY_STOPPED';
+export const ACTIVE_SESSION_ALREADY_STOPPED =
+  'ACTIVE_TIMER_SESSION_ALREADY_STOPPED';

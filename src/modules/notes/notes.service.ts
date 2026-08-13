@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
@@ -95,7 +100,9 @@ export class NotesService {
     if (dto.parentId) {
       const descendants = await this.getDescendantIds(id);
       if (descendants.includes(dto.parentId)) {
-        throw new ForbiddenException('Cannot move a note to its own descendant');
+        throw new ForbiddenException(
+          'Cannot move a note to its own descendant',
+        );
       }
     }
 
@@ -316,7 +323,13 @@ export class NotesService {
       orderBy: { createdAt: 'desc' },
       include: {
         note: {
-          select: { id: true, title: true, icon: true, color: true, updatedAt: true },
+          select: {
+            id: true,
+            title: true,
+            icon: true,
+            color: true,
+            updatedAt: true,
+          },
         },
         owner: {
           select: { id: true, name: true, email: true, avatar: true },

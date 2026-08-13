@@ -1,8 +1,19 @@
-import { Injectable, Logger, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
-import { InviteUserDto, CreatePublicLinkDto, PublicLinkResponse, AccessLevel } from './dto/sharing.dto';
+import {
+  InviteUserDto,
+  CreatePublicLinkDto,
+  PublicLinkResponse,
+  AccessLevel,
+} from './dto/sharing.dto';
 
 @Injectable()
 export class SharingService {
@@ -28,15 +39,14 @@ export class SharingService {
     const existingShare = await this.prisma.sharedAccess.findFirst({
       where: {
         ownerId,
-        OR: [
-          { inviteEmail: dto.email },
-          { sharedWith: { email: dto.email } },
-        ],
+        OR: [{ inviteEmail: dto.email }, { sharedWith: { email: dto.email } }],
       },
     });
 
     if (existingShare) {
-      throw new ConflictException('User already has access or pending invitation');
+      throw new ConflictException(
+        'User already has access or pending invitation',
+      );
     }
 
     // Check if user exists
@@ -76,7 +86,10 @@ export class SharingService {
         isExistingUser: !!invitedUser,
       });
       emailSent = true;
-    } catch (error) {}
+    } catch {
+      // Swallow send failures: the share itself still succeeds even if the
+      // invite email doesn't go out, so there's nothing to handle here.
+    }
 
     return {
       ...sharedAccess,
@@ -112,7 +125,8 @@ export class SharingService {
     // 2. If inviteEmail is set, it must match the user's email
     const isForThisUser =
       (invitation.sharedWithId && invitation.sharedWithId === userId) ||
-      (invitation.inviteEmail && invitation.inviteEmail.toLowerCase() === user.email.toLowerCase());
+      (invitation.inviteEmail &&
+        invitation.inviteEmail.toLowerCase() === user.email.toLowerCase());
 
     if (!isForThisUser) {
       throw new ForbiddenException('This invitation is not for you');
@@ -138,13 +152,17 @@ export class SharingService {
       this.prisma.sharedAccess.findMany({
         where: { sharedWithId: userId, isAccepted: true },
         include: {
-          owner: { select: { id: true, email: true, name: true, avatar: true } },
+          owner: {
+            select: { id: true, email: true, name: true, avatar: true },
+          },
         },
       }),
       this.prisma.sharedAccess.findMany({
         where: { ownerId: userId },
         include: {
-          sharedWith: { select: { id: true, email: true, name: true, avatar: true } },
+          sharedWith: {
+            select: { id: true, email: true, name: true, avatar: true },
+          },
         },
       }),
     ]);
@@ -163,7 +181,9 @@ export class SharingService {
     });
 
     if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this user\'s data');
+      throw new ForbiddenException(
+        "You do not have access to this user's data",
+      );
     }
 
     // Get owner's data. Private schedule blocks (and time entries
@@ -233,7 +253,9 @@ export class SharingService {
     return this.prisma.sharedAccess.findMany({
       where: { ownerId },
       include: {
-        sharedWith: { select: { id: true, email: true, name: true, avatar: true } },
+        sharedWith: {
+          select: { id: true, email: true, name: true, avatar: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -251,10 +273,7 @@ export class SharingService {
       where: {
         ownerId: { not: userId }, // Exclude invites created BY this user
         isAccepted: false,
-        OR: [
-          { inviteEmail: user.email },
-          { sharedWithId: userId },
-        ],
+        OR: [{ inviteEmail: user.email }, { sharedWithId: userId }],
       },
       include: {
         owner: { select: { id: true, email: true, name: true, avatar: true } },
@@ -315,7 +334,7 @@ export class SharingService {
           accepterName: user.name,
           accepterEmail: user.email,
         });
-      } catch (err: any) {
+      } catch (err) {
         // Logged here, swallowed for the request.
         this.logger.warn(
           `acceptInvite: notification email failed (accept succeeded): ${err?.message ?? err}`,
@@ -328,11 +347,11 @@ export class SharingService {
 
   async declineInvite(userId: string, inviteId: string) {
     // Get the current user's email
-    const user = await this.prisma.user.findUnique({ 
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true } 
+      select: { email: true },
     });
-    
+
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -341,10 +360,7 @@ export class SharingService {
     const invite = await this.prisma.sharedAccess.findFirst({
       where: {
         id: inviteId,
-        OR: [
-          { sharedWithId: userId },
-          { inviteEmail: user.email },
-        ],
+        OR: [{ sharedWithId: userId }, { inviteEmail: user.email }],
       },
     });
 
@@ -358,22 +374,22 @@ export class SharingService {
 
   async getSharedWithMe(userId: string) {
     return this.prisma.sharedAccess.findMany({
-      where: { 
-        sharedWithId: userId, 
-        isAccepted: true 
+      where: {
+        sharedWithId: userId,
+        isAccepted: true,
       },
       select: {
         id: true,
         ownerId: true,
         createdAt: true,
         accessLevel: true,
-        owner: { 
-          select: { 
-            id: true, 
-            email: true, 
-            name: true, 
-            avatar: true 
-          } 
+        owner: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            avatar: true,
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -381,10 +397,10 @@ export class SharingService {
   }
 
   async getSharedUserTimeEntries(
-    accessorId: string, 
-    ownerId: string, 
-    startDate: string, 
-    endDate: string
+    accessorId: string,
+    ownerId: string,
+    startDate: string,
+    endDate: string,
   ) {
     // Verify access
     const hasAccess = await this.prisma.sharedAccess.findFirst({
@@ -396,7 +412,9 @@ export class SharingService {
     });
 
     if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this user\'s data');
+      throw new ForbiddenException(
+        "You do not have access to this user's data",
+      );
     }
 
     const start = new Date(startDate);
@@ -415,7 +433,9 @@ export class SharingService {
         ],
       },
       include: {
-        goal: { select: { id: true, title: true, color: true, category: true } },
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
         task: { select: { id: true, title: true } },
       },
       orderBy: { date: 'desc' },
@@ -435,7 +455,9 @@ export class SharingService {
     });
 
     if (!hasAccess) {
-      throw new ForbiddenException('You do not have access to this user\'s data');
+      throw new ForbiddenException(
+        "You do not have access to this user's data",
+      );
     }
 
     return this.prisma.goal.findMany({
@@ -473,7 +495,7 @@ export class SharingService {
 
   async getPublicSharedData(token: string) {
     const share = await this.verifyPublicToken(token);
-    
+
     return {
       owner: share.owner,
       shareId: share.id,
@@ -486,7 +508,11 @@ export class SharingService {
     };
   }
 
-  async getPublicSharedTimeEntries(token: string, startDate: string, endDate: string) {
+  async getPublicSharedTimeEntries(
+    token: string,
+    startDate: string,
+    endDate: string,
+  ) {
     const share = await this.verifyPublicToken(token);
 
     const start = new Date(startDate);
@@ -504,7 +530,9 @@ export class SharingService {
         ],
       },
       include: {
-        goal: { select: { id: true, title: true, color: true, category: true } },
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
         task: { select: { id: true, title: true } },
       },
       orderBy: { date: 'desc' },
@@ -515,7 +543,7 @@ export class SharingService {
 
   async getPublicSharedGoals(token: string) {
     const share = await this.verifyPublicToken(token);
-    
+
     return this.prisma.goal.findMany({
       where: { userId: share.ownerId },
       orderBy: { createdAt: 'desc' },
@@ -524,7 +552,10 @@ export class SharingService {
 
   // ============ PUBLIC LINK MANAGEMENT ============
 
-  async createPublicLink(ownerId: string, dto: CreatePublicLinkDto): Promise<PublicLinkResponse> {
+  async createPublicLink(
+    ownerId: string,
+    dto: CreatePublicLinkDto,
+  ): Promise<PublicLinkResponse> {
     const token = uuidv4();
     const expiresInDays = dto.expiresInDays || 30;
     const expiresAt = new Date();
@@ -560,7 +591,7 @@ export class SharingService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return links.map(link => ({
+    return links.map((link) => ({
       id: link.id,
       publicLink: `/share/accept?token=${link.inviteToken}`,
       token: link.inviteToken,

@@ -18,7 +18,9 @@ class FakeResponse {
  */
 function build(queryRaw: () => Promise<unknown>) {
   const prisma = { $queryRaw: queryRaw } as any;
-  const supabase = { checkConnectivity: async () => ({ ok: true, latencyMs: 1 }) } as any;
+  const supabase = {
+    checkConnectivity: async () => ({ ok: true, latencyMs: 1 }),
+  } as any;
   const config = { get: () => undefined } as any;
 
   const service = new HealthService(prisma, supabase, config);

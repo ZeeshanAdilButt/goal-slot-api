@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
-import { CoachInsightStatus, Prisma } from '@prisma/client';
+import { CoachInsightKind, CoachInsightStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InsightStatusFilter } from './dto/list-insights.dto';
 
@@ -36,23 +36,27 @@ export class CoachInsightsService {
       sourceConversationId?: string;
     },
   ) {
-    if (!dto.title?.trim()) throw new HttpException('title is required', HttpStatus.BAD_REQUEST);
-    if (!dto.body?.trim()) throw new HttpException('body is required', HttpStatus.BAD_REQUEST);
+    if (!dto.title?.trim())
+      throw new HttpException('title is required', HttpStatus.BAD_REQUEST);
+    if (!dto.body?.trim())
+      throw new HttpException('body is required', HttpStatus.BAD_REQUEST);
     const now = new Date();
     return this.prisma.coachInsight.create({
       data: {
         userId,
-        kind: (dto.kind ?? 'SUGGESTION') as any,
+        kind: (dto.kind ?? 'SUGGESTION') as CoachInsightKind,
         title: dto.title.trim(),
         body: dto.body.trim(),
-        evidence: (dto.evidence ?? 'User-approved practice via Coach proposal').trim(),
+        evidence: (
+          dto.evidence ?? 'User-approved practice via Coach proposal'
+        ).trim(),
         suggestedAction: dto.suggestedAction?.trim() || null,
         mediaSlot: dto.mediaSlot?.trim() || null,
         mediaTopic: dto.mediaTopic?.trim() || null,
         scopeKey: dto.scopeKey?.trim() || '',
         sourceMessageId: dto.sourceMessageId ?? null,
         sourceConversationId: dto.sourceConversationId ?? null,
-        status: 'ACCEPTED' as any,
+        status: 'ACCEPTED' as CoachInsightStatus,
         acceptedAt: now,
       },
     });

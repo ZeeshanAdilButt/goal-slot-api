@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoachReflectionService } from './coach-reflection.service';
 import { GetReflectionQueryDto } from './dto/get-reflection.dto';
 import { UpsertGoalReflectionDto } from './dto/upsert-goal-reflection.dto';
+import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 @ApiTags('coach-reflection')
 @Controller('coach/goals/:goalId/reflections')
@@ -22,9 +23,12 @@ export class CoachReflectionController {
   constructor(private readonly reflectionService: CoachReflectionService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get the reflection for a goal+weekKey (defaults to current ISO week)' })
+  @ApiOperation({
+    summary:
+      'Get the reflection for a goal+weekKey (defaults to current ISO week)',
+  })
   async getOne(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('goalId') goalId: string,
     @Query() query: GetReflectionQueryDto,
   ) {
@@ -36,9 +40,11 @@ export class CoachReflectionController {
   }
 
   @Get('history')
-  @ApiOperation({ summary: 'Get up to 12 most-recent reflections for this goal' })
+  @ApiOperation({
+    summary: 'Get up to 12 most-recent reflections for this goal',
+  })
   async getHistory(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('goalId') goalId: string,
   ) {
     return this.reflectionService.getHistory(req.user.sub, goalId);
@@ -47,7 +53,7 @@ export class CoachReflectionController {
   @Post()
   @ApiOperation({ summary: 'Upsert a weekly reflection for this goal' })
   async upsert(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('goalId') goalId: string,
     @Body() dto: UpsertGoalReflectionDto,
   ) {

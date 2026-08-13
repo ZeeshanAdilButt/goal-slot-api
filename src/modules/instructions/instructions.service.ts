@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
 import { AssignInstructionDto } from './dto/instructions.dto';
@@ -28,7 +33,9 @@ export class InstructionsService {
     });
 
     if (!share) {
-      throw new ForbiddenException('You do not have accepted access to this user');
+      throw new ForbiddenException(
+        'You do not have accepted access to this user',
+      );
     }
 
     const instruction = await this.prisma.instruction.create({
@@ -47,7 +54,10 @@ export class InstructionsService {
     // notification delivery must never fail instruction creation, which has
     // already committed by this point. The sweep remains the safety net.
     try {
-      await this.reminderDispatchService.sendInstructionReminder(instruction, new Date());
+      await this.reminderDispatchService.sendInstructionReminder(
+        instruction,
+        new Date(),
+      );
     } catch (error) {
       this.logger.error(
         `Failed to send immediate reminder for instruction ${instruction.id}: ${(error as Error).message}`,
@@ -87,7 +97,9 @@ export class InstructionsService {
     }
 
     if (instruction.assigneeId !== callerId) {
-      throw new ForbiddenException('Only the assignee can complete this instruction');
+      throw new ForbiddenException(
+        'Only the assignee can complete this instruction',
+      );
     }
 
     return this.prisma.instruction.update({
