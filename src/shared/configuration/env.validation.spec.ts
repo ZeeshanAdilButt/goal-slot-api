@@ -37,7 +37,10 @@ function validEnv(): Record<string, string> {
 // NestJS ConfigModule validates with allowUnknown, so mirror that rather than
 // asserting against stricter rules than the app actually applies.
 function validate(env: Record<string, string | undefined>) {
-  return envValidationSchema.validate(env, { allowUnknown: true, abortEarly: false });
+  return envValidationSchema.validate(env, {
+    allowUnknown: true,
+    abortEarly: false,
+  });
 }
 
 /**
@@ -58,7 +61,8 @@ function parseEnvFile(contents: string): Record<string, string> {
     let value = match[2].trim();
     if (
       value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
     ) {
       value = value.slice(1, -1);
     }
@@ -77,7 +81,10 @@ describe('envValidationSchema', () => {
   // APP_URL and POSTHOG_HOST held prose where a URI was validated, and
   // BYOK_ENCRYPTION_KEY was blank against a required rule.
   it('accepts .env.example as shipped', () => {
-    const contents = readFileSync(join(__dirname, '../../../.env.example'), 'utf8');
+    const contents = readFileSync(
+      join(__dirname, '../../../.env.example'),
+      'utf8',
+    );
 
     const { error } = validate(parseEnvFile(contents));
 
@@ -100,7 +107,8 @@ describe('envValidationSchema', () => {
 
     it('accepts a comma-separated list', () => {
       const env = validEnv();
-      env.CORS_ORIGIN = 'https://www.goalslot.io,https://goalslot.io,http://localhost:3010';
+      env.CORS_ORIGIN =
+        'https://www.goalslot.io,https://goalslot.io,http://localhost:3010';
 
       expect(validate(env).error).toBeUndefined();
     });
@@ -116,15 +124,18 @@ describe('envValidationSchema', () => {
   describe('Stripe per-tier prices', () => {
     // Missing values used to fall back to the single STRIPE_PRICE_ID, so
     // every tier billed the same and nothing said so.
-    it.each(['STRIPE_PRICE_ID_BASIC', 'STRIPE_PRICE_ID_PRO'])('requires %s', (name) => {
-      const env = validEnv();
-      delete env[name];
+    it.each(['STRIPE_PRICE_ID_BASIC', 'STRIPE_PRICE_ID_PRO'])(
+      'requires %s',
+      (name) => {
+        const env = validEnv();
+        delete env[name];
 
-      const { error } = validate(env);
+        const { error } = validate(env);
 
-      expect(error).toBeDefined();
-      expect(error!.message).toContain(name);
-    });
+        expect(error).toBeDefined();
+        expect(error!.message).toContain(name);
+      },
+    );
   });
 
   describe('RESEND_API_KEY', () => {

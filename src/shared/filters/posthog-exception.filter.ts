@@ -39,19 +39,19 @@ const SENSITIVE_QUERY_PARAM_PATTERNS = [
   'signature',
   'session',
   'credential',
-]
+];
 
-const REDACTED = '[REDACTED]'
+const REDACTED = '[REDACTED]';
 
 // Anything longer than this in a query value is truncated before it leaves
 // the process, so an unrecognised parameter name cannot smuggle a large blob.
-const MAX_QUERY_VALUE_LENGTH = 200
+const MAX_QUERY_VALUE_LENGTH = 200;
 
 // Bounds for the JSON walker below. They mirror the inspect() options so the
 // two payloads that go to PostHog are limited the same way.
-const MAX_SERIALIZED_DEPTH = 4
-const MAX_SERIALIZED_STRING_LENGTH = 2000
-const MAX_SERIALIZED_ARRAY_LENGTH = 100
+const MAX_SERIALIZED_DEPTH = 4;
+const MAX_SERIALIZED_STRING_LENGTH = 2000;
+const MAX_SERIALIZED_ARRAY_LENGTH = 100;
 
 @Catch()
 export class PostHogExceptionFilter implements ExceptionFilter {
@@ -158,34 +158,44 @@ export class PostHogExceptionFilter implements ExceptionFilter {
    */
   private redactQueryParams(query: unknown, depth = 0): unknown {
     if (query == null || typeof query !== 'object') {
-      return this.clampQueryValue(query)
+      return this.clampQueryValue(query);
     }
 
     if (depth >= 3) {
-      return '[Truncated]'
+      return '[Truncated]';
     }
 
     if (Array.isArray(query)) {
-      return query.slice(0, 20).map((entry) => this.redactQueryParams(entry, depth + 1))
+      return query
+        .slice(0, 20)
+        .map((entry) => this.redactQueryParams(entry, depth + 1));
     }
 
-    const output: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(query as Record<string, unknown>)) {
-      output[key] = this.isSensitiveQueryParam(key) ? REDACTED : this.redactQueryParams(value, depth + 1)
+    const output: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(
+      query as Record<string, unknown>,
+    )) {
+      output[key] = this.isSensitiveQueryParam(key)
+        ? REDACTED
+        : this.redactQueryParams(value, depth + 1);
     }
-    return output
+    return output;
   }
 
   private isSensitiveQueryParam(name: string): boolean {
-    const lowered = name.toLowerCase()
-    return SENSITIVE_QUERY_PARAM_PATTERNS.some((pattern) => lowered.includes(pattern))
+    const lowered = name.toLowerCase();
+    return SENSITIVE_QUERY_PARAM_PATTERNS.some((pattern) =>
+      lowered.includes(pattern),
+    );
   }
 
   private clampQueryValue(value: unknown): unknown {
     if (typeof value !== 'string') {
-      return value
+      return value;
     }
-    return value.length > MAX_QUERY_VALUE_LENGTH ? `${value.slice(0, MAX_QUERY_VALUE_LENGTH)}...[truncated]` : value
+    return value.length > MAX_QUERY_VALUE_LENGTH
+      ? `${value.slice(0, MAX_QUERY_VALUE_LENGTH)}...[truncated]`
+      : value;
   }
 
   /**
@@ -193,7 +203,11 @@ export class PostHogExceptionFilter implements ExceptionFilter {
    * this walker undoes the bounding, because Object.getOwnPropertyNames pulls
    * in non-enumerable properties and it recursed forever.
    */
-  private toSerializable(value: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
+  private toSerializable(
+    value: unknown,
+    seen = new WeakSet<object>(),
+    depth = 0,
+  ): unknown {
     if (typeof value === 'bigint') {
       return value.toString();
     }
@@ -209,7 +223,7 @@ export class PostHogExceptionFilter implements ExceptionFilter {
     if (typeof value === 'string') {
       return value.length > MAX_SERIALIZED_STRING_LENGTH
         ? `${value.slice(0, MAX_SERIALIZED_STRING_LENGTH)}...[truncated]`
-        : value
+        : value;
     }
 
     if (typeof value !== 'object') {
@@ -221,25 +235,29 @@ export class PostHogExceptionFilter implements ExceptionFilter {
     }
 
     if (depth >= MAX_SERIALIZED_DEPTH) {
-      return '[Truncated: max depth]'
+      return '[Truncated: max depth]';
     }
 
-    seen.add(value)
+    seen.add(value);
 
     if (Array.isArray(value)) {
       return value
         .slice(0, MAX_SERIALIZED_ARRAY_LENGTH)
-        .map((entry) => this.toSerializable(entry, seen, depth + 1))
+        .map((entry) => this.toSerializable(entry, seen, depth + 1));
     }
 
     const output: Record<string, unknown> = {};
     for (const key of Object.getOwnPropertyNames(value)) {
       if (this.isSensitiveQueryParam(key)) {
-        output[key] = REDACTED
-        continue
+        output[key] = REDACTED;
+        continue;
       }
       try {
-        output[key] = this.toSerializable((value as Record<string, unknown>)[key], seen, depth + 1)
+        output[key] = this.toSerializable(
+          (value as Record<string, unknown>)[key],
+          seen,
+          depth + 1,
+        );
       } catch (error) {
         output[key] = `[Unserializable property: ${String(error)}]`;
       }
