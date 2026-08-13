@@ -6,6 +6,22 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { Resend } from "resend";
 
+// Every template below interpolates user-controlled strings (display
+// names, titles, emails) into HTML that gets sent from GoalSlot's
+// verified sending domain. Without escaping, a user could set their own
+// name to raw markup (e.g. a fake "GoalSlot Security" sender with an
+// embedded <a> tag) and have it delivered, SPF/DKIM/DMARC-clean, to
+// anyone they invite. Route every interpolated value through this before
+// it goes into an html string (plain-text bodies don't need it).
+function escapeHtml(value: string): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -16,20 +32,6 @@ export class EmailService {
     return `${local.slice(0, 2)}***@${domain}`;
   }
 
-  // Escapes the characters that matter for interpolating untrusted text
-  // into an HTML document: &, <, >, ", '. Anything sourced from another
-  // user (note/whiteboard titles, reminder titles/bodies pulled from
-  // instruction text, etc) must go through this before landing in
-  // bodyHtml — this file sends real GoalSlot-branded email, so unescaped
-  // input becomes a live phishing vector delivered by a trusted sender.
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
   private resend: Resend;
   private onboardingEmail: string;
   private notificationEmail: string;
@@ -167,15 +169,17 @@ export class EmailService {
   }) {
     const { toEmail, inviterName, inviterEmail, inviteToken, isExistingUser } =
       params;
+    const safeInviterName = escapeHtml(inviterName);
+    const safeInviterEmail = escapeHtml(inviterEmail);
 
     const viewLink = `${this.appUrl}/share/accept?token=${inviteToken}`;
 
     const html = this.renderLayout({
-      preheader: `${inviterName} shared their focus reports with you on GoalSlot.`,
+      preheader: `${safeInviterName} shared their focus reports with you on GoalSlot.`,
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">You have been invited to view focus reports</h1>
         <p style="margin:0 0 12px;color:#3f3f46;">
-          <strong>${inviterName}</strong> (${inviterEmail}) shared their GoalSlot focus reports and productivity data with you.
+          <strong>${safeInviterName}</strong> (${safeInviterEmail}) shared their GoalSlot focus reports and productivity data with you.
         </p>
         <p style="margin:0 0 4px;color:#3f3f46;">Click below to open the shared view:</p>
         ${this.renderButton(viewLink, "View shared reports")}
@@ -213,7 +217,7 @@ GoalSlot`;
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
-      subject: `${inviterName} shared their focus reports with you`,
+      subject: `${safeInviterName} shared their focus reports with you`,
       html,
       text,
     });
@@ -253,14 +257,16 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/notes?shared=${noteId}`;
-    const safeTitle = this.escapeHtml(noteTitle || "Untitled");
+    const safeTitle = escapeHtml(noteTitle || "Untitled");
+    const safeInviterName = escapeHtml(inviterName);
+    const safeInviterEmail = escapeHtml(inviterEmail);
 
     const html = this.renderLayout({
-      preheader: `${inviterName} shared a note with you on GoalSlot.`,
+      preheader: `${safeInviterName} shared a note with you on GoalSlot.`,
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">A note has been shared with you</h1>
         <p style="margin:0 0 6px;color:#3f3f46;">
-          <strong>${inviterName}</strong> (${inviterEmail}) shared a note with you on GoalSlot.
+          <strong>${safeInviterName}</strong> (${safeInviterEmail}) shared a note with you on GoalSlot.
         </p>
         ${this.renderTitleCard(safeTitle)}
         <p style="margin:0 0 4px;color:#3f3f46;">${
@@ -285,7 +291,7 @@ GoalSlot`;
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
-      subject: `${inviterName} shared a note with you on GoalSlot`,
+      subject: `${safeInviterName} shared a note with you on GoalSlot`,
       html,
       text,
     });
@@ -322,14 +328,16 @@ GoalSlot`;
       isExistingUser,
     } = params;
     const viewLink = `${this.appUrl}/dashboard/whiteboards?shared=${whiteboardId}`;
-    const safeTitle = this.escapeHtml(whiteboardTitle || "Untitled");
+    const safeTitle = escapeHtml(whiteboardTitle || "Untitled");
+    const safeInviterName = escapeHtml(inviterName);
+    const safeInviterEmail = escapeHtml(inviterEmail);
 
     const html = this.renderLayout({
-      preheader: `${inviterName} shared a whiteboard with you on GoalSlot.`,
+      preheader: `${safeInviterName} shared a whiteboard with you on GoalSlot.`,
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">A whiteboard has been shared with you</h1>
         <p style="margin:0 0 6px;color:#3f3f46;">
-          <strong>${inviterName}</strong> (${inviterEmail}) shared a whiteboard with you on GoalSlot.
+          <strong>${safeInviterName}</strong> (${safeInviterEmail}) shared a whiteboard with you on GoalSlot.
         </p>
         ${this.renderTitleCard(safeTitle)}
         <p style="margin:0 0 4px;color:#3f3f46;">${
@@ -352,7 +360,7 @@ GoalSlot`;
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
-      subject: `${inviterName} shared a whiteboard with you on GoalSlot`,
+      subject: `${safeInviterName} shared a whiteboard with you on GoalSlot`,
       html,
       text,
     });
@@ -379,6 +387,9 @@ GoalSlot`;
     role: string;
   }) {
     const { toEmail, inviterName, inviterEmail, role } = params;
+    const safeInviterName = escapeHtml(inviterName);
+    const safeInviterEmail = escapeHtml(inviterEmail);
+    const safeToEmail = escapeHtml(toEmail);
     const setPasswordLink = `${this.appUrl}/forgot-password?email=${encodeURIComponent(toEmail)}`;
     const loginLink = `${this.appUrl}/login`;
     const roleLine =
@@ -387,16 +398,16 @@ GoalSlot`;
         : "Your free Fellowship account is ready.";
 
     const html = this.renderLayout({
-      preheader: `${inviterName} invited you to GoalSlot.`,
+      preheader: `${safeInviterName} invited you to GoalSlot.`,
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">Welcome to GoalSlot</h1>
         <p style="margin:0 0 12px;color:#3f3f46;">
-          <strong>${inviterName}</strong> (${inviterEmail}) invited you to join GoalSlot. ${roleLine}
+          <strong>${safeInviterName}</strong> (${safeInviterEmail}) invited you to join GoalSlot. ${roleLine}
         </p>
         ${this.renderCallout({
           tone: "info",
           title: "Step 1 &ndash; Set your password",
-          html: `<p style="margin:0 0 4px;color:#3f3f46;">Use this email address (${toEmail}) when prompted.</p>
+          html: `<p style="margin:0 0 4px;color:#3f3f46;">Use this email address (${safeToEmail}) when prompted.</p>
             ${this.renderButton(setPasswordLink, "Set my password", "left")}`,
         })}
         ${this.renderCallout({
@@ -421,7 +432,7 @@ GoalSlot`;
     const result = await this.resend.emails.send({
       from: this.onboardingEmail,
       to: toEmail,
-      subject: `${inviterName} invited you to GoalSlot`,
+      subject: `${safeInviterName} invited you to GoalSlot`,
       html,
       text,
     });
@@ -527,7 +538,7 @@ GoalSlot`;
 
     const dashboardLink = `${this.appUrl}/dashboard`;
     const libraryLink = `${this.appUrl}/dashboard/library`;
-    const firstName = userName.split(" ")[0];
+    const firstName = escapeHtml(userName.split(" ")[0]);
 
     const html = this.renderLayout({
       preheader: `Welcome to GoalSlot, ${firstName}. Set up your first goal in two minutes.`,
@@ -595,13 +606,15 @@ GoalSlot`;
     accepterEmail: string;
   }) {
     const { toEmail, accepterName, accepterEmail } = params;
+    const safeAccepterName = escapeHtml(accepterName);
+    const safeAccepterEmail = escapeHtml(accepterEmail);
 
     const html = this.renderLayout({
-      preheader: `${accepterName} accepted your share invitation.`,
+      preheader: `${safeAccepterName} accepted your share invitation.`,
       bodyHtml: `
         <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">Invitation accepted</h1>
         <p style="margin:0 0 12px;color:#3f3f46;">
-          <strong>${accepterName}</strong> (${accepterEmail}) accepted your invitation and can now view your focus reports on GoalSlot.
+          <strong>${safeAccepterName}</strong> (${safeAccepterEmail}) accepted your invitation and can now view your focus reports on GoalSlot.
         </p>
         ${this.renderCallout({
           tone: "success",
@@ -628,7 +641,7 @@ GoalSlot`;
     const result = await this.resend.emails.send({
       from: this.notificationEmail,
       to: toEmail,
-      subject: `${accepterName} accepted your share invitation`,
+      subject: `${safeAccepterName} accepted your share invitation`,
       html,
       text,
     });
@@ -657,8 +670,8 @@ GoalSlot`;
     // AssignInstructionDto.title set by another user's mentor/mentee) and
     // are rendered live into HTML below — must be escaped the same as the
     // note/whiteboard share titles above.
-    const safeTitle = this.escapeHtml(title);
-    const safeBody = this.escapeHtml(body);
+    const safeTitle = escapeHtml(title);
+    const safeBody = escapeHtml(body);
 
     const html = this.renderLayout({
       preheader: safeBody,

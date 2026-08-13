@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, MinLength, IsEnum, IsBoolean, IsArray, ArrayMinSize, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsEmail, MinLength, MaxLength, IsEnum, IsBoolean, IsArray, ArrayMinSize, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, PlanType } from '@prisma/client';
 
@@ -15,6 +15,10 @@ export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'John Doe' })
   @IsOptional()
   @IsString()
+  // Display name gets echoed unescaped-length-wise into outbound emails
+  // (inviter name, accepter name, etc.) and various UI surfaces; cap it so
+  // a single field can't be turned into a wall of text.
+  @MaxLength(100)
   name?: string;
 
   @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg' })
