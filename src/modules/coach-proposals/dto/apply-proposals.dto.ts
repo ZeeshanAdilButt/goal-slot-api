@@ -34,6 +34,13 @@ export const COACH_ACTION_TYPES = [
   'CREATE_PRACTICE',
   'START_TIMER',
   'STOP_TIMER',
+  // Appends a paragraph to a day's journal entry (today's unless the payload
+  // names a date). Append-only by design — see
+  // CoachJournalService.appendContent. Mirrored client-side in
+  // goalslot-mobile's packages/shared/src/api/coach.ts, which keeps BOTH a
+  // type union and a runtime array; a type missing from that array is dropped
+  // before the user ever sees the card.
+  'APPEND_JOURNAL_ENTRY',
 ] as const;
 
 export type CoachActionType = (typeof COACH_ACTION_TYPES)[number];

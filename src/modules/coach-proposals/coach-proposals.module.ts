@@ -7,6 +7,7 @@ import { ScheduleModule } from '../schedule/schedule.module';
 import { TimeEntriesModule } from '../time-entries/time-entries.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { ActiveTimerModule } from '../active-timer/active-timer.module';
+import { CoachJournalModule } from '../coach-journal/coach-journal.module';
 import { UserThrottlerGuard } from '../coach-ai/user-throttler.guard';
 import { CoachProposalsController } from './coach-proposals.controller';
 import { CoachProposalsService } from './coach-proposals.service';
@@ -34,6 +35,11 @@ const PROPOSALS_APPLY_LIMIT = 60;
     TimeEntriesModule,
     TasksModule,
     ActiveTimerModule,
+    // Backs APPEND_JOURNAL_ENTRY. Imported for its exported
+    // CoachJournalService so the Coach writes through the same service the
+    // /coach/journal/entries endpoints use, rather than a Coach-only copy of
+    // the append rule.
+    CoachJournalModule,
     ThrottlerModule.forRoot([
       {
         name: 'coach-proposals',

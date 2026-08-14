@@ -14,6 +14,7 @@ import { CoachProposedAction } from './dto/apply-proposals.dto';
 // relation fields as uuids, so the spies have to hand back a real one for the
 // "$ref:N" back-reference path to stay representative.
 const CREATED_ID = '22222222-2222-4222-8222-222222222222';
+const JOURNAL_ENTRY_ID = '33333333-3333-4333-8333-333333333333';
 
 class SpyService {
   calls: Array<{ method: string; userId: string; id?: string; dto: any }> = [];
@@ -37,6 +38,11 @@ class SpyService {
     this.calls.push({ method: 'createAccepted', userId, dto });
     return { id: 'insight_1' };
   };
+
+  appendContent = async (userId: string, dto: any) => {
+    this.calls.push({ method: 'appendContent', userId, dto });
+    return { id: JOURNAL_ENTRY_ID };
+  };
 }
 
 class FakePrisma {
@@ -53,6 +59,7 @@ function buildService() {
   const tasks = new SpyService();
   const insights = new SpyService();
   const activeTimer = new SpyService();
+  const journal = new SpyService();
   const service = new CoachProposalsService(
     new FakePrisma() as any,
     goals as any,
@@ -61,6 +68,7 @@ function buildService() {
     tasks as any,
     insights as any,
     activeTimer as any,
+    journal as any,
   );
 
   return {
@@ -71,6 +79,7 @@ function buildService() {
     tasks,
     insights,
     activeTimer,
+    journal,
   };
 }
 
@@ -196,6 +205,85 @@ describe('CoachProposalsService payload validation', () => {
     expect(insights.calls[0].userId).toBe(ATTACKER);
   });
 
+  // The journal action is the newest write surface the Coach has, and the one
+  // whose payload looks most innocuous (no ids at all, just prose), so it gets
+  // the same cross-account cover every other action type has. The only thing
+  // standing between "append to my journal" and "append to someone else's" is
+  // that `userId` comes from the JWT and can never come from the payload.
+  it('rejects APPEND_JOURNAL_ENTRY that tries to write into another user journal', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Planted evidence.', userId: VICTIM },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('userId');
+    // Not "wrote to the caller's own row instead" — the action fails outright
+    // and the journal service is never reached.
+    expect(journal.calls).toHaveLength(0);
+  });
+
+  it('rejects an APPEND_JOURNAL_ENTRY payload carrying an entry id', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: {
+          content: 'Hello',
+          id: '99999999-9999-4999-8999-999999999999',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(journal.calls).toHaveLength(0);
+  });
+
+  it('rejects fields AppendJournalContentDto does not expose, such as mood', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Hello', mood: 5 },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('mood');
+    expect(journal.calls).toHaveLength(0);
+  });
+
+  it('rejects an APPEND_JOURNAL_ENTRY with a malformed date', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Hello', date: 'yesterday' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(journal.calls).toHaveLength(0);
+  });
+
+  it('rejects an APPEND_JOURNAL_ENTRY with nothing but whitespace to add', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      { type: 'APPEND_JOURNAL_ENTRY', payload: { content: '   ' } } as any,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(journal.calls).toHaveLength(0);
+  });
+
   it('one poisoned action does not stop the legitimate ones in the batch', async () => {
     const { service, goals } = buildService();
 
@@ -312,6 +400,43 @@ describe('CoachProposalsService still applies legitimate proposals', () => {
 
     expect(results[0].ok).toBe(false);
     expect(schedule.calls).toHaveLength(0);
+  });
+
+  it('applies APPEND_JOURNAL_ENTRY under the caller own id, with no date defaulting handled here', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Felt scattered all afternoon.' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0]).toMatchObject({ ok: true, resultId: JOURNAL_ENTRY_ID });
+    expect(journal.calls).toHaveLength(1);
+    // The one thing that must never come from the payload. The `date`
+    // fallback deliberately lives in CoachJournalService, not here.
+    expect(journal.calls[0].userId).toBe(ATTACKER);
+    expect(journal.calls[0].dto).toEqual({
+      content: 'Felt scattered all afternoon.',
+    });
+  });
+
+  it('passes an explicit date through to the journal service unchanged', async () => {
+    const { service, journal } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Monday was better.', date: '2026-08-10' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(true);
+    expect(journal.calls[0].dto).toEqual({
+      content: 'Monday was better.',
+      date: '2026-08-10',
+    });
   });
 
   it('still resolves $ref tokens across actions in one batch', async () => {

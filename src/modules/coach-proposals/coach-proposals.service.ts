@@ -13,6 +13,8 @@ import { TimeEntriesService } from '../time-entries/time-entries.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CoachInsightsService } from '../coach-insights/coach-insights.service';
 import { ActiveTimerService } from '../active-timer/active-timer.service';
+import { CoachJournalService } from '../coach-journal/coach-journal.service';
+import { AppendJournalContentDto } from '../coach-journal/dto/append-content.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGoalDto, UpdateGoalDto } from '../goals/dto/goals.dto';
 import {
@@ -75,6 +77,7 @@ const PAYLOAD_DTO_BY_ACTION: Partial<
   UPDATE_TASK: UpdateTaskDto,
   START_TIMER: StartTimerSessionDto,
   STOP_TIMER: StopTimerSessionDto,
+  APPEND_JOURNAL_ENTRY: AppendJournalContentDto,
 };
 
 /**
@@ -140,6 +143,7 @@ export class CoachProposalsService {
     private readonly tasks: TasksService,
     private readonly insights: CoachInsightsService,
     private readonly activeTimer: ActiveTimerService,
+    private readonly journal: CoachJournalService,
   ) {}
 
   async apply(
@@ -513,6 +517,42 @@ export class CoachProposalsService {
           payload as unknown as StopTimerSessionDto,
         );
         return stopped?.timeEntry?.id;
+      }
+
+      // -------- Journal --------
+      // Dispatches onto CoachJournalService, the SAME service backing
+      // /coach/journal/entries — deliberately not raw Prisma, so the append
+      // rule, the length ceiling and the [userId, date] scoping all live in
+      // one place and cannot drift from the journal's other writers.
+      //
+      // APPEND, NEVER REPLACE. The user has very likely already written
+      // something on the day being targeted, and an approved proposal card is
+      // a single click with no undo behind it. The voice fast-path's
+      // APPEND_JOURNAL intent has always appended (blank-line paragraph join,
+      // see appendJournalParagraph); this action produces a byte-identical
+      // result so a line added by the microphone and a line added here are
+      // indistinguishable in the entry.
+      //
+      // Ownership: `userId` is the JWT subject, and it is half of the
+      // JournalEntry [userId, date] composite unique, so the write can only
+      // ever reach this caller's own row. The payload carries no id at all —
+      // just content and an optional date — and AppendJournalContentDto is
+      // registered in PAYLOAD_DTO_BY_ACTION above, so `forbidNonWhitelisted`
+      // fails the action outright if the model (or a crafted request) tries
+      // to smuggle a `userId` in alongside them.
+      //
+      // Not in DESTRUCTIVE_COACH_ACTION_TYPES (action-safety.ts) for the same
+      // reason START_TIMER isn't: an append adds text and removes nothing, so
+      // the worst case is a paragraph the user deletes in the Journal tab.
+      case 'APPEND_JOURNAL_ENTRY': {
+        if (typeof payload.content !== 'string' || !payload.content.trim()) {
+          throw new Error('APPEND_JOURNAL_ENTRY requires payload.content');
+        }
+        const entry = await this.journal.appendContent(
+          userId,
+          payload as unknown as AppendJournalContentDto,
+        );
+        return entry?.id;
       }
 
       default:

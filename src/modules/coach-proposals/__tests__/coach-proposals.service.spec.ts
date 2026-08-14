@@ -1,5 +1,6 @@
 import { CoachProposalsService } from '../coach-proposals.service';
 import { ScheduleService } from '../../schedule/schedule.service';
+import { CoachJournalService } from '../../coach-journal/coach-journal.service';
 
 const USER = 'user-1';
 const OTHER_USER = 'user-2';
@@ -120,6 +121,51 @@ class FakePrisma {
       return row;
     },
   };
+
+  // --- journalEntry, for APPEND_JOURNAL_ENTRY ---------------------------
+  // Modelled on the real table's `@@unique([userId, date])`: every read and
+  // write below is keyed on the PAIR, which is exactly the property the
+  // ownership tests lean on. A fake that matched on `date` alone would make
+  // the cross-account test pass for the wrong reason.
+  journalEntries: Array<{
+    id: string;
+    userId: string;
+    date: string;
+    content: string;
+  }> = [];
+
+  addJournalEntry(userId: string, date: string, content: string) {
+    const row = { id: `je_${++this.seq}`, userId, date, content };
+    this.journalEntries.push(row);
+    return row;
+  }
+
+  journalEntry = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_date;
+      const row = this.journalEntries.find(
+        (j) => j.userId === key.userId && j.date === key.date,
+      );
+      return row ? { ...row } : null;
+    },
+
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.userId_date;
+      const row = this.journalEntries.find(
+        (j) => j.userId === key.userId && j.date === key.date,
+      );
+      if (row) {
+        Object.assign(row, update);
+        return { ...row };
+      }
+      const created = this.addJournalEntry(
+        create.userId,
+        create.date,
+        create.content ?? '',
+      );
+      return { ...created };
+    },
+  };
 }
 
 function buildServices() {
@@ -128,6 +174,10 @@ function buildServices() {
     checkPlanLimit: jest.fn().mockResolvedValue(undefined),
   };
   const schedule = new ScheduleService(prisma as any, authService as any);
+  // The REAL journal service against the fake table, not a spy: the append
+  // rule (blank-line paragraph join, never overwrite) is the behaviour under
+  // test here, and a spy would only prove the executor called something.
+  const journal = new CoachJournalService(prisma as any);
   const service = new CoachProposalsService(
     prisma as any,
     {} as any, // GoalsService - unused by these tests
@@ -136,8 +186,14 @@ function buildServices() {
     {} as any, // TasksService - unused
     {} as any, // CoachInsightsService - unused
     {} as any, // ActiveTimerService - unused
+    journal,
   );
   return { prisma, service };
+}
+
+/** The day the service falls back to when a payload carries no `date`. */
+function serverToday(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK stale id recovery', () => {
@@ -568,5 +624,174 @@ describe('CoachProposalsService - UPDATE_SCHEDULE_BLOCK wrong-block guard (valid
     ]);
 
     expect(results[0]).toMatchObject({ ok: true, resultId: block.id });
+  });
+});
+
+// The Coach can write to the journal (the user asked for this repeatedly, and
+// until now the system prompt had it declining). These run the executor
+// against the REAL CoachJournalService so they cover the actual append rule,
+// not a spy's idea of it.
+describe('CoachProposalsService - APPEND_JOURNAL_ENTRY', () => {
+  it('appends after existing content as its own paragraph, never replacing it', async () => {
+    const { prisma, service } = buildServices();
+    const existing = prisma.addJournalEntry(
+      USER,
+      '2026-08-14',
+      'Woke up late but Fajr was on time.',
+    );
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: {
+          content: 'Afternoon was scattered.',
+          date: '2026-08-14',
+        },
+      } as any,
+    ]);
+
+    expect(results[0]).toMatchObject({ ok: true, resultId: existing.id });
+    const row = prisma.journalEntries.find((j) => j.id === existing.id)!;
+    // Blank-line join, and the user's own words survive verbatim at the front
+    // — the whole reason this is an append and not an upsert of `content`.
+    expect(row.content).toBe(
+      'Woke up late but Fajr was on time.\n\nAfternoon was scattered.',
+    );
+  });
+
+  it('creates the day when the user has not written anything yet, with no leading blank line', async () => {
+    const { prisma, service } = buildServices();
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: {
+          content: 'First thing I have written today.',
+          date: '2026-08-14',
+        },
+      } as any,
+    ]);
+
+    expect(results[0].ok).toBe(true);
+    expect(prisma.journalEntries).toHaveLength(1);
+    expect(prisma.journalEntries[0]).toMatchObject({
+      userId: USER,
+      date: '2026-08-14',
+      content: 'First thing I have written today.',
+    });
+  });
+
+  it('defaults to today when the payload carries no date', async () => {
+    const { prisma, service } = buildServices();
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'No date given.' },
+      } as any,
+    ]);
+
+    expect(results[0].ok).toBe(true);
+    expect(prisma.journalEntries[0].date).toBe(serverToday());
+  });
+
+  it('trims the incoming paragraph so a dictated trailing newline never becomes blank space', async () => {
+    const { prisma, service } = buildServices();
+    prisma.addJournalEntry(USER, '2026-08-14', 'Line one.');
+
+    await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: '\n  Line two.  \n', date: '2026-08-14' },
+      } as any,
+    ]);
+
+    expect(prisma.journalEntries[0].content).toBe('Line one.\n\nLine two.');
+  });
+
+  it('stacks two appends in one batch in the order the user approved them', async () => {
+    const { prisma, service } = buildServices();
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'First.', date: '2026-08-14' },
+      } as any,
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Second.', date: '2026-08-14' },
+      } as any,
+    ]);
+
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(prisma.journalEntries).toHaveLength(1);
+    expect(prisma.journalEntries[0].content).toBe('First.\n\nSecond.');
+  });
+
+  // The IDOR shape that was found and fixed twice elsewhere in this codebase:
+  // a write that keys off something the caller supplied instead of the JWT
+  // subject. Here the only key the caller controls is `date`, and it is only
+  // ever half of the [userId, date] pair.
+  it('never touches another account entry for the same date', async () => {
+    const { prisma, service } = buildServices();
+    const theirs = prisma.addJournalEntry(
+      OTHER_USER,
+      '2026-08-14',
+      'Private to user-2.',
+    );
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Mine.', date: '2026-08-14' },
+      } as any,
+    ]);
+
+    expect(results[0].ok).toBe(true);
+    // Their row is byte-for-byte what it was.
+    expect(prisma.journalEntries.find((j) => j.id === theirs.id)!.content).toBe(
+      'Private to user-2.',
+    );
+    // And the caller got a brand new row of their own on the same date.
+    const mine = prisma.journalEntries.find(
+      (j) => j.userId === USER && j.date === '2026-08-14',
+    )!;
+    expect(mine).toBeDefined();
+    expect(mine.id).not.toBe(theirs.id);
+    expect(mine.content).toBe('Mine.');
+  });
+
+  it('refuses to grow an entry past the length the journal editor can save back', async () => {
+    const { prisma, service } = buildServices();
+    prisma.addJournalEntry(USER, '2026-08-14', 'x'.repeat(65_000));
+
+    const results = await service.apply(USER, [
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'y'.repeat(1000), date: '2026-08-14' },
+      } as any,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toMatch(/65535/);
+    // Refused, not truncated: the existing entry is untouched.
+    expect(prisma.journalEntries[0].content).toBe('x'.repeat(65_000));
+  });
+
+  it('reports a failed append per-action without taking the rest of the batch down', async () => {
+    const { prisma, service } = buildServices();
+
+    const results = await service.apply(USER, [
+      { type: 'APPEND_JOURNAL_ENTRY', payload: { content: '   ' } } as any,
+      {
+        type: 'APPEND_JOURNAL_ENTRY',
+        payload: { content: 'Real thought.', date: '2026-08-14' },
+      } as any,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[1].ok).toBe(true);
+    expect(prisma.journalEntries).toHaveLength(1);
+    expect(prisma.journalEntries[0].content).toBe('Real thought.');
   });
 });
