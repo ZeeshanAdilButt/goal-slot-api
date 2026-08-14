@@ -363,9 +363,9 @@ export class CoachProposalsService {
           const updated = await this.schedule.update(
             userId,
             action.id,
-            payload as any,
+            payload as unknown as UpdateScheduleBlockDto,
           );
-          return (updated as any)?.id ?? action.id;
+          return updated?.id ?? action.id;
         } catch (err) {
           if (!(err instanceof NotFoundException)) throw err;
           // The id the Coach was given has gone stale. schedule.service.ts never
@@ -409,9 +409,9 @@ export class CoachProposalsService {
           const updated = await this.schedule.update(
             userId,
             resolution.id,
-            payload as any,
+            payload as unknown as UpdateScheduleBlockDto,
           );
-          return (updated as any)?.id ?? resolution.id;
+          return updated?.id ?? resolution.id;
         }
       }
       case 'DELETE_SCHEDULE_BLOCK': {
