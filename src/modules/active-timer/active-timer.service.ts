@@ -359,7 +359,17 @@ export class ActiveTimerService {
           scheduleBlockId: scheduleBlockId ?? undefined,
           source: 'TRACKER',
         },
-        include: { goal: true },
+        // Trimmed to match ATTRIBUTION_INCLUDE's goal shape (and
+        // TimeEntriesService's own create/update) rather than pulling the
+        // entire Goal row — every reader of this response only ever uses
+        // id/title/color/category, and the full row leaks fields like
+        // loggedHours/targetHours/deadline that have no reason to ride along
+        // on a stop() response.
+        include: {
+          goal: {
+            select: { id: true, title: true, color: true, category: true },
+          },
+        },
       });
     });
 

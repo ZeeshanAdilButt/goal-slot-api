@@ -1,4 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TimeEntriesService } from './time-entries.service';
 
 // Regression cover for the time-entry IDOR.
@@ -36,6 +38,10 @@ class FakePrisma {
 
   created: any[] = [];
   updated: any[] = [];
+  // Full call args (not just `data`), so tests can assert on `include`/
+  // `select` shape without changing what create/update return.
+  createCalls: any[] = [];
+  updateCalls: any[] = [];
 
   private match(rows: Row[], where: any) {
     return (
@@ -62,11 +68,14 @@ class FakePrisma {
   timeEntry = {
     findFirst: async ({ where }: any) => this.match(this.entries, where),
     count: async () => 0,
-    create: async ({ data }: any) => {
-      this.created.push(data);
-      return { id: 'new-entry', ...data };
+    create: async (args: any) => {
+      this.createCalls.push(args);
+      this.created.push(args.data);
+      return { id: 'new-entry', ...args.data };
     },
-    update: async ({ where, data }: any) => {
+    update: async (args: any) => {
+      const { where, data } = args;
+      this.updateCalls.push(args);
       this.updated.push({ where, data });
       return { id: where.id, ...data };
     },
@@ -190,5 +199,98 @@ describe('TimeEntriesService relation ownership', () => {
     expect(goals.progressCalls).toEqual([
       { goalId: OWN_GOAL, userId: ATTACKER },
     ]);
+  });
+});
+
+// Regression cover for the over-fetch fix: create/update used to say
+// `include: { goal: true }`, pulling the entire Goal row (description,
+// loggedHours, targetHours, deadline, templateId, ...) into every response
+// even though callers only ever read id/title/color/category off it (see
+// findByDateRange/getRecentEntries below, which already scoped their
+// selects). Asserting the exact `select` shape here means a future revert
+// back to `goal: true` fails this test instead of shipping unnoticed.
+describe('TimeEntriesService goal over-fetch', () => {
+  const GOAL_SELECT = {
+    id: true,
+    title: true,
+    color: true,
+    category: true,
+  };
+
+  it('create() selects only the fields the response actually uses off goal', async () => {
+    const { prisma, service } = buildService();
+
+    await service.create(ATTACKER, {
+      ...baseCreate,
+      goalId: OWN_GOAL,
+    } as any);
+
+    expect(prisma.createCalls).toHaveLength(1);
+    expect(prisma.createCalls[0].include).toEqual({
+      goal: { select: GOAL_SELECT },
+    });
+  });
+
+  it('update() selects only the fields the response actually uses off goal', async () => {
+    const { prisma, service } = buildService();
+    prisma.entries[0].goalId = OWN_GOAL;
+
+    await service.update(ATTACKER, OWN_ENTRY, { duration: 45 } as any);
+
+    expect(prisma.updateCalls).toHaveLength(1);
+    expect(prisma.updateCalls[0].include).toEqual({
+      goal: { select: GOAL_SELECT },
+    });
+  });
+});
+
+// Regression cover for the missing-index fix: TimeEntry is filtered by
+// `{ userId, date: {...} }` together in the overwhelming majority of hot-path
+// queries (reports.service.ts, this service's own aggregates/list endpoints,
+// the daily-entry-limit checks in tasks/active-timer, sharing.service.ts,
+// coach-ai.service.ts) but previously only had separate single-column
+// indexes on userId and on date. This checks the compound index is declared
+// in the schema AND shipped as a committed migration, so a future schema
+// edit that drops it (or a migration that never got generated) fails here
+// instead of silently regressing query plans in production.
+describe('TimeEntry userId+date compound index', () => {
+  it('is declared on the TimeEntry model in schema.prisma', () => {
+    const schema = fs.readFileSync(
+      path.join(__dirname, '..', '..', '..', 'prisma', 'schema.prisma'),
+      'utf8',
+    );
+    const model = schema.slice(
+      schema.indexOf('model TimeEntry {'),
+      schema.indexOf('// A timer that is currently running'),
+    );
+
+    expect(model).toContain('@@index([userId, date])');
+  });
+
+  it('ships a committed migration that creates the index', () => {
+    const migrationsDir = path.join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'prisma',
+      'migrations',
+    );
+    const sql = fs
+      .readdirSync(migrationsDir)
+      .filter((entry) =>
+        fs.existsSync(path.join(migrationsDir, entry, 'migration.sql')),
+      )
+      .map((entry) =>
+        fs.readFileSync(
+          path.join(migrationsDir, entry, 'migration.sql'),
+          'utf8',
+        ),
+      )
+      .join('\n');
+
+    expect(sql).toContain(
+      'CREATE INDEX "TimeEntry_userId_date_idx" ON "TimeEntry"("userId", "date")',
+    );
   });
 });

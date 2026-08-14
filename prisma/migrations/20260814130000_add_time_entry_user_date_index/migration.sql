@@ -1,0 +1,21 @@
+-- Performance: compound index backing the userId+date filter that nearly
+-- every hot-path TimeEntry query uses together (dashboard stats, every
+-- report in reports.service.ts, time-entries.service.ts's list/aggregate
+-- endpoints, the daily-entry-limit checks in active-timer.service.ts and
+-- tasks.service.ts, sharing.service.ts's shared-report views, and
+-- coach-ai.service.ts's recent-activity lookup).
+--
+-- Previously TimeEntry only had separate single-column indexes on userId and
+-- on date, so Postgres could use at most one of them for these queries and
+-- had to re-check the other predicate row-by-row. This lets it satisfy both
+-- in one index scan. The existing [userId] index is left in place for the
+-- callers that filter by userId alone (e.g. sharing.service.ts's owner
+-- dashboard).
+--
+-- Generated offline with `prisma migrate diff --from-schema <previous>
+-- --to-schema prisma/schema.prisma --script` -- no database was contacted.
+-- Purely additive (CREATE INDEX only), so it is safe to apply with
+-- `prisma migrate deploy` while older instances are still rolling out.
+
+-- CreateIndex
+CREATE INDEX "TimeEntry_userId_date_idx" ON "TimeEntry"("userId", "date");

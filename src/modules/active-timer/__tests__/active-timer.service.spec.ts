@@ -102,10 +102,17 @@ class FakePrisma {
     },
   };
 
+  // Full call args of the last timeEntry.create, so tests can assert on
+  // `include`/`select` shape (over-fetch regression cover) without changing
+  // what create returns.
+  lastTimeEntryCreateArgs: any = null;
+
   timeEntry = {
     count: async ({ where }: any) =>
       this.timeEntries.filter((e) => e.userId === where.userId).length,
-    create: async ({ data }: any) => {
+    create: async (args: any) => {
+      this.lastTimeEntryCreateArgs = args;
+      const { data } = args;
       if (this.failNextTimeEntryCreate) {
         this.failNextTimeEntryCreate = false;
         throw new Error('simulated insert failure');
@@ -585,6 +592,29 @@ describe('ActiveTimerService', () => {
       expect(result.timeEntry.goalId).toBe('goal-1');
       expect(result.timeEntry.source).toBe('TRACKER');
       expect(await service.getActive(USER)).toBeNull();
+    });
+
+    // Regression cover for the over-fetch fix: this used to say
+    // `include: { goal: true }`, pulling the entire Goal row (description,
+    // loggedHours, targetHours, deadline, templateId, ...) into every stop()
+    // response even though every reader of it only uses
+    // id/title/color/category (same shape as ATTRIBUTION_INCLUDE and
+    // TimeEntriesService's own create/update). Asserting the exact `select`
+    // here means a future revert back to `goal: true` fails this test
+    // instead of shipping unnoticed.
+    it('selects only the fields the response actually uses off the entry goal', async () => {
+      const { prisma, service } = build();
+      prisma.goals.push({ id: 'goal-1', userId: USER });
+      await service.start(USER, { goalId: 'goal-1' });
+      at('2026-08-12T10:30:00.000Z');
+
+      await service.stop(USER, {});
+
+      expect(prisma.lastTimeEntryCreateArgs.include).toEqual({
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
+      });
     });
 
     it('dates the entry from when the session started, not when it stopped, while preserving the exact startedAt instant', async () => {

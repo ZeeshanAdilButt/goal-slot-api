@@ -165,6 +165,15 @@ model TimeEntry {
   @@index([userId])
   @@index([date])
   @@index([goalId])
+  // Nearly every report/dashboard/limit-check query filters by userId AND a
+  // date range in the same where clause (reports.service.ts x7,
+  // time-entries.service.ts x4, active-timer/tasks daily-limit checks,
+  // sharing.service.ts, coach-ai.service.ts). The separate single-column
+  // [userId] and [date] indexes force Postgres to pick one and re-check the
+  // other row-by-row; this compound index lets it satisfy both predicates
+  // directly. Leaves [userId] in place for the handful of callers (e.g.
+  // sharing.service.ts's owner dashboard) that filter by userId alone.
+  @@index([userId, date])
 }
 
 // A timer that is currently running (or paused) for a user.

@@ -112,8 +112,15 @@ export class TimeEntriesService {
         taskTitle,
         startedAt,
       },
+      // Trimmed to the fields every other reader of TimeEntry.goal in this
+      // service uses (see findByDateRange/getRecentEntries below) — `goal:
+      // true` was pulling the entire Goal row (description, loggedHours,
+      // targetHours, deadline, templateId, ...) into every create response
+      // even though only id/title/color/category are ever read off it.
       include: {
-        goal: true,
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
       },
     });
 
@@ -196,7 +203,12 @@ export class TimeEntriesService {
         startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
         taskTitle,
       },
-      include: { goal: true },
+      // Same trim as create() above, for the same reason.
+      include: {
+        goal: {
+          select: { id: true, title: true, color: true, category: true },
+        },
+      },
     });
 
     if (dto.duration !== undefined || dto.goalId !== undefined) {
