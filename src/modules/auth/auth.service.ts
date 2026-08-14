@@ -609,6 +609,18 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new ForbiddenException('User not found');
 
+    return this.checkPlanLimitForUser(user, limitType, currentCount);
+  }
+
+  // Same check as checkPlanLimit, but for callers that already have the User
+  // row in hand (typically because they fetched it themselves to run
+  // concurrently with other independent queries). Lets them avoid a second
+  // `user.findUnique` round-trip just to re-derive plan limits.
+  checkPlanLimitForUser(
+    user: User,
+    limitType: 'goals' | 'schedules' | 'tasksPerDay',
+    currentCount: number,
+  ) {
     const limits = resolvePlanLimits(user);
 
     const limitMap = {

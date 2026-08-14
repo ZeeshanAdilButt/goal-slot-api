@@ -33,31 +33,38 @@ export class TimeEntriesService {
     scheduleBlockId?: string | null,
     taskId?: string | null,
   ) {
-    if (goalId) {
-      const goal = await this.prisma.goal.findFirst({
-        where: { id: goalId, userId },
-      });
-      if (!goal)
-        throw new ForbiddenException('Goal not found or access denied');
+    // The three ownership checks are independent of each other, so they run
+    // concurrently instead of one round-trip after another. Promise.all
+    // resolves only once every query is in, so it doesn't by itself decide
+    // which failure gets reported when more than one relation is invalid —
+    // that's still decided by the sequential goal -> scheduleBlock -> task
+    // checks below, in the same precedence the old sequential-await version
+    // had (first offending relation in argument order wins, regardless of
+    // which query happened to come back from the DB first).
+    const [goal, block, task] = await Promise.all([
+      goalId
+        ? this.prisma.goal.findFirst({ where: { id: goalId, userId } })
+        : Promise.resolve(undefined),
+      scheduleBlockId
+        ? this.prisma.scheduleBlock.findFirst({
+            where: { id: scheduleBlockId, userId },
+          })
+        : Promise.resolve(undefined),
+      taskId
+        ? this.prisma.task.findFirst({ where: { id: taskId, userId } })
+        : Promise.resolve(undefined),
+    ]);
+
+    if (goalId && !goal) {
+      throw new ForbiddenException('Goal not found or access denied');
     }
 
-    if (scheduleBlockId) {
-      const block = await this.prisma.scheduleBlock.findFirst({
-        where: { id: scheduleBlockId, userId },
-      });
-      if (!block) {
-        throw new ForbiddenException(
-          'Schedule block not found or access denied',
-        );
-      }
+    if (scheduleBlockId && !block) {
+      throw new ForbiddenException('Schedule block not found or access denied');
     }
 
-    if (taskId) {
-      const task = await this.prisma.task.findFirst({
-        where: { id: taskId, userId },
-      });
-      if (!task)
-        throw new ForbiddenException('Task not found or access denied');
+    if (taskId && !task) {
+      throw new ForbiddenException('Task not found or access denied');
     }
   }
 
@@ -73,29 +80,48 @@ export class TimeEntriesService {
     const dayOfWeek = date.getDay();
     const startedAt = dto.startedAt ? new Date(dto.startedAt) : date;
 
-    let taskTitle = dto.taskTitle;
-    if (dto.taskId && !taskTitle) {
-      const task = await this.prisma.task.findFirst({
-        where: { id: dto.taskId, userId },
-        select: { title: true },
-      });
-      taskTitle = task?.title;
-    }
-
     // Check daily task limit
     const todayStart = new Date(date);
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(date);
     todayEnd.setHours(23, 59, 59, 999);
 
-    const todayEntries = await this.prisma.timeEntry.count({
-      where: {
-        userId,
-        date: { gte: todayStart, lte: todayEnd },
-      },
-    });
+    const needsTaskTitle = !!dto.taskId && !dto.taskTitle;
 
-    await this.authService.checkPlanLimit(userId, 'tasksPerDay', todayEntries);
+    // These three are independent of each other (and only reachable once
+    // validateRelations above has already cleared every relation), so they
+    // run concurrently: the taskTitle lookup, the same-day entry count, and
+    // the user row that checkPlanLimit would otherwise fetch itself. Fetching
+    // the user here and calling checkPlanLimitForUser directly avoids
+    // checkPlanLimit's own `user.findUnique`, which would otherwise be a
+    // fourth serialized round-trip.
+    const [taskForTitle, todayEntries, user] = await Promise.all([
+      needsTaskTitle
+        ? this.prisma.task.findFirst({
+            where: { id: dto.taskId as string, userId },
+            select: { title: true },
+          })
+        : Promise.resolve(undefined),
+      this.prisma.timeEntry.count({
+        where: {
+          userId,
+          date: { gte: todayStart, lte: todayEnd },
+        },
+      }),
+      this.prisma.user.findUnique({ where: { id: userId } }),
+    ]);
+
+    let taskTitle = dto.taskTitle;
+    if (needsTaskTitle) {
+      taskTitle = taskForTitle?.title;
+    }
+
+    if (!user) throw new ForbiddenException('User not found');
+    await this.authService.checkPlanLimitForUser(
+      user,
+      'tasksPerDay',
+      todayEntries,
+    );
 
     const entry = await this.prisma.timeEntry.create({
       data: {

@@ -35,6 +35,13 @@ class FakePrisma {
   entries: Row[] = [
     { id: OWN_ENTRY, userId: ATTACKER, duration: 30, goalId: null },
   ];
+  // create() now fetches the caller's own User row (concurrently with the
+  // taskTitle lookup and the same-day count) so it can call
+  // checkPlanLimitForUser without a second round-trip inside checkPlanLimit.
+  users: Row[] = [
+    { id: ATTACKER, userId: ATTACKER, plan: 'FREE' },
+    { id: VICTIM, userId: VICTIM, plan: 'FREE' },
+  ];
 
   created: any[] = [];
   updated: any[] = [];
@@ -65,6 +72,10 @@ class FakePrisma {
     findFirst: async ({ where }: any) => this.match(this.tasks, where),
   };
 
+  user = {
+    findUnique: async ({ where }: any) => this.match(this.users, where),
+  };
+
   timeEntry = {
     findFirst: async ({ where }: any) => this.match(this.entries, where),
     count: async () => 0,
@@ -89,6 +100,22 @@ class FakePrisma {
 
 class FakeAuth {
   checkPlanLimit = async () => undefined;
+
+  // Tracks whether/how often create()'s plan-limit check actually ran, and
+  // lets tests force it to fail, so precedence between it and the
+  // relation-ownership checks can be pinned directly (see the "error
+  // precedence" describe block below) instead of only inferred from which
+  // message came back.
+  planLimitCalls = 0;
+  planLimitExceeded = false;
+
+  checkPlanLimitForUser = async (..._args: unknown[]) => {
+    this.planLimitCalls++;
+    if (this.planLimitExceeded) {
+      throw new ForbiddenException('Plan limit reached');
+    }
+    return true;
+  };
 }
 
 class FakeGoals {
@@ -102,13 +129,14 @@ class FakeGoals {
 function buildService() {
   const prisma = new FakePrisma();
   const goals = new FakeGoals();
+  const auth = new FakeAuth();
   const service = new TimeEntriesService(
     prisma as any,
-    new FakeAuth() as any,
+    auth as any,
     goals as any,
   );
 
-  return { prisma, goals, service };
+  return { prisma, goals, auth, service };
 }
 
 const baseCreate = {
@@ -199,6 +227,47 @@ describe('TimeEntriesService relation ownership', () => {
     expect(goals.progressCalls).toEqual([
       { goalId: OWN_GOAL, userId: ATTACKER },
     ]);
+  });
+});
+
+// Pins the error precedence of create(): relation-ownership checks
+// (validateRelations) and the plan-limit check both throw ForbiddenException,
+// and used to be strictly ordered by sequential awaits (validateRelations
+// fully resolves — and throws, if it's going to — before checkPlanLimit ever
+// runs). Once validateRelations' three ownership checks and create()'s
+// taskTitle/count/user lookups were each parallelised with Promise.all, nothing
+// guarantees "first in source order" for free: Promise.all/race settle on
+// whichever promise rejects first in wall-clock time, not array order. The
+// fix keeps the two *stages* sequential (validateRelations is awaited to
+// completion before the second Promise.all group even starts), so this test
+// asserts the plan-limit check is never reached at all when a relation check
+// is going to fail.
+describe('TimeEntriesService error precedence', () => {
+  it('throws the relation-ownership 403, not the plan-limit 403, when both would fail', async () => {
+    const { prisma, auth, service } = buildService();
+    auth.planLimitExceeded = true;
+
+    await expect(
+      service.create(ATTACKER, { ...baseCreate, goalId: VICTIM_GOAL } as any),
+    ).rejects.toThrow('Goal not found or access denied');
+
+    // The plan-limit check must never have run: proves validateRelations'
+    // throw happened before create() even reached the stage that fetches the
+    // user / calls checkPlanLimitForUser, not merely that it "won a race".
+    expect(auth.planLimitCalls).toBe(0);
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('still enforces the plan-limit 403 when every relation check passes', async () => {
+    const { prisma, auth, service } = buildService();
+    auth.planLimitExceeded = true;
+
+    await expect(
+      service.create(ATTACKER, { ...baseCreate, goalId: OWN_GOAL } as any),
+    ).rejects.toThrow('Plan limit reached');
+
+    expect(auth.planLimitCalls).toBe(1);
+    expect(prisma.created).toHaveLength(0);
   });
 });
 
