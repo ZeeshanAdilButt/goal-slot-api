@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -17,7 +18,27 @@ export class ScheduleService {
     private authService: AuthService,
   ) {}
 
+  /**
+   * goalId is client-supplied, so it has to be confirmed to belong to the
+   * caller before it's written onto a schedule block. Without this a caller
+   * could link their own block to a stranger's goal and read that goal back
+   * out of the `include: { goal: true }` response (mirrors
+   * TasksService.validateRelations / TimeEntriesService.validateRelations,
+   * which guard the same relation elsewhere in the codebase).
+   */
+  private async validateGoalOwnership(userId: string, goalId?: string | null) {
+    if (!goalId) return;
+    const goal = await this.prisma.goal.findFirst({
+      where: { id: goalId, userId },
+    });
+    if (!goal) {
+      throw new ForbiddenException('Goal not found or access denied');
+    }
+  }
+
   async create(userId: string, dto: CreateScheduleBlockDto) {
+    await this.validateGoalOwnership(userId, dto.goalId);
+
     // Check plan limits
     const currentSchedules = await this.prisma.scheduleBlock.count({
       where: { userId },
@@ -91,6 +112,8 @@ export class ScheduleService {
       ...changes
     } = dto;
     const updateData = this.removeUndefined(changes);
+
+    await this.validateGoalOwnership(userId, updateData.goalId);
 
     if (updateScope === 'series' && block.seriesId) {
       const sanitizedSeriesData = {
