@@ -177,18 +177,19 @@ describe('CoachProposalsService payload validation', () => {
   });
 
   it('rejects userId on action types that have no per-type DTO', async () => {
-    const { service, insights } = buildService();
+    const { service, goals } = buildService();
 
     const results = await service.apply(ATTACKER, [
       {
-        type: 'CREATE_PRACTICE',
-        payload: { title: 'Walk daily', body: 'Ten minutes', userId: VICTIM },
+        type: 'RENAME_GOAL',
+        id: OWN_GOAL,
+        payload: { title: 'LeafCompute', userId: VICTIM },
       } as CoachProposedAction,
     ]);
 
     expect(results[0].ok).toBe(false);
     expect(results[0].error).toContain('userId');
-    expect(insights.calls).toHaveLength(0);
+    expect(goals.calls).toHaveLength(0);
   });
 
   it('still applies a clean CREATE_PRACTICE under the caller own id', async () => {
@@ -203,6 +204,100 @@ describe('CoachProposalsService payload validation', () => {
 
     expect(results[0].ok).toBe(true);
     expect(insights.calls[0].userId).toBe(ATTACKER);
+  });
+
+  // CREATE_PRACTICE used to be the one action type absent from
+  // PAYLOAD_DTO_BY_ACTION: its payload only got the generic forbidden-key
+  // strip (id/userId/user/createdAt/updatedAt), never a real DTO pass, so
+  // unlike every other action type it had no forbidNonWhitelisted check and
+  // no field-length ceiling. These lock in CreatePracticeDto now closing that
+  // gap the same way every other action type is already covered.
+  it('rejects CREATE_PRACTICE carrying a field CreatePracticeDto does not expose', async () => {
+    const { service, insights } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'CREATE_PRACTICE',
+        payload: {
+          title: 'Walk daily',
+          body: 'Ten minutes',
+          notARealField: 'sneaky',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('notARealField');
+    expect(insights.calls).toHaveLength(0);
+  });
+
+  // The actual finding: sourceMessageId/sourceConversationId are opaque,
+  // arbitrary-length, model-chosen strings that createAccepted stores
+  // verbatim. CreatePracticeDto deliberately does not expose them (see the
+  // class doc comment on CreatePracticeDto), so a payload trying to set
+  // either one is refused outright rather than silently written.
+  it.each(['sourceMessageId', 'sourceConversationId'])(
+    'rejects a CREATE_PRACTICE payload that tries to set %s',
+    async (field) => {
+      const { service, insights } = buildService();
+
+      const results = await service.apply(ATTACKER, [
+        {
+          type: 'CREATE_PRACTICE',
+          payload: {
+            title: 'Walk daily',
+            body: 'Ten minutes',
+            [field]: 'some-other-users-conversation-id',
+          },
+        } as CoachProposedAction,
+      ]);
+
+      expect(results[0].ok).toBe(false);
+      expect(results[0].error).toContain(field);
+      expect(insights.calls).toHaveLength(0);
+    },
+  );
+
+  it('rejects a CREATE_PRACTICE title over the length ceiling', async () => {
+    const { service, insights } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'CREATE_PRACTICE',
+        payload: { title: 'x'.repeat(101), body: 'Ten minutes' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(insights.calls).toHaveLength(0);
+  });
+
+  it('still applies a CREATE_PRACTICE carrying its full set of optional fields', async () => {
+    const { service, insights } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'CREATE_PRACTICE',
+        payload: {
+          title: 'Walk daily',
+          body: 'Ten minutes after Asr, no phone.',
+          suggestedAction: 'Put your shoes by the door tonight.',
+          kind: 'EXPERIMENT',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(true);
+    expect(insights.calls[0].dto).toMatchObject({
+      title: 'Walk daily',
+      body: 'Ten minutes after Asr, no phone.',
+      suggestedAction: 'Put your shoes by the door tonight.',
+      kind: 'EXPERIMENT',
+    });
+    // The whitelist is the whole point: nothing beyond CreatePracticeDto's own
+    // fields reaches the service, no matter what the caller sent alongside.
+    expect(insights.calls[0].dto.sourceMessageId).toBeUndefined();
+    expect(insights.calls[0].dto.sourceConversationId).toBeUndefined();
   });
 
   // The journal action is the newest write surface the Coach has, and the one

@@ -30,6 +30,7 @@ import {
   StartTimerSessionDto,
   StopTimerSessionDto,
 } from '../active-timer/dto/active-timer.dto';
+import { CreatePracticeDto } from '../coach-insights/dto/create-practice.dto';
 import {
   CoachActionResult,
   CoachActionType,
@@ -59,10 +60,8 @@ import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
  * account.
  *
  * Action types absent from this map do not forward the payload to a service
- * verbatim: RENAME_GOAL builds a literal `{ title }`, the DELETE_* cases only
- * use `action.id`, and CREATE_PRACTICE goes to
- * `CoachInsightsService.createAccepted`, which copies named fields one by one.
- * They still get the forbidden-key strip below.
+ * verbatim: RENAME_GOAL builds a literal `{ title }`, and the DELETE_* cases
+ * only use `action.id`. They still get the forbidden-key strip below.
  */
 const PAYLOAD_DTO_BY_ACTION: Partial<
   Record<CoachActionType, new (...args: any[]) => object>
@@ -78,6 +77,7 @@ const PAYLOAD_DTO_BY_ACTION: Partial<
   START_TIMER: StartTimerSessionDto,
   STOP_TIMER: StopTimerSessionDto,
   APPEND_JOURNAL_ENTRY: AppendJournalContentDto,
+  CREATE_PRACTICE: CreatePracticeDto,
 };
 
 /**
