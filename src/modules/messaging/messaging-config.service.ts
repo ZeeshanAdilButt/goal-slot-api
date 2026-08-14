@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   MessagingConfig,
   readConversationGateSecret,
+  readMessageNotifySecret,
   readMessagingConfig,
   safeEqual,
 } from './messaging.config';
@@ -27,11 +28,13 @@ export class MessagingConfigService {
   private readonly logger = new Logger(MessagingConfigService.name);
   private readonly config: MessagingConfig | null;
   private readonly gateSecret: string | null;
+  private readonly notifySecret: string | null;
 
   constructor(configService: ConfigService) {
     const read = (key: string) => configService.get(key);
     this.config = readMessagingConfig(read);
     this.gateSecret = readConversationGateSecret(read);
+    this.notifySecret = readMessageNotifySecret(read);
 
     if (!this.config) {
       this.logger.warn(
@@ -44,6 +47,13 @@ export class MessagingConfigService {
       this.logger.warn(
         'CONVERSATION_GATE_SECRET is not set. ' +
           'POST /internal/messaging/can-create-conversation will reject every request.',
+      );
+    }
+
+    if (!this.notifySecret) {
+      this.logger.warn(
+        'MESSAGE_NOTIFY_SECRET is not set. ' +
+          'POST /internal/messaging/on-message-sent will reject every request, so new-message push/email notifications will not fire.',
       );
     }
   }
@@ -78,5 +88,15 @@ export class MessagingConfigService {
   verifyGateSecret(provided: string | undefined): boolean {
     if (!this.gateSecret || !provided) return false;
     return safeEqual(provided, this.gateSecret);
+  }
+
+  /**
+   * Checks a credential presented to the internal message-notify endpoint
+   * against MESSAGE_NOTIFY_SECRET. Same fail-closed reasoning as
+   * verifyGateSecret.
+   */
+  verifyNotifySecret(provided: string | undefined): boolean {
+    if (!this.notifySecret || !provided) return false;
+    return safeEqual(provided, this.notifySecret);
   }
 }

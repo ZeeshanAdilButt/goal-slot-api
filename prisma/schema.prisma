@@ -736,6 +736,7 @@ enum NotificationType {
   FEEDBACK_REPLY
   SHARED_REPORT_UNVIEWED
   INSTRUCTION_ASSIGNED
+  MESSAGE_RECEIVED
 }
 
 enum TimeEntrySource {

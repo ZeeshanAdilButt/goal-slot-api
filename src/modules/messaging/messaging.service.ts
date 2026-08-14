@@ -2,14 +2,18 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { NotificationType } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
 import {
   JiffyConversation,
   JiffyMessagingClient,
 } from './jiffy-messaging.client';
+import { OnMessageSentDto } from './dto/messaging.dto';
 import { MessagingConfigService } from './messaging-config.service';
 import { MessagingTokenService } from './messaging-token.service';
 
@@ -49,11 +53,14 @@ function isExactlyThisPair(
 
 @Injectable()
 export class MessagingService {
+  private readonly logger = new Logger(MessagingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: MessagingConfigService,
     private readonly tokens: MessagingTokenService,
     private readonly jiffy: JiffyMessagingClient,
+    private readonly reminderDispatch: ReminderDispatchService,
   ) {}
 
   async issueToken(userId: string): Promise<MessagingTokenResponse> {
@@ -177,6 +184,51 @@ export class MessagingService {
     ]);
 
     return this.toResponse(created, counterpart, true);
+  }
+
+  /**
+   * Backs POST /internal/messaging/on-message-sent — the MessageNotifier
+   * callback jiffy-messaging invokes after a message is durably written,
+   * so each recipient gets a push/email notification the same way an
+   * instruction assignment or a stale-report reminder does (see
+   * ReminderDispatchService, already built for exactly this "notify user
+   * X across whatever channels they have" job).
+   *
+   * Every recipient is dispatched independently via allSettled: one
+   * failing (a bad push token, an unreachable email provider) must not
+   * stop the others, and the message itself already exists regardless —
+   * there is nothing here to roll back.
+   */
+  async notifyMessageSent(dto: OnMessageSentDto): Promise<void> {
+    const sender = await this.prisma.user.findUnique({
+      where: { id: dto.senderId },
+      select: { name: true, email: true },
+    });
+    const senderName = sender?.name?.trim() || sender?.email || 'Someone';
+
+    // Long enough to read as a real preview, short enough that a push
+    // notification's own OS-level truncation isn't doing all the work.
+    const preview =
+      dto.body.length > 140 ? `${dto.body.slice(0, 140)}...` : dto.body;
+
+    const results = await Promise.allSettled(
+      dto.recipientIds.map((recipientId) =>
+        this.reminderDispatch.dispatchToUser(recipientId, {
+          title: senderName,
+          body: preview,
+          data: { type: 'conversation', conversationId: dto.conversationId },
+          notificationType: NotificationType.MESSAGE_RECEIVED,
+        }),
+      ),
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          `Failed to notify recipient ${dto.recipientIds[index]} of message ${dto.messageId}: ${result.reason}`,
+        );
+      }
+    });
   }
 
   private toResponse(
