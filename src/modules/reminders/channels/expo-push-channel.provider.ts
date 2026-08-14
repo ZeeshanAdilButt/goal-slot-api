@@ -3,14 +3,20 @@ import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
+  DEFAULT_PUSH_PRESENTATION,
+  NOTIFICATION_POLICY,
+} from '../notification-policy';
+import {
   ReminderChannel,
   ReminderChannelInput,
+  ReminderChannelKind,
   ReminderChannelResult,
 } from '../reminder-channel.interface';
 
 @Injectable()
 export class ExpoPushReminderChannel implements ReminderChannel {
   readonly name = 'expo-push';
+  readonly kind: ReminderChannelKind = 'push';
 
   private readonly logger = new Logger(ExpoPushReminderChannel.name);
   private readonly expo = new Expo();
@@ -53,12 +59,26 @@ export class ExpoPushReminderChannel implements ReminderChannel {
         return { ok: false };
       }
 
+      // Presentation (sound/channel/priority) comes from the policy table
+      // keyed by notificationType, not from the caller directly - every
+      // NotificationType decides its own urgency once, here, rather than
+      // each dispatch call site guessing. A send with no notificationType
+      // (a call site that predates this field) gets the same treatment as
+      // a routine nudge rather than silently going out with no sound at
+      // all, which was the original bug.
+      const presentation = input.notificationType
+        ? NOTIFICATION_POLICY[input.notificationType].push
+        : DEFAULT_PUSH_PRESENTATION;
+
       const messages: ExpoPushMessage[] = validSubscriptions.map(
         (subscription) => ({
           to: subscription.expoToken as string,
           title: input.title,
           body: input.body,
           data: input.data,
+          sound: presentation.sound,
+          channelId: presentation.channelId,
+          priority: presentation.priority,
         }),
       );
 

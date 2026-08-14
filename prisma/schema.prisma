@@ -414,7 +414,7 @@ model PushSubscription {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  kind String // "WEB" | "EXPO"
+  kind PushSubscriptionKind
 
   // WEB
   endpoint String?
@@ -746,6 +746,15 @@ enum NotificationType {
   SHARED_REPORT_UNVIEWED
   INSTRUCTION_ASSIGNED
   MESSAGE_RECEIVED
+}
+
+// Was a free-form String ("WEB" | "EXPO") until a mismatched value written
+// under different casing/spelling turned out to be permanently invisible to
+// the Expo channel's `where: { kind: 'EXPO' }` query, with no error anywhere
+// in the path. An enum makes that class of bug impossible to write.
+enum PushSubscriptionKind {
+  WEB
+  EXPO
 }
 
 enum TimeEntrySource {

@@ -4,6 +4,7 @@ import { ReminderDispatchService } from '../reminders/reminder-dispatch.service'
 import {
   ReminderChannel,
   ReminderChannelInput,
+  ReminderChannelKind,
   ReminderChannelResult,
 } from '../reminders/reminder-channel.interface';
 
@@ -62,12 +63,18 @@ class FakePrisma {
 
 class RecordingChannel implements ReminderChannel {
   calls: ReminderChannelInput[] = [];
+  readonly kind: ReminderChannelKind;
 
   constructor(
     public readonly name: string,
     private readonly result: ReminderChannelResult = { ok: true },
     private readonly shouldReject = false,
-  ) {}
+    kind?: ReminderChannelKind,
+  ) {
+    // These tests only ever construct 'email', 'expo-push', or 'web-push' -
+    // inferring kind from name keeps every existing call site unchanged.
+    this.kind = kind ?? (name === 'email' ? 'email' : 'push');
+  }
 
   async send(input: ReminderChannelInput): Promise<ReminderChannelResult> {
     this.calls.push(input);

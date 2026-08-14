@@ -81,12 +81,18 @@ describe('ExpoPushReminderChannel', () => {
     const result = await channel.send(input);
 
     expect(result).toEqual({ ok: true });
+    // No notificationType on `input`, so this falls back to
+    // DEFAULT_PUSH_PRESENTATION (the same treatment as a routine nudge)
+    // rather than sending with no sound at all.
     expect(sendPushNotificationsAsync).toHaveBeenCalledWith([
       {
         to: 'ExponentPushToken[abc]',
         title: input.title,
         body: input.body,
         data: undefined,
+        sound: 'default',
+        channelId: 'goalslot-schedule-notify-v1',
+        priority: 'default',
       },
     ]);
   });

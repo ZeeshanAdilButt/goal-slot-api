@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NOTIFICATION_POLICY } from './notification-policy';
 import {
   REMINDER_CHANNELS,
   ReminderChannel,
@@ -165,12 +166,19 @@ export class ReminderDispatchService {
   }
 
   /**
-   * Fans a single reminder out to every injected channel in parallel and
-   * always creates the matching in-app Notification row alongside it. Uses
-   * allSettled rather than all because one channel rejecting must not stop
-   * the others from being attempted or awaited. The in-app notification is
-   * not one of the injected channels - it is unconditional and does not
-   * affect the return value.
+   * Fans a single reminder out to every injected channel whose kind the
+   * NotificationType's policy allows (see notification-policy.ts) and
+   * always creates the matching in-app Notification row alongside it. A
+   * channel suppressed by the policy - e.g. email for MESSAGE_RECEIVED -
+   * is filtered out before the fan-out entirely, so it is never attempted
+   * and never logged as failed; that is the whole point of the policy
+   * table, as opposed to attempting every channel and having the channel
+   * itself decide to no-op.
+   *
+   * Uses allSettled rather than all because one channel rejecting must not
+   * stop the others from being attempted or awaited. The in-app
+   * notification is not one of the injected channels - it is unconditional
+   * and does not affect the return value.
    */
   async dispatchToUser(
     userId: string,
@@ -178,20 +186,26 @@ export class ReminderDispatchService {
   ): Promise<boolean> {
     await this.createInAppNotification(userId, content);
 
+    const policy = NOTIFICATION_POLICY[content.notificationType];
+    const eligibleChannels = this.channels.filter(
+      (channel) => policy.channels[channel.kind],
+    );
+
     const results = await Promise.allSettled(
-      this.channels.map((channel) =>
+      eligibleChannels.map((channel) =>
         channel.send({
           userId,
           title: content.title,
           body: content.body,
           data: content.data,
+          notificationType: content.notificationType,
         }),
       ),
     );
 
     let anySucceeded = false;
     results.forEach((result, index) => {
-      const channel = this.channels[index];
+      const channel = eligibleChannels[index];
 
       if (result.status === 'rejected') {
         this.logger.error(

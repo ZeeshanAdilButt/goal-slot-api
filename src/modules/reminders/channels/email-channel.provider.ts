@@ -5,12 +5,14 @@ import { EmailService } from '../../email/email.service';
 import {
   ReminderChannel,
   ReminderChannelInput,
+  ReminderChannelKind,
   ReminderChannelResult,
 } from '../reminder-channel.interface';
 
 @Injectable()
 export class EmailReminderChannel implements ReminderChannel {
   readonly name = 'email';
+  readonly kind: ReminderChannelKind = 'email';
 
   private readonly logger = new Logger(EmailReminderChannel.name);
 

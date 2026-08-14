@@ -2,6 +2,7 @@ import { ReminderDispatchService } from './reminder-dispatch.service';
 import {
   ReminderChannel,
   ReminderChannelInput,
+  ReminderChannelKind,
   ReminderChannelResult,
 } from './reminder-channel.interface';
 
@@ -39,12 +40,20 @@ class FakePrisma {
 
 class RecordingChannel implements ReminderChannel {
   calls: ReminderChannelInput[] = [];
+  readonly kind: ReminderChannelKind;
 
   constructor(
     public readonly name: string,
     private readonly result: ReminderChannelResult = { ok: true },
     private readonly shouldReject = false,
-  ) {}
+    kind?: ReminderChannelKind,
+  ) {
+    // Every existing call site below constructs 'email', 'expo-push', or
+    // 'web-push' - inferring kind from name keeps them all unchanged, while
+    // still letting tests that care about channel-kind filtering pass one
+    // explicitly (see the notification-policy describe block).
+    this.kind = kind ?? (name === 'email' ? 'email' : 'push');
+  }
 
   async send(input: ReminderChannelInput): Promise<ReminderChannelResult> {
     this.calls.push(input);
@@ -321,5 +330,107 @@ describe('ReminderDispatchService.dispatchToUser', () => {
     });
 
     expect(succeeded).toBe(false);
+  });
+});
+
+describe('ReminderDispatchService.dispatchToUser - notification policy', () => {
+  // MESSAGE_RECEIVED is push-only in NOTIFICATION_POLICY (see
+  // notification-policy.ts) - a chat message shouldn't email the recipient
+  // minutes to hours later. This is the behavior item 2 exists to add: a
+  // suppressed channel must be filtered out before the fan-out, not
+  // attempted and then ignored.
+  it('does not attempt the email channel for a MESSAGE_RECEIVED notification', async () => {
+    const email = new RecordingChannel('email');
+    const push = new RecordingChannel('expo-push');
+    const { service } = buildService([email, push]);
+
+    const succeeded = await service.dispatchToUser('user_1', {
+      title: 'Priya',
+      body: 'hi there',
+      data: { type: 'conversation', conversationId: 'conv_1' },
+      notificationType: 'MESSAGE_RECEIVED' as any,
+    });
+
+    expect(succeeded).toBe(true);
+    expect(email.calls).toHaveLength(0);
+    expect(push.calls).toHaveLength(1);
+    expect(push.calls[0].notificationType).toBe('MESSAGE_RECEIVED');
+  });
+
+  // SHARED_REPORT_UNVIEWED and INSTRUCTION_ASSIGNED are daily/cron-driven
+  // nudges - both channels are attempted since nothing is time-sensitive
+  // about them.
+  it.each(['SHARED_REPORT_UNVIEWED', 'INSTRUCTION_ASSIGNED'])(
+    'attempts both email and push for a %s notification',
+    async (notificationType) => {
+      const email = new RecordingChannel('email');
+      const push = new RecordingChannel('expo-push');
+      const { service } = buildService([email, push]);
+
+      await service.dispatchToUser('user_1', {
+        title: 'Title',
+        body: 'Body',
+        data: {},
+        notificationType: notificationType as any,
+      });
+
+      expect(email.calls).toHaveLength(1);
+      expect(push.calls).toHaveLength(1);
+    },
+  );
+
+  // FEEDBACK_REPLY never reaches dispatchToUser today (NotificationsService
+  // writes the in-app row directly), but the policy table is exhaustive
+  // over NotificationType, so if it ever did go through this path both
+  // channels should stay suppressed rather than firing unexpectedly.
+  it('attempts no channel for a FEEDBACK_REPLY notification', async () => {
+    const email = new RecordingChannel('email');
+    const push = new RecordingChannel('expo-push');
+    const { service } = buildService([email, push]);
+
+    const succeeded = await service.dispatchToUser('user_1', {
+      title: 'New reply to your feedback',
+      body: 'Body',
+      data: {},
+      notificationType: 'FEEDBACK_REPLY' as any,
+    });
+
+    expect(succeeded).toBe(false);
+    expect(email.calls).toHaveLength(0);
+    expect(push.calls).toHaveLength(0);
+  });
+
+  it('still creates the in-app notification even when every channel is suppressed', async () => {
+    const email = new RecordingChannel('email');
+    const { prisma, service } = buildService([email]);
+
+    await service.dispatchToUser('user_1', {
+      title: 'New reply to your feedback',
+      body: 'Body',
+      data: {},
+      notificationType: 'FEEDBACK_REPLY' as any,
+    });
+
+    expect(prisma.notifications).toHaveLength(1);
+    expect(email.calls).toHaveLength(0);
+  });
+
+  // A channel that happens to have both an email-kind and a push-kind
+  // instance (e.g. web-push and expo-push, both 'push') both get attempted
+  // together - the filter is by kind, not by name.
+  it('attempts every push-kind channel, not just one, when push is allowed', async () => {
+    const expoPush = new RecordingChannel('expo-push');
+    const webPush = new RecordingChannel('web-push');
+    const { service } = buildService([expoPush, webPush]);
+
+    await service.dispatchToUser('user_1', {
+      title: 'Priya',
+      body: 'hi',
+      data: { type: 'conversation', conversationId: 'conv_1' },
+      notificationType: 'MESSAGE_RECEIVED' as any,
+    });
+
+    expect(expoPush.calls).toHaveLength(1);
+    expect(webPush.calls).toHaveLength(1);
   });
 });

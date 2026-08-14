@@ -119,4 +119,56 @@ export const envValidationSchema = Joi.object({
   // boot-safety reason: unset means that endpoint rejects every request,
   // never that ConfigModule refuses to start.
   CONVERSATION_GATE_SECRET: Joi.string().optional().allow(''),
+
+  // Credential jiffy-messaging's MessageNotifier callback presents to
+  // POST /internal/messaging/on-message-sent (see
+  // MessagingConfigService.verifyNotifySecret). Independent of the
+  // JIFFY_MESSAGING_* block the same way CONVERSATION_GATE_SECRET is —
+  // still optional when messaging itself is off, for the same boot-safety
+  // reason. But unlike the gate secret, this one is conditioned on
+  // JIFFY_MESSAGING_URL: once that is set, the deploy clearly intends
+  // messaging to be live, and leaving this unset silently turns every
+  // message sent into a no-op notification (a boot warning, nothing more)
+  // rather than something a deploy would ever choose on purpose. Required
+  // only in that case, so a drifted/typo'd value fails loudly at boot
+  // instead of failing closed at request time with no signal.
+  MESSAGE_NOTIFY_SECRET: Joi.string()
+    .optional()
+    .allow('')
+    .when('JIFFY_MESSAGING_URL', {
+      // `.required()` here matters: without it, an *unset* JIFFY_MESSAGING_URL
+      // would still satisfy `Joi.string().min(1)` (an optional peer schema
+      // treats a missing value as trivially valid), so the "then" branch
+      // would fire even when messaging is off entirely.
+      is: Joi.string().min(1).required(),
+      then: Joi.string().required(),
+    }),
+
+  // Web push (VAPID) keys. Read directly via process.env in
+  // WebPushReminderChannel, not through ConfigService (see
+  // src/modules/push-subscriptions/channels/web-push-channel.provider.ts) —
+  // validated here anyway purely for discoverability and typo-catching,
+  // not because the channel needs it. An entirely-unset trio is a normal,
+  // expected state (the channel degrades to a no-op sender), so all three
+  // stay optional. But the three travel together: once one is set the
+  // deploy clearly intends web push on, so the other two become required —
+  // otherwise the channel silently stays disabled with only a runtime
+  // warning to say so, the same class of drift item 3 exists to catch.
+  VAPID_PUBLIC_KEY: Joi.string().optional().allow(''),
+  VAPID_PRIVATE_KEY: Joi.string()
+    .optional()
+    .allow('')
+    .when('VAPID_PUBLIC_KEY', {
+      // See the matching comment on MESSAGE_NOTIFY_SECRET above for why
+      // `.required()` has to be part of the "is" schema, not just "then".
+      is: Joi.string().min(1).required(),
+      then: Joi.string().required(),
+    }),
+  VAPID_SUBJECT: Joi.string()
+    .optional()
+    .allow('')
+    .when('VAPID_PUBLIC_KEY', {
+      is: Joi.string().min(1).required(),
+      then: Joi.string().required(),
+    }),
 });

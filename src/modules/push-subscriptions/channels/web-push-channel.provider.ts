@@ -5,12 +5,14 @@ import { PushSubscriptionsService } from '../push-subscriptions.service';
 import {
   ReminderChannel,
   ReminderChannelInput,
+  ReminderChannelKind,
   ReminderChannelResult,
 } from '../../reminders/reminder-channel.interface';
 
 @Injectable()
 export class WebPushReminderChannel implements ReminderChannel {
   readonly name = 'web-push';
+  readonly kind: ReminderChannelKind = 'push';
 
   private readonly logger = new Logger(WebPushReminderChannel.name);
   private readonly configured: boolean;
