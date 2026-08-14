@@ -314,8 +314,20 @@ export class ReportsService {
   }
 
   async getGoalProgress(userId: string) {
+    // Trimmed to the fields the mapping below actually reads — the full row
+    // (description, category, order, templateId, templateGoalRef,
+    // createdAt/updatedAt, ...) was riding along for no reason. `status` is
+    // filtered on in `where` but never read back, so it's left out too.
     const goals = await this.prisma.goal.findMany({
       where: { userId, status: GoalStatus.ACTIVE },
+      select: {
+        id: true,
+        title: true,
+        color: true,
+        loggedHours: true,
+        targetHours: true,
+        deadline: true,
+      },
       orderBy: { deadline: 'asc' },
     });
 
@@ -354,15 +366,27 @@ export class ReportsService {
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59, 999);
 
-    const entries = await this.prisma.timeEntry.findMany({
-      where: {
-        userId,
-        date: { gte: start, lte: end },
-      },
-    });
+    // Sum + count are pushed to the database via aggregate() instead of
+    // fetching every column of every entry and reducing in JS. The one
+    // remaining findMany is trimmed to just `date` (needed to dedupe distinct
+    // calendar days client-side, since `date` may carry a time-of-day
+    // component that a DB-side `distinct` wouldn't collapse) rather than
+    // pulling taskName/notes/etc. that this report never reads.
+    const [agg, dateRows] = await Promise.all([
+      this.prisma.timeEntry.aggregate({
+        where: { userId, date: { gte: start, lte: end } },
+        _sum: { duration: true },
+        _count: true,
+      }),
+      this.prisma.timeEntry.findMany({
+        where: { userId, date: { gte: start, lte: end } },
+        select: { date: true },
+      }),
+    ]);
 
-    const totalMinutes = entries.reduce((sum, e) => sum + e.duration, 0);
-    const daysWithEntries = new Set(entries.map((e) => e.date.toDateString()))
+    const totalMinutes = agg._sum.duration || 0;
+    const tasksLogged = agg._count;
+    const daysWithEntries = new Set(dateRows.map((e) => e.date.toDateString()))
       .size;
 
     return {
@@ -374,7 +398,7 @@ export class ReportsService {
       daysActive: daysWithEntries,
       dailyAverage:
         daysWithEntries > 0 ? Math.round(totalMinutes / daysWithEntries) : 0,
-      tasksLogged: entries.length,
+      tasksLogged,
     };
   }
 
@@ -601,8 +625,11 @@ export class ReportsService {
         goal: {
           select: { id: true, title: true, color: true, category: true },
         },
+        // `notes` dropped: aggregateByGroup() below (and its
+        // AggregatableTimeEntry input type) never reads task notes — this
+        // report only ever shows id/title/category per task.
         task: {
-          select: { id: true, title: true, category: true, notes: true },
+          select: { id: true, title: true, category: true },
         },
       },
     });
@@ -691,9 +718,12 @@ export class ReportsService {
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
+      // No `task` include here: the displayed name is always the entry's
+      // own snapshot `taskName` (see the comment below on why), and taskId
+      // is already the scalar `entry.taskId` — the linked Task row was being
+      // joined in and never read.
       include: {
         goal: { select: { id: true, title: true, color: true } },
-        task: { select: { id: true, title: true, notes: true } },
       },
       orderBy: [{ date: 'asc' }],
     });
@@ -844,12 +874,13 @@ export class ReportsService {
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
+      // `task` trimmed to just `title` (the only field this report reads —
+      // as a fallback when the entry has no per-entry taskName snapshot).
+      // `scheduleBlock` dropped entirely: nothing in this report reads
+      // entry.scheduleBlock, it was joined in and never touched.
       include: {
-        task: { select: { id: true, title: true, notes: true } },
+        task: { select: { title: true } },
         goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: {
-          select: { id: true, title: true, startTime: true, endTime: true },
-        },
       },
       orderBy: [{ date: 'asc' }],
     });
@@ -1017,18 +1048,15 @@ export class ReportsService {
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
       },
+      // Both relations trimmed to the fields the pattern-matching loop below
+      // actually reads: task.title (taskName fallback) and
+      // scheduleBlock.title/startTime/endTime (the pattern key). The block's
+      // category/color/goalId/id are only needed on the separate
+      // `scheduleBlocks` query above, which already selects them in full.
       include: {
-        task: { select: { id: true, title: true } },
+        task: { select: { title: true } },
         scheduleBlock: {
-          select: {
-            id: true,
-            title: true,
-            startTime: true,
-            endTime: true,
-            category: true,
-            color: true,
-            goalId: true,
-          },
+          select: { title: true, startTime: true, endTime: true },
         },
       },
       orderBy: [{ date: 'asc' }],
