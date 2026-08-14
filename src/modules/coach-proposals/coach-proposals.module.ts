@@ -6,6 +6,7 @@ import { GoalsModule } from '../goals/goals.module';
 import { ScheduleModule } from '../schedule/schedule.module';
 import { TimeEntriesModule } from '../time-entries/time-entries.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { ActiveTimerModule } from '../active-timer/active-timer.module';
 import { UserThrottlerGuard } from '../coach-ai/user-throttler.guard';
 import { CoachProposalsController } from './coach-proposals.controller';
 import { CoachProposalsService } from './coach-proposals.service';
@@ -32,6 +33,7 @@ const PROPOSALS_APPLY_LIMIT = 60;
     ScheduleModule,
     TimeEntriesModule,
     TasksModule,
+    ActiveTimerModule,
     ThrottlerModule.forRoot([
       {
         name: 'coach-proposals',

@@ -12,6 +12,7 @@ import { ScheduleService } from '../schedule/schedule.service';
 import { TimeEntriesService } from '../time-entries/time-entries.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CoachInsightsService } from '../coach-insights/coach-insights.service';
+import { ActiveTimerService } from '../active-timer/active-timer.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGoalDto, UpdateGoalDto } from '../goals/dto/goals.dto';
 import {
@@ -23,6 +24,10 @@ import {
   UpdateTimeEntryDto,
 } from '../time-entries/dto/time-entries.dto';
 import { CreateTaskDto, UpdateTaskDto } from '../tasks/dto/tasks.dto';
+import {
+  StartTimerSessionDto,
+  StopTimerSessionDto,
+} from '../active-timer/dto/active-timer.dto';
 import {
   CoachActionResult,
   CoachActionType,
@@ -68,6 +73,8 @@ const PAYLOAD_DTO_BY_ACTION: Partial<
   UPDATE_TIME_ENTRY: UpdateTimeEntryDto,
   CREATE_TASK: CreateTaskDto,
   UPDATE_TASK: UpdateTaskDto,
+  START_TIMER: StartTimerSessionDto,
+  STOP_TIMER: StopTimerSessionDto,
 };
 
 /**
@@ -132,6 +139,7 @@ export class CoachProposalsService {
     private readonly timeEntries: TimeEntriesService,
     private readonly tasks: TasksService,
     private readonly insights: CoachInsightsService,
+    private readonly activeTimer: ActiveTimerService,
   ) {}
 
   async apply(
@@ -477,6 +485,34 @@ export class CoachProposalsService {
           >[1],
         );
         return created.id;
+      }
+
+      // -------- Live tracker --------
+      // Dispatches onto ActiveTimerService, the SAME service backing
+      // POST /timer/session and POST /timer/session/stop — not a separate
+      // Coach-only mechanism. That is what keeps a timer the Coach starts
+      // visible and controllable from the direct REST endpoints (and the
+      // fast /coach/voice-intent classifier) on any device, and vice versa.
+      //
+      // Neither action is in DESTRUCTIVE_COACH_ACTION_TYPES (action-safety.ts):
+      // starting a timer creates nothing destructive, and stopping one only
+      // ever converts elapsed time into a TimeEntry (the same "worst case" as
+      // the existing CREATE_TIME_ENTRY action, which also isn't capped as
+      // destructive). A stray START_TIMER/STOP_TIMER is trivially undone by
+      // the user, unlike a DELETE_*.
+      case 'START_TIMER': {
+        const started = await this.activeTimer.start(
+          userId,
+          payload as unknown as StartTimerSessionDto,
+        );
+        return started?.id;
+      }
+      case 'STOP_TIMER': {
+        const stopped = await this.activeTimer.stop(
+          userId,
+          payload as unknown as StopTimerSessionDto,
+        );
+        return stopped?.timeEntry?.id;
       }
 
       default:

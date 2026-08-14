@@ -32,6 +32,8 @@ export const COACH_ACTION_TYPES = [
   'UPDATE_TASK',
   'DELETE_TASK',
   'CREATE_PRACTICE',
+  'START_TIMER',
+  'STOP_TIMER',
 ] as const;
 
 export type CoachActionType = (typeof COACH_ACTION_TYPES)[number];

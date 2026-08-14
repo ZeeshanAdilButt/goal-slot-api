@@ -52,6 +52,7 @@ function buildService() {
   const timeEntries = new SpyService();
   const tasks = new SpyService();
   const insights = new SpyService();
+  const activeTimer = new SpyService();
   const service = new CoachProposalsService(
     new FakePrisma() as any,
     goals as any,
@@ -59,9 +60,18 @@ function buildService() {
     timeEntries as any,
     tasks as any,
     insights as any,
+    activeTimer as any,
   );
 
-  return { service, goals, schedule, timeEntries, tasks, insights };
+  return {
+    service,
+    goals,
+    schedule,
+    timeEntries,
+    tasks,
+    insights,
+    activeTimer,
+  };
 }
 
 const OWN_GOAL = '11111111-1111-4111-8111-111111111111';

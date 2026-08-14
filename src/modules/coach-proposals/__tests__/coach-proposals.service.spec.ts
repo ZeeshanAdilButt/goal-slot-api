@@ -135,6 +135,7 @@ function buildServices() {
     {} as any, // TimeEntriesService - unused
     {} as any, // TasksService - unused
     {} as any, // CoachInsightsService - unused
+    {} as any, // ActiveTimerService - unused
   );
   return { prisma, service };
 }

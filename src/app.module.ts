@@ -22,6 +22,7 @@ import { CoachJournalModule } from './modules/coach-journal/coach-journal.module
 import { CoachProfileModule } from './modules/coach-profile/coach-profile.module';
 import { CoachProposalsModule } from './modules/coach-proposals/coach-proposals.module';
 import { CoachReflectionModule } from './modules/coach-reflection/coach-reflection.module';
+import { CoachVoiceIntentModule } from './modules/coach-voice-intent/coach-voice-intent.module';
 import { HealthModule } from './modules/health/health.module';
 import { LabelsModule } from './modules/labels/labels.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
@@ -76,6 +77,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     CoachProfileModule,
     CoachProposalsModule,
     CoachReflectionModule,
+    CoachVoiceIntentModule,
     LabelsModule,
     MessagingModule,
     NotesModule,

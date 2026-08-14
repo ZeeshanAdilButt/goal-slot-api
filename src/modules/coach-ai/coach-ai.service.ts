@@ -149,6 +149,10 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`UPDATE_TASK\`             id=<taskId>, payload: subset
 - \`DELETE_TASK\`             id=<taskId>
 - \`CREATE_PRACTICE\`         payload: { title, body, suggestedAction?, kind? "SUGGESTION"|"EXPERIMENT"|"OBSERVATION"|"MEDIA_PROMPT" }
+- \`START_TIMER\`             payload: { goalId?, taskId?, scheduleBlockId?, taskName? }
+                              Starts the live, cross-device tracker (the same one the app's own Start Timer button uses). Use when the user asks you to start tracking or start a timer for something, e.g. "start tracking OloStep", "start the timer". Link goalId/taskId when they named a goal or task that exists in context; do not fabricate one if it doesn't. If a timer is already running, this action fails with a clear message rather than silently replacing it, so just tell the user to stop or resume the existing one.
+- \`STOP_TIMER\`              payload: {} (empty)
+                              Stops the currently running tracker and converts the elapsed time into a time entry, same as the app's own Stop button. Use when the user says "stop the timer", "stop tracking", "I'm done for now". No id or payload fields are needed, there is only ever one running session per account.
 
                               ABSOLUTE RULE — read this twice:
                               When the user asks you to suggest, recommend, propose, give, or share a practice / habit / experiment / dua / ayah / dhikr / lecture / book to read / thing to try / reminder to track — ANYTHING that would belong in their Active Practice — you MUST respond with a coach-proposal block containing a CREATE_PRACTICE action. You may NOT reply with the suggestion as plain text, as a bullet list, or as Markdown headings. The whole point is that suggestions become tracked, approved, reviewable cards. A plain-text suggestion is a bug.
@@ -948,8 +952,15 @@ export class CoachAiService {
    *
    * Throws PRECONDITION_FAILED only when both are unavailable (no
    * BYOK AND no shared key configured on the server).
+   *
+   * Public: also called directly by CoachVoiceIntentService, which needs the
+   * same BYOK-or-shared-key resolution for its fast classification call but
+   * deliberately does NOT go through assertWithinBudget / reserveSharedQuotaSlot
+   * below — see the long comment on CoachVoiceIntentService for why sharing
+   * those counters with a call meant to fire on nearly every voice utterance
+   * would be wrong.
    */
-  private async resolveCoachKey(userId: string): Promise<
+  async resolveCoachKey(userId: string): Promise<
     | { kind: 'byok'; byok: import('@prisma/client').EncryptedByokKey }
     | {
         kind: 'shared';
