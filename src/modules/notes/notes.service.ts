@@ -72,6 +72,13 @@ export class NotesService {
   }
 
   async create(userId: string, dto: CreateNoteDto) {
+    if (dto.parentId) {
+      // The parent note must also belong to the caller, otherwise a
+      // client could attach a new note under a stranger's tree (or use
+      // the 404-vs-403 split to probe whether a given note id exists).
+      await this.findOne(dto.parentId, userId);
+    }
+
     const maxOrder = await this.prisma.note.aggregate({
       where: {
         userId,
@@ -98,6 +105,11 @@ export class NotesService {
     await this.findOne(id, userId);
 
     if (dto.parentId) {
+      // The new parent must also belong to the caller — otherwise a
+      // client could reparent its own note under (or probe the
+      // existence of) another user's note by id.
+      await this.findOne(dto.parentId, userId);
+
       const descendants = await this.getDescendantIds(id);
       if (descendants.includes(dto.parentId)) {
         throw new ForbiddenException(
@@ -130,6 +142,21 @@ export class NotesService {
   }
 
   async reorder(userId: string, items: ReorderNotesDto[]) {
+    // Every target parentId must also belong to the caller — the
+    // updateMany below already scopes the moved note itself by
+    // (id, userId), but without this a client could drag a note of
+    // its own under another user's note id.
+    const parentIds = Array.from(
+      new Set(
+        items
+          .map((item) => item.parentId)
+          .filter((parentId): parentId is string => !!parentId),
+      ),
+    );
+    for (const parentId of parentIds) {
+      await this.findOne(parentId, userId);
+    }
+
     const updates = items.map((item) =>
       this.prisma.note.updateMany({
         where: {
