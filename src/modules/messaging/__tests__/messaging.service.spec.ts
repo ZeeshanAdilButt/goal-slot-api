@@ -123,21 +123,32 @@ class FakeJiffyClient {
   }
 }
 
+class FakeReminderDispatch {
+  calls: Array<{ userId: string; content: any }> = [];
+
+  async dispatchToUser(userId: string, content: any): Promise<boolean> {
+    this.calls.push({ userId, content });
+    return true;
+  }
+}
+
 function buildService(env: Record<string, unknown> = CONFIGURED_ENV) {
   const prisma = new FakePrisma();
   const config = new MessagingConfigService({
     get: (key: string) => env[key],
   } as unknown as ConfigService);
   const jiffy = new FakeJiffyClient();
+  const reminderDispatch = new FakeReminderDispatch();
 
   const service = new MessagingService(
     prisma as any,
     config,
     new MessagingTokenService(config),
     jiffy as any,
+    reminderDispatch as any,
   );
 
-  return { prisma, jiffy, service };
+  return { prisma, jiffy, reminderDispatch, service };
 }
 
 describe('MessagingService permission rule', () => {
@@ -356,5 +367,97 @@ describe('MessagingService.issueToken', () => {
     expect(result.messagingUrl).toBe('https://messaging.example.com');
     expect(result.expiresIn).toBe(900);
     expect(result.token.split('.')).toHaveLength(3);
+  });
+});
+
+describe('MessagingService.notifyMessageSent', () => {
+  it('dispatches to every recipient with the sender name as the title', async () => {
+    const { prisma, reminderDispatch, service } = buildService();
+    prisma.addUser(ME, 'Priya');
+
+    await service.notifyMessageSent({
+      messageId: 'msg_1',
+      conversationId: 'conv_1',
+      senderId: ME,
+      recipientIds: [FRIEND, STRANGER],
+      body: 'hi there',
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+
+    expect(reminderDispatch.calls.map((c) => c.userId)).toEqual([
+      FRIEND,
+      STRANGER,
+    ]);
+    expect(reminderDispatch.calls[0].content).toMatchObject({
+      title: 'Priya',
+      body: 'hi there',
+      data: { type: 'conversation', conversationId: 'conv_1' },
+      notificationType: 'MESSAGE_RECEIVED',
+    });
+  });
+
+  it('falls back to the sender email, then "Someone", when no name is on file', async () => {
+    const { prisma, reminderDispatch, service } = buildService();
+    prisma.users.set(ME, { id: ME, name: null, email: 'priya@example.com' });
+
+    await service.notifyMessageSent({
+      messageId: 'msg_1',
+      conversationId: 'conv_1',
+      senderId: ME,
+      recipientIds: [FRIEND],
+      body: 'hi',
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+    expect(reminderDispatch.calls[0].content.title).toBe('priya@example.com');
+
+    prisma.users.delete(ME);
+    await service.notifyMessageSent({
+      messageId: 'msg_2',
+      conversationId: 'conv_1',
+      senderId: ME,
+      recipientIds: [FRIEND],
+      body: 'hi again',
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+    expect(reminderDispatch.calls[1].content.title).toBe('Someone');
+  });
+
+  it('truncates a long body to a preview', async () => {
+    const { prisma, reminderDispatch, service } = buildService();
+    prisma.addUser(ME);
+    const longBody = 'x'.repeat(200);
+
+    await service.notifyMessageSent({
+      messageId: 'msg_1',
+      conversationId: 'conv_1',
+      senderId: ME,
+      recipientIds: [FRIEND],
+      body: longBody,
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+
+    const preview = reminderDispatch.calls[0].content.body as string;
+    expect(preview.length).toBe(143); // 140 chars + '...'
+    expect(preview.endsWith('...')).toBe(true);
+  });
+
+  it('does not let one recipient failing stop the others', async () => {
+    const { prisma, reminderDispatch, service } = buildService();
+    prisma.addUser(ME);
+    reminderDispatch.dispatchToUser = async (userId: string) => {
+      if (userId === FRIEND) throw new Error('push provider down');
+      return true;
+    };
+
+    await expect(
+      service.notifyMessageSent({
+        messageId: 'msg_1',
+        conversationId: 'conv_1',
+        senderId: ME,
+        recipientIds: [FRIEND, STRANGER],
+        body: 'hi',
+        createdAt: '2026-08-14T00:00:00.000Z',
+      }),
+    ).resolves.toBeUndefined();
   });
 });

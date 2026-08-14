@@ -6,7 +6,9 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 
 import { PrismaService } from '../../../prisma/prisma.service';
+import { ReminderDispatchService } from '../../reminders/reminder-dispatch.service';
 import { ConversationGateSecretGuard } from '../guards/conversation-gate-secret.guard';
+import { MessageNotifySecretGuard } from '../guards/message-notify-secret.guard';
 import { InternalMessagingController } from '../internal-messaging.controller';
 import { JiffyMessagingClient } from '../jiffy-messaging.client';
 import { MessagingConfigService } from '../messaging-config.service';
@@ -32,7 +34,9 @@ async function compileWith(env: Record<string, unknown>) {
       JiffyMessagingClient,
       MessagingService,
       ConversationGateSecretGuard,
+      MessageNotifySecretGuard,
       { provide: PrismaService, useValue: {} },
+      { provide: ReminderDispatchService, useValue: {} },
       { provide: ConfigService, useValue: { get: (key: string) => env[key] } },
     ],
   }).compile();
@@ -109,6 +113,38 @@ describe('MessagingModule wiring', () => {
     expect(moduleRef.get(MessagingConfigService).isEnabled).toBe(false);
 
     const guard = moduleRef.get(ConversationGateSecretGuard);
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { authorization: 'Bearer shared-secret' },
+        }),
+      }),
+    } as any;
+
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
+  it('rejects the on-message-sent endpoint via its guard when no notify secret is configured', async () => {
+    const moduleRef = await compileWith({});
+    const guard = moduleRef.get(MessageNotifySecretGuard);
+
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { authorization: 'Bearer anything' } }),
+      }),
+    } as any;
+
+    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
+  });
+
+  it('accepts the on-message-sent endpoint via its guard once MESSAGE_NOTIFY_SECRET is set, independent of outbound messaging config', async () => {
+    const moduleRef = await compileWith({
+      MESSAGE_NOTIFY_SECRET: 'shared-secret',
+    });
+
+    expect(moduleRef.get(MessagingConfigService).isEnabled).toBe(false);
+
+    const guard = moduleRef.get(MessageNotifySecretGuard);
     const context = {
       switchToHttp: () => ({
         getRequest: () => ({

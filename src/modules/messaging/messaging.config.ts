@@ -107,6 +107,19 @@ export function readConversationGateSecret(read: EnvReader): string | null {
 }
 
 /**
+ * The credential jiffy-messaging's MessageNotifier callback presents on
+ * POST /internal/messaging/on-message-sent. Deliberately a separate
+ * variable from CONVERSATION_GATE_SECRET — this endpoint and the gate
+ * endpoint are different capabilities, and a caller with one should not
+ * automatically have the other. Same null-not-throw reasoning as
+ * readConversationGateSecret: an unset value just leaves this endpoint
+ * unreachable.
+ */
+export function readMessageNotifySecret(read: EnvReader): string | null {
+  return readTrimmed(read, 'MESSAGE_NOTIFY_SECRET') ?? null;
+}
+
+/**
  * Constant-time comparison that never throws on a length mismatch.
  * `timingSafeEqual` requires equal-length buffers, so both sides are
  * hashed to a fixed 32-byte digest first — that also means the secret's

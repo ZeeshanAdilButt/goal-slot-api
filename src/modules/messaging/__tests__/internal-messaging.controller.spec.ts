@@ -5,6 +5,7 @@ import { InternalMessagingController } from '../internal-messaging.controller';
 import { MessagingConfigService } from '../messaging-config.service';
 import { MessagingService } from '../messaging.service';
 import { MessagingTokenService } from '../messaging-token.service';
+import { ReminderDispatchService } from '../../reminders/reminder-dispatch.service';
 
 const ME = 'user_me';
 const FRIEND = 'user_friend';
@@ -68,8 +69,17 @@ function buildController() {
   // Unused by canCreateConversation - never mints a token or calls out to
   // jiffy-messaging, unlike openConversation.
   const jiffy = {} as JiffyMessagingClient;
+  // Unused by canCreateConversation - only notifyMessageSent (backing the
+  // separate on-message-sent route) touches this.
+  const reminderDispatch = {} as ReminderDispatchService;
 
-  const service = new MessagingService(prisma as any, config, tokens, jiffy);
+  const service = new MessagingService(
+    prisma as any,
+    config,
+    tokens,
+    jiffy,
+    reminderDispatch,
+  );
   const controller = new InternalMessagingController(service);
 
   return { prisma, controller };
@@ -196,5 +206,54 @@ describe('InternalMessagingController.canCreateConversation mirrors canMessage',
         participantIds: [attacker, victim],
       }),
     ).resolves.toEqual({ allowed: false });
+  });
+});
+
+describe('InternalMessagingController.onMessageSent', () => {
+  it('dispatches to every recipient and returns { ok: true }', async () => {
+    const prisma = {
+      user: {
+        findUnique: async () => ({ name: 'Priya', email: 'priya@example.com' }),
+      },
+    };
+    const config = new MessagingConfigService({
+      get: () => undefined,
+    } as unknown as ConfigService);
+    const tokens = new MessagingTokenService(config);
+    const jiffy = {} as JiffyMessagingClient;
+    const calls: Array<{ userId: string; content: any }> = [];
+    const reminderDispatch = {
+      dispatchToUser: async (userId: string, content: any) => {
+        calls.push({ userId, content });
+        return true;
+      },
+    };
+
+    const service = new MessagingService(
+      prisma as any,
+      config,
+      tokens,
+      jiffy,
+      reminderDispatch as any,
+    );
+    const controller = new InternalMessagingController(service);
+
+    await expect(
+      controller.onMessageSent({
+        messageId: 'msg_1',
+        conversationId: 'conv_1',
+        senderId: ME,
+        recipientIds: [FRIEND, STRANGER],
+        body: 'hi there',
+        createdAt: '2026-08-14T00:00:00.000Z',
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(calls.map((c) => c.userId)).toEqual([FRIEND, STRANGER]);
+    expect(calls[0].content).toMatchObject({
+      title: 'Priya',
+      body: 'hi there',
+      data: { type: 'conversation', conversationId: 'conv_1' },
+    });
   });
 });
