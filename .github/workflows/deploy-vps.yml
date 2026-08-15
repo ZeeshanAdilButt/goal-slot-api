@@ -12,8 +12,67 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15m covered the single 12m deploy step before. Bumped to 16m for the
+    # new, much shorter .env-upsert step's own SSH connection overhead so it
+    # cannot make an otherwise-healthy deploy trip the job-level timeout.
+    timeout-minutes: 16
     steps:
+      # The VPS .env is hand-maintained and holds values (DB connection
+      # strings, JWT secrets, etc.) this workflow must never touch. This
+      # step only prepares MESSAGE_NOTIFY_SECRET for the upsert below: it
+      # travels base64 encoded so it can survive the cmd/PowerShell quoting
+      # on the way over SSH without ever appearing as a literal in the
+      # script text, and the blob is masked before it is used anywhere, so
+      # the SSH step's command echo shows *** rather than the secret.
+      - name: Prepare MESSAGE_NOTIFY_SECRET
+        id: notify-secret
+        env:
+          MESSAGE_NOTIFY_SECRET: ${{ secrets.MESSAGE_NOTIFY_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MESSAGE_NOTIFY_SECRET:-}" ]; then
+            echo "::error::Missing repository secret MESSAGE_NOTIFY_SECRET."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$MESSAGE_NOTIFY_SECRET" | wc -l)" -ne 0 ]; then
+            echo "::error::MESSAGE_NOTIFY_SECRET contains a newline, which the .env file cannot carry. Check for a stray line break when the secret was pasted."
+            exit 1
+          fi
+
+          blob="$(printf '%s' "$MESSAGE_NOTIFY_SECRET" | base64 -w 0)"
+          echo "::add-mask::$blob"
+          echo "value=$blob" >> "$GITHUB_OUTPUT"
+
+      # Upserts a single line in the VPS's existing .env: replaces
+      # MESSAGE_NOTIFY_SECRET=... if that line is already there, appends it
+      # otherwise. Every other line is copied through unchanged, so the
+      # hand-maintained DB/JWT/etc values in the same file survive
+      # untouched. This runs before the deploy step below so the value is
+      # in place before deploy.ps1 restarts the service — the app reads
+      # .env once at process start (ConfigModule.forRoot({ envFilePath:
+      # '.env' }) in src/app.module.ts), so a restart is what makes this
+      # take effect.
+      #
+      # The secret only ever exists on the box as a decoded byte string
+      # built at runtime from the base64 blob — it is never written into
+      # the script text itself — so this survives whatever characters
+      # `openssl rand -base64` can produce without needing to escape
+      # quotes through cmd.exe. Written unquoted (MESSAGE_NOTIFY_SECRET=...)
+      # both because deploy.ps1's Import-DotEnv already parses that plain
+      # style, and to avoid quoting a value that never appears in the
+      # script text.
+      - name: Upsert MESSAGE_NOTIFY_SECRET in .env
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          command_timeout: 1m
+          script: |
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$envPath = 'C:\app\goal-slot-api\.env'; $secret = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${{ steps.notify-secret.outputs.value }}')); $newLine = 'MESSAGE_NOTIFY_SECRET=' + $secret; if (Test-Path $envPath) { $lines = @(Get-Content -LiteralPath $envPath) } else { $lines = @() }; $pattern = '^\s*MESSAGE_NOTIFY_SECRET\s*='; $matched = $false; $result = @(foreach ($l in $lines) { if ($l -match $pattern) { $matched = $true; $newLine } else { $l } }); if (-not $matched) { $result = $result + $newLine }; [System.IO.File]::WriteAllLines($envPath, [string[]]$result, (New-Object System.Text.UTF8Encoding $false)); if (-not (Select-String -LiteralPath $envPath -Pattern '^MESSAGE_NOTIFY_SECRET=' -Quiet)) { Write-Host 'FAILED: MESSAGE_NOTIFY_SECRET missing from .env after write'; exit 95 } else { Write-Host 'MESSAGE_NOTIFY_SECRET upserted in .env' }"
+
       # Fix up PATH, which a non-interactive SSH session does not inherit,
       # record the commit currently deployed so the script can put it back,
       # fast forward to origin/main, and hand over to the script that the
