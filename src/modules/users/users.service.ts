@@ -247,13 +247,29 @@ export class UsersService {
           adminAssignedPlanNote: true,
           createdAt: true,
           updatedAt: true,
+          // A user "uses the mobile app" if the Expo app ever completed
+          // push registration for them (push-registration.ts, mobile).
+          // That only happens once notification permission is granted, so
+          // this under-counts real mobile usage by however many installed
+          // the app but declined the permission prompt - a lower bound,
+          // not an exact figure. take: 1 because presence is all that's
+          // asked; the row itself is discarded below, never sent to the
+          // client.
+          pushSubscriptions: {
+            where: { kind: 'EXPO' },
+            select: { id: true },
+            take: 1,
+          },
         },
       }),
       this.prisma.user.count({ where: whereClause }),
     ]);
 
     return {
-      users,
+      users: users.map(({ pushSubscriptions, ...user }) => ({
+        ...user,
+        usesMobileApp: pushSubscriptions.length > 0,
+      })),
       pagination: {
         page,
         limit,
@@ -523,17 +539,30 @@ export class UsersService {
   async getUserStats(adminId: string) {
     await this.verifyAdmin(adminId);
 
-    const [totalUsers, activeUsers, disabledUsers, verifiedUsers, planCounts] =
-      await Promise.all([
-        this.prisma.user.count(),
-        this.prisma.user.count({ where: { isDisabled: false } }),
-        this.prisma.user.count({ where: { isDisabled: true } }),
-        this.prisma.user.count({ where: { emailVerified: true } }),
-        this.prisma.user.groupBy({
-          by: ['plan'],
-          _count: { plan: true },
-        }),
-      ]);
+    const [
+      totalUsers,
+      activeUsers,
+      disabledUsers,
+      verifiedUsers,
+      planCounts,
+      mobileAppUsers,
+    ] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.user.count({ where: { isDisabled: false } }),
+      this.prisma.user.count({ where: { isDisabled: true } }),
+      this.prisma.user.count({ where: { emailVerified: true } }),
+      this.prisma.user.groupBy({
+        by: ['plan'],
+        _count: { plan: true },
+      }),
+      // Same signal and same caveat as listUsers' usesMobileApp: a user
+      // only ever gets an EXPO PushSubscription row once the mobile app's
+      // push-registration flow completes, which requires the user to have
+      // granted notification permission. Real mobile usage is >= this.
+      this.prisma.user.count({
+        where: { pushSubscriptions: { some: { kind: 'EXPO' } } },
+      }),
+    ]);
 
     const planCountsMap = planCounts.reduce(
       (acc, curr) => {
@@ -549,6 +578,7 @@ export class UsersService {
       disabledUsers,
       verifiedUsers,
       unverifiedUsers: totalUsers - verifiedUsers,
+      mobileAppUsers,
       byPlan: {
         free: planCountsMap[PlanType.FREE] || 0,
         basic: planCountsMap[PlanType.BASIC] || 0,
