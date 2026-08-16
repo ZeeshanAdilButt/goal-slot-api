@@ -266,13 +266,14 @@ describe('ScheduleService.create conflict-guard transaction', () => {
     expect(prisma.created).toHaveLength(0);
   });
 
-  it('never leaves two rows committed for one slot when two creates race with an unresolved conflict check in between', async () => {
-    // Simulates the exact bug: both callers' conflict checks run before
-    // either insert lands (the pre-fix race). Even with the checks racing,
-    // the second insert must not be allowed to land as a silent duplicate —
-    // in production that's Postgres's serializable isolation aborting one
-    // side; here the fake proves the code path in `create` never itself
-    // decides "both are fine" once it has seen the eventual conflict.
+  it('rejects a second, later create for an already-taken slot (sequential — the check-then-insert already caught this pre-fix too)', async () => {
+    // NOT a concurrency test — both calls are awaited one after the other,
+    // so the second one's conflict check always sees the first's committed
+    // row. This passes identically against the pre-fix code (two separate,
+    // un-transacted statements): it only proves the ordinary non-racing
+    // conflict path still works. The actual race is covered below, by a
+    // fake that lets both transactions' reads genuinely interleave before
+    // either commits.
     const { prisma, service } = buildService();
 
     const first = await service.create(ATTACKER, { ...baseCreate } as any);
@@ -284,4 +285,103 @@ describe('ScheduleService.create conflict-guard transaction', () => {
 
     expect(prisma.created).toHaveLength(1);
   });
+
+  it('genuinely closes the race when two creates for the same slot run concurrently, not sequentially', async () => {
+    // `RacyFakePrisma` below is deliberately a SEPARATE, from-scratch fake
+    // (not FakePrisma with $transaction swapped out) — it models just
+    // enough of Postgres's serializable snapshot isolation to prove the
+    // fix, rather than trusting a mock that's shaped to make the fix look
+    // correct. Each transaction stamps the table's write-version at the
+    // point it *reads* (checkTimeConflict); at *write* time (the insert),
+    // if the version has moved since — meaning another transaction
+    // committed in between — that's a genuine write-skew, and Postgres's
+    // real serializable isolation would abort exactly one side with a
+    // P2034-shaped error. `createWithConflictGuard`'s own `await` between
+    // the read and the write (see schedule.service.ts) is what gives two
+    // `Promise.all`-started calls a real interleaving point here: both
+    // reach their read before either reaches its write, exactly like two
+    // concurrent requests hitting the API at the same moment.
+    const prisma = new RacyFakePrisma();
+    const service = new ScheduleService(prisma as any, new FakeAuth() as any);
+
+    const results = await Promise.allSettled([
+      service.create(ATTACKER, { ...baseCreate } as any),
+      service.create(ATTACKER, { ...baseCreate } as any),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+
+    // Both callers' checks genuinely raced (see the fake's own comment) —
+    // this is the exact scenario the pre-fix two-statement code would have
+    // let both insert into. One must win, one must lose, and the loser's
+    // retry (createWithConflictGuard catches the P2034 and tries again) has
+    // to see the winner's now-committed row and reject with the ordinary
+    // conflict message, not a raw retry-exhausted error.
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason?.message).toContain(
+      'Time slot conflicts with an existing schedule block',
+    );
+    expect(prisma.created).toHaveLength(1);
+  });
 });
+
+/**
+ * A from-scratch fake for the concurrency test above — see that test's own
+ * comment for why this isn't just FakePrisma with `$transaction` patched.
+ */
+class RacyFakePrisma {
+  scheduleBlocks: Row[] = [];
+  created: Row[] = [];
+  private tableVersion = 0;
+
+  private matches(row: Row, where: Record<string, any>): boolean {
+    return Object.keys(where).every((key) => {
+      const cond = where[key];
+      if (cond === undefined) return true;
+      if (cond && typeof cond === 'object' && 'not' in cond) {
+        return row[key] !== cond.not;
+      }
+      return row[key] === cond;
+    });
+  }
+
+  // Read directly by `create()` before `createWithConflictGuard`/
+  // `$transaction` is ever entered — goal ownership + plan-limit checks.
+  goal = { findFirst: async () => null };
+  scheduleBlock = {
+    count: async () => 0,
+    findFirst: async ({ where }: any) =>
+      this.scheduleBlocks.find((b) => this.matches(b, where)) ?? null,
+    findMany: async ({ where }: any) =>
+      this.scheduleBlocks.filter((b) => this.matches(b, where)),
+  };
+
+  $transaction = async (fn: any, _opts?: any) => {
+    const versionAtStart = this.tableVersion;
+    const tx = {
+      goal: this.goal,
+      scheduleBlock: {
+        ...this.scheduleBlock,
+        create: async ({ data }: any) => {
+          if (this.tableVersion !== versionAtStart) {
+            // The write-skew: this transaction's read happened before the
+            // table changed underneath it. Real Postgres would abort one
+            // side of exactly this with a P2034 at commit time.
+            throw { code: 'P2034', message: 'Transaction write conflict' };
+          }
+          const row: Row = {
+            ...data,
+            id: data.id ?? `racy-block-${this.created.length}`,
+          };
+          this.created.push(row);
+          this.scheduleBlocks.push(row);
+          this.tableVersion += 1;
+          return row;
+        },
+      },
+    };
+    return fn(tx);
+  };
+}
