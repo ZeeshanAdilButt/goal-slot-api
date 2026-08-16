@@ -10,6 +10,12 @@ import { EmailService } from '../email/email.service';
 import { CreateNoteDto, UpdateNoteDto, ReorderNotesDto } from './dto/notes.dto';
 import { appendNoteParagraph, matchNotesByTitle } from './note-content';
 
+// Same ceiling coach-journal.service.ts enforces on journal entries. Notes
+// content has no DB-level or DTO-level length limit, so without this a
+// single note could be grown without bound — trivially reachable at volume
+// via repeated Coach APPEND_NOTE_CONTENT actions targeting the same title.
+const MAX_NOTE_CONTENT_LENGTH = 65535;
+
 @Injectable()
 export class NotesService {
   constructor(
@@ -119,6 +125,15 @@ export class NotesService {
       }
     }
 
+    if (
+      dto.content !== undefined &&
+      dto.content.length > MAX_NOTE_CONTENT_LENGTH
+    ) {
+      throw new BadRequestException(
+        `This note's content would exceed the ${MAX_NOTE_CONTENT_LENGTH}-character limit. Trim it and try again.`,
+      );
+    }
+
     return this.prisma.note.update({
       where: { id },
       data: {
@@ -194,9 +209,16 @@ export class NotesService {
       );
     }
 
+    const content = appendNoteParagraph(match.note.content, addition);
+    if (content.length > MAX_NOTE_CONTENT_LENGTH) {
+      throw new BadRequestException(
+        `Adding this would push "${match.note.title}" past the ${MAX_NOTE_CONTENT_LENGTH}-character limit. Trim that page first.`,
+      );
+    }
+
     return this.prisma.note.update({
       where: { id: match.note.id },
-      data: { content: appendNoteParagraph(match.note.content, addition) },
+      data: { content },
     });
   }
 

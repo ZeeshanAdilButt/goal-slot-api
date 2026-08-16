@@ -5,16 +5,19 @@ export const PLAN_LIMITS = {
     maxGoals: 3,
     maxSchedules: 5,
     maxTasksPerDay: 3,
+    maxActivePractices: 20,
   },
   BASIC: {
     maxGoals: 10,
     maxSchedules: Infinity,
     maxTasksPerDay: Infinity,
+    maxActivePractices: 100,
   },
   PRO: {
     maxGoals: Infinity,
     maxSchedules: Infinity,
     maxTasksPerDay: Infinity,
+    maxActivePractices: Infinity,
   },
 } as const;
 

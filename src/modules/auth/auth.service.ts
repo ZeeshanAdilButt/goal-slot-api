@@ -603,7 +603,7 @@ export class AuthService {
 
   async checkPlanLimit(
     userId: string,
-    limitType: 'goals' | 'schedules' | 'tasksPerDay',
+    limitType: 'goals' | 'schedules' | 'tasksPerDay' | 'activePractices',
     currentCount: number,
   ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -618,7 +618,7 @@ export class AuthService {
   // `user.findUnique` round-trip just to re-derive plan limits.
   checkPlanLimitForUser(
     user: User,
-    limitType: 'goals' | 'schedules' | 'tasksPerDay',
+    limitType: 'goals' | 'schedules' | 'tasksPerDay' | 'activePractices',
     currentCount: number,
   ) {
     const limits = resolvePlanLimits(user);
@@ -627,6 +627,7 @@ export class AuthService {
       goals: limits.maxGoals,
       schedules: limits.maxSchedules,
       tasksPerDay: limits.maxTasksPerDay,
+      activePractices: limits.maxActivePractices,
     } as const;
 
     if (currentCount >= limitMap[limitType]) {

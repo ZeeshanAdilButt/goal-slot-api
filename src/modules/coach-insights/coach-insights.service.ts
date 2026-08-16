@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { CoachInsightKind, CoachInsightStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
 import { InsightStatusFilter } from './dto/list-insights.dto';
 
 const ACTIVE_STATUSES: CoachInsightStatus[] = ['PROPOSED', 'ACCEPTED', 'DOING'];
@@ -14,7 +15,10 @@ const NON_DELETABLE_STATUSES: CoachInsightStatus[] = [
 
 @Injectable()
 export class CoachInsightsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+  ) {}
 
   /**
    * Create an insight that lands directly in ACCEPTED (the user already
@@ -40,6 +44,16 @@ export class CoachInsightsService {
       throw new HttpException('title is required', HttpStatus.BAD_REQUEST);
     if (!dto.body?.trim())
       throw new HttpException('body is required', HttpStatus.BAD_REQUEST);
+
+    const activeCount = await this.prisma.coachInsight.count({
+      where: { userId, status: { in: ACTIVE_STATUSES } },
+    });
+    await this.authService.checkPlanLimit(
+      userId,
+      'activePractices',
+      activeCount,
+    );
+
     const now = new Date();
     return this.prisma.coachInsight.create({
       data: {

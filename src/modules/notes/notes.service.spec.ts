@@ -115,6 +115,18 @@ describe('NotesService parent-ownership scope', () => {
     expect(result).toEqual({ success: true });
     expect(prisma.updateManyCalls).toHaveLength(1);
   });
+
+  it('update rejects content past the length ceiling and writes nothing', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.update(OWNER_NOTE, OWNER, {
+        content: 'x'.repeat(65536),
+      } as any),
+    ).rejects.toThrow(/65535-character limit/i);
+
+    expect(prisma.updates).toHaveLength(0);
+  });
 });
 
 // Integration cover for NotesService.appendContentByTitleHint — the method
@@ -241,6 +253,20 @@ describe('NotesService.appendContentByTitleHint', () => {
     await expect(
       service.appendContentByTitleHint(CALLER, 'research papers', 'x'),
     ).rejects.toThrow(/couldn't find a page/i);
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  // Regression cover for an unbounded-growth gap: nothing capped a note's
+  // total length, so repeated appends (trivially reachable at volume via
+  // Coach APPEND_NOTE_CONTENT) could grow a single row without limit.
+  it('rejects and writes nothing when the append would exceed the length ceiling', async () => {
+    const { prisma, service } = buildAppendService([
+      { id: 'n1', userId: CALLER, title: 'Big Note', content: 'x'.repeat(65530) },
+    ]);
+
+    await expect(
+      service.appendContentByTitleHint(CALLER, 'big note', 'this pushes it over'),
+    ).rejects.toThrow(/65535-character limit/i);
     expect(prisma.updates).toHaveLength(0);
   });
 });
