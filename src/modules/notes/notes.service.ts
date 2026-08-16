@@ -234,8 +234,24 @@ export class NotesService {
           .filter((parentId): parentId is string => !!parentId),
       ),
     );
-    for (const parentId of parentIds) {
-      await this.findOne(parentId, userId);
+    // Was one findOne (one findUnique query) per unique parentId, sequentially
+    // awaited - a drag that touches N distinct parents did N round trips
+    // before a single row of the actual reorder even ran. Batched into one
+    // findMany, then the same not-found/forbidden checks findOne did.
+    if (parentIds.length > 0) {
+      const parents = await this.prisma.note.findMany({
+        where: { id: { in: parentIds } },
+      });
+      const parentsById = new Map(parents.map((p) => [p.id, p]));
+      for (const parentId of parentIds) {
+        const parent = parentsById.get(parentId);
+        if (!parent) {
+          throw new NotFoundException('Note not found');
+        }
+        if (parent.userId !== userId) {
+          throw new ForbiddenException('You do not have access to this note');
+        }
+      }
     }
 
     const updates = items.map((item) =>
@@ -255,17 +271,25 @@ export class NotesService {
     return { success: true };
   }
 
+  // Walks the note tree level by level, one query per depth level instead of
+  // one query per node - the previous version recursed node-by-node, so
+  // reparenting a note under a tree N notes deep did N sequential queries
+  // just to check for a cycle. Same result set, same order-of-magnitude
+  // input (a personal notes tree), far fewer round trips for anything with
+  // more than a couple of children per level.
   private async getDescendantIds(noteId: string): Promise<string[]> {
-    const children = await this.prisma.note.findMany({
-      where: { parentId: noteId },
-      select: { id: true },
-    });
+    const ids: string[] = [];
+    let frontier: string[] = [noteId];
 
-    const ids: string[] = children.map((c: { id: string }) => c.id);
-
-    for (const child of children) {
-      const childDescendants = await this.getDescendantIds(child.id);
-      ids.push(...childDescendants);
+    while (frontier.length > 0) {
+      const children = await this.prisma.note.findMany({
+        where: { parentId: { in: frontier } },
+        select: { id: true },
+      });
+      if (children.length === 0) break;
+      const childIds = children.map((c: { id: string }) => c.id);
+      ids.push(...childIds);
+      frontier = childIds;
     }
 
     return ids;

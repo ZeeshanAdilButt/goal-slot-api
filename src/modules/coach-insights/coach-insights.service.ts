@@ -87,6 +87,14 @@ export class CoachInsightsService {
     return this.prisma.coachInsight.findMany({
       where,
       orderBy: [{ createdAt: 'desc' }],
+      // ACTIVE is already bounded by the activePractices plan limit
+      // (createAccepted checks it below), but DONE/DISMISSED/SAVED/ALL have
+      // no cap - every extraction pass can add rows and nothing ever deletes
+      // them, so a long-lived account's history grows without bound. This
+      // is a ceiling far above what any real history view/pagination would
+      // ever need, not a page size - it just stops the query itself from
+      // ever being genuinely unbounded.
+      take: 500,
     });
   }
 

@@ -33,9 +33,9 @@ class FakeTx {
       }
       return [];
     },
-    create: async ({ data }: any) => {
-      this.createdGoals.push(data);
-      return { id: `${data.templateGoalRef}-new` };
+    createMany: async ({ data }: any) => {
+      this.createdGoals.push(...data);
+      return { count: data.length };
     },
   };
 

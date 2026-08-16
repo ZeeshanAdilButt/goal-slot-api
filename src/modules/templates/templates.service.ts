@@ -106,14 +106,22 @@ export class TemplatesService {
 
         // Use the goal's order in the template as the initial `order` so the
         // goals page shows them in the curator's intended sequence.
-        for (let i = 0; i < template.goals.length; i++) {
-          const g = template.goals[i];
-          const computed = targetHoursByRef.get(g.ref) ?? 0;
-          const deadline = g.deadlineDays
-            ? new Date(Date.now() + g.deadlineDays * 24 * 60 * 60 * 1000)
-            : null;
-          const created = await tx.goal.create({
-            data: {
+        //
+        // IDs are generated here rather than left to Goal's `@default(uuid())`
+        // so every goal can be inserted in one `createMany` instead of one
+        // `create` per template goal (was N sequential round trips inside this
+        // transaction for an N-goal template) - we still need each id up
+        // front to populate goalRefMap for the schedule blocks / tasks below.
+        const goalInputs: Prisma.GoalCreateManyInput[] = template.goals.map(
+          (g, i) => {
+            const id = crypto.randomUUID();
+            goalRefMap.set(g.ref, id);
+            const computed = targetHoursByRef.get(g.ref) ?? 0;
+            const deadline = g.deadlineDays
+              ? new Date(Date.now() + g.deadlineDays * 24 * 60 * 60 * 1000)
+              : null;
+            return {
+              id,
               userId,
               title: g.title,
               description: g.description ?? null,
@@ -124,12 +132,11 @@ export class TemplatesService {
               deadline,
               templateId: template.id,
               templateGoalRef: g.ref,
-            },
-            select: { id: true },
-          });
-          goalRefMap.set(g.ref, created.id);
-          goalsCreated++;
-        }
+            };
+          },
+        );
+        const createdGoals = await tx.goal.createMany({ data: goalInputs });
+        goalsCreated = createdGoals.count;
       } else if (opts.schedule || opts.tasks) {
         // The user did not opt in to creating goals, but the schedule or
         // tasks they ARE importing reference goalRefs. Pre-populate the map

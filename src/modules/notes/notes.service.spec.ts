@@ -33,7 +33,13 @@ class FakePrisma {
       this.findUniqueArgs.push(where);
       return this.notesById[where.id] ?? null;
     },
-    findMany: async () => [],
+    findMany: async ({ where }: any = {}) => {
+      const ids: string[] | undefined = where?.id?.in;
+      if (!ids) return [];
+      return ids
+        .map((id: string) => this.notesById[id])
+        .filter((note: any) => note !== undefined);
+    },
     aggregate: async () => ({ _max: { order: null } }),
     create: async (args: any) => {
       this.creates.push(args);
