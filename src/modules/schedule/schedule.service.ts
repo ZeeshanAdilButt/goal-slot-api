@@ -4,12 +4,21 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import {
   CreateScheduleBlockDto,
   UpdateScheduleBlockDto,
 } from './dto/schedule.dto';
+
+// A client that can run `scheduleBlock` queries: either the live
+// PrismaService or the `tx` handed to a `$transaction` callback. Lets
+// `checkTimeConflict` run either standalone or as part of one atomic
+// check-then-insert (see `createWithConflictGuard`).
+type ScheduleBlockClient = Pick<PrismaService, 'scheduleBlock'>;
+
+const MAX_CONFLICT_RETRIES = 3;
 
 @Injectable()
 export class ScheduleService {
@@ -49,27 +58,75 @@ export class ScheduleService {
       currentSchedules,
     );
 
-    // Check for time conflicts
-    const hasConflict = await this.checkTimeConflict(
-      userId,
-      dto.dayOfWeek,
-      dto.startTime,
-      dto.endTime,
-    );
-    if (hasConflict) {
-      throw new BadRequestException(
-        'Time slot conflicts with an existing schedule block',
-      );
-    }
+    return this.createWithConflictGuard(userId, dto);
+  }
 
-    return this.prisma.scheduleBlock.create({
-      data: {
-        ...dto,
-        id: dto.id ?? undefined,
-        userId,
-      },
-      include: { goal: true },
-    });
+  /**
+   * The time-conflict check and the insert used to be two separate
+   * statements — `checkTimeConflict` then `prisma.scheduleBlock.create` —
+   * with nothing between them. Two concurrent creates for the same slot
+   * (a double-tap before the button disables, a client retry racing its
+   * own still-in-flight original attempt, or two different
+   * clients/idempotency keys — mobile, web, Coach — landing at the same
+   * moment) could both run the check, both see "no conflict" because
+   * neither had written yet, and both insert: two real overlapping rows
+   * for one logical booking. That's the "schedule still double" bug.
+   *
+   * Client-side idempotency keys (goalslot-mobile@83d5536) don't close
+   * this on their own — they only dedupe a literal retry carrying the
+   * *same* key, not two different requests racing each other for the
+   * same slot.
+   *
+   * Running the check + insert inside one SERIALIZABLE transaction closes
+   * the window: Postgres's serializable snapshot isolation tracks the
+   * read (the conflict-check SELECT) against the write (the INSERT) and
+   * detects exactly this phantom-read pattern between two concurrent
+   * transactions, aborting the loser with a retryable serialization
+   * failure (P2034) instead of letting both commit. The loser is retried
+   * a few times so it gets a fair second look once the winner has
+   * committed — at which point its own conflict check correctly sees the
+   * winner's row and throws the normal 400 instead of silently
+   * duplicating it.
+   */
+  private async createWithConflictGuard(
+    userId: string,
+    dto: CreateScheduleBlockDto,
+    attempt = 0,
+  ): Promise<Awaited<ReturnType<PrismaService['scheduleBlock']['create']>>> {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const hasConflict = await this.checkTimeConflict(
+            userId,
+            dto.dayOfWeek,
+            dto.startTime,
+            dto.endTime,
+            undefined,
+            tx,
+          );
+          if (hasConflict) {
+            throw new BadRequestException(
+              'Time slot conflicts with an existing schedule block',
+            );
+          }
+
+          return tx.scheduleBlock.create({
+            data: {
+              ...dto,
+              id: dto.id ?? undefined,
+              userId,
+            },
+            include: { goal: true },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializationFailure(error) && attempt < MAX_CONFLICT_RETRIES) {
+        return this.createWithConflictGuard(userId, dto, attempt + 1);
+      }
+      throw error;
+    }
   }
 
   async findAll(userId: string) {
@@ -222,8 +279,9 @@ export class ScheduleService {
     startTime: string,
     endTime: string,
     excludeId?: string,
+    client: ScheduleBlockClient = this.prisma,
   ): Promise<boolean> {
-    const blocks = await this.prisma.scheduleBlock.findMany({
+    const blocks = await client.scheduleBlock.findMany({
       where: {
         userId,
         dayOfWeek,
@@ -284,4 +342,18 @@ export class ScheduleService {
 
     return weekSchedule;
   }
+}
+
+/**
+ * Duck-typed rather than `instanceof Prisma.PrismaClientKnownRequestError` so
+ * the check keeps working against the fake Prisma client used in unit tests
+ * (mirrors `isUniqueViolation` in active-timer.service.ts, which guards the
+ * analogous check-then-write race on session start).
+ */
+function isSerializationFailure(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'P2034'
+  );
 }
