@@ -746,6 +746,13 @@ enum NotificationType {
   SHARED_REPORT_UNVIEWED
   INSTRUCTION_ASSIGNED
   MESSAGE_RECEIVED
+  // A new app release/update is available. Dispatched from
+  // ReleaseNotesService.create when an admin publishes a release note —
+  // see notification-policy.ts and reminder-dispatch.service.ts. Payload
+  // shape `{ type: 'release', url?: string }` matches what goalslot-mobile's
+  // deep-link resolver already speculatively handles (opens `url`
+  // externally if present, otherwise triggers an in-app OTA update check).
+  APP_RELEASE
 }
 
 // Was a free-form String ("WEB" | "EXPO") until a mismatched value written

@@ -100,6 +100,16 @@ export const NOTIFICATION_POLICY: Record<NotificationType, NotificationPolicy> =
       push: NUDGE_PUSH,
     },
 
+    // A new build was published. Not urgent (nobody is waiting on it the
+    // way a chat reply is), so default priority — but worth email too,
+    // since a user who's stepped away from the app for a while (exactly
+    // who benefits from being told an update is out) may not have push
+    // reliably configured.
+    [NotificationType.APP_RELEASE]: {
+      channels: { email: true, push: true },
+      push: NUDGE_PUSH,
+    },
+
     // Never goes through ReminderDispatchService today - NotificationsService
     // writes the in-app Notification row directly and nothing else (see
     // src/modules/notifications/notifications.service.ts). Given an explicit

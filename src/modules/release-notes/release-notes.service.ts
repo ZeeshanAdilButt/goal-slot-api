@@ -1,16 +1,23 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateReleaseNoteDto } from './dto/create-release-note.dto';
 import { UpdateReleaseNoteDto } from './dto/update-release-note.dto';
-import { UserRole } from '@prisma/client';
+import { NotificationType, UserRole } from '@prisma/client';
+import { ReminderDispatchService } from '../reminders/reminder-dispatch.service';
 
 @Injectable()
 export class ReleaseNotesService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(ReleaseNotesService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private readonly reminderDispatch: ReminderDispatchService,
+  ) {}
 
   private ensureAdmin(role: UserRole) {
     if (role !== UserRole.ADMIN && role !== UserRole.SUPER_ADMIN) {
@@ -20,7 +27,7 @@ export class ReleaseNotesService {
 
   async create(dto: CreateReleaseNoteDto, role: UserRole) {
     this.ensureAdmin(role);
-    return this.prisma.releaseNote.create({
+    const note = await this.prisma.releaseNote.create({
       data: {
         version: dto.version,
         title: dto.title,
@@ -28,6 +35,46 @@ export class ReleaseNotesService {
         publishedAt: dto.publishedAt ? new Date(dto.publishedAt) : undefined,
       },
     });
+
+    // Best-effort, same pattern InstructionsService.assign already uses:
+    // the release note itself has already committed above, so a
+    // notification failure (for one user or all of them) must never make
+    // this call look like it failed. goalslot-mobile's deep-link resolver
+    // already speculatively handles `{ type: 'release' }` — no `url` here
+    // by design, so a tap triggers the in-app OTA check/apply flow rather
+    // than sending anyone to a page for a JS-only update.
+    void this.notifyAllUsersOfRelease(note.version, note.title).catch(
+      (err) =>
+        this.logger.error(
+          `Failed to fan out APP_RELEASE notification for ${note.version}`,
+          err,
+        ),
+    );
+
+    return note;
+  }
+
+  private async notifyAllUsersOfRelease(
+    version: string,
+    title: string,
+  ): Promise<void> {
+    const users = await this.prisma.user.findMany({ select: { id: true } });
+    const results = await Promise.allSettled(
+      users.map((user) =>
+        this.reminderDispatch.dispatchToUser(user.id, {
+          title: `GoalSlot ${version}`,
+          body: title,
+          data: { type: 'release' },
+          notificationType: NotificationType.APP_RELEASE,
+        }),
+      ),
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.logger.warn(
+        `APP_RELEASE fan-out for ${version}: ${failed}/${users.length} users failed`,
+      );
+    }
   }
 
   async update(id: string, dto: UpdateReleaseNoteDto, role: UserRole) {
