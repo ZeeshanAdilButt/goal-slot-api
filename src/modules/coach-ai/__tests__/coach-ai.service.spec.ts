@@ -859,6 +859,10 @@ describe('CoachAiService', () => {
       expect(msg).toContain("What you've already suggested");
       expect(msg).toContain('60-min Deep Work block');
       expect(msg).toMatch(/status=DOING/);
+      // suggestedAction must never be replayed into a later session's
+      // context — it's free text an earlier, manipulated Coach turn could
+      // have used to smuggle instructions that would then look trusted.
+      expect(msg).not.toContain('Block 09:00-10:00 Mon/Wed/Fri');
     }
   });
 
@@ -1323,7 +1327,7 @@ describe('formatMemoryBlock', () => {
     expect(formatMemoryBlock([])).toBe('');
   });
 
-  it('formats with status and suggestedAction when present', () => {
+  it('formats with status and title, but never replays suggestedAction', () => {
     const now = new Date();
     const txt = formatMemoryBlock(
       [
@@ -1355,12 +1359,49 @@ describe('formatMemoryBlock', () => {
       now,
     );
     expect(txt).toContain('60-min Deep Work block');
-    expect(txt).toContain('Block 09:00-10:00');
+    // suggestedAction is free text that could carry injected instructions
+    // from an earlier, manipulated Coach turn — it must never be replayed
+    // as trusted-looking "things you already agreed to" context.
+    expect(txt).not.toContain('Block 09:00-10:00');
     expect(txt).toContain('status=DOING');
     expect(txt).toMatch(/2 weeks ago|this week|last week/);
   });
 
-  it('FIFO-trims when over the 800-char cap (oldest dropped first)', () => {
+  it('never replays body either', () => {
+    const now = new Date();
+    const txt = formatMemoryBlock(
+      [
+        {
+          id: 'a',
+          userId: 'u',
+          sourceConversationId: null,
+          sourceMessageId: null,
+          scopeKey: '2026-W22',
+          kind: 'SUGGESTION',
+          title: '60-min Deep Work block',
+          body: 'SECRET-BODY-TEXT should never appear in memory replay',
+          evidence: 'e',
+          suggestedAction: null,
+          mediaSlot: null,
+          mediaTopic: null,
+          status: 'ACCEPTED',
+          acceptedAt: now,
+          startedDoingAt: null,
+          completedAt: null,
+          dismissedAt: null,
+          savedAt: null,
+          userNote: null,
+          createdAt: now,
+          updatedAt: now,
+        } as any,
+      ],
+      800,
+      now,
+    );
+    expect(txt).not.toContain('SECRET-BODY-TEXT');
+  });
+
+  it('FIFO-trims when over the char cap (oldest dropped first)', () => {
     const now = new Date();
     const make = (id: string, weeksOld: number, title: string): any => ({
       id,
@@ -1372,7 +1413,7 @@ describe('formatMemoryBlock', () => {
       title,
       body: 'b',
       evidence: 'e',
-      suggestedAction: 'x'.repeat(150),
+      suggestedAction: null,
       mediaSlot: null,
       mediaTopic: null,
       status: 'ACCEPTED',
@@ -1386,13 +1427,15 @@ describe('formatMemoryBlock', () => {
       updatedAt: now,
     });
 
+    // Titles (not suggestedAction) now drive line length, since
+    // suggestedAction is excluded from the replay entirely.
     const insights = [
-      make('a', 10, 'OLDEST'),
-      make('b', 5, 'MIDDLE'),
-      make('c', 1, 'NEWEST'),
+      make('a', 10, `OLDEST ${'x'.repeat(80)}`),
+      make('b', 5, `MIDDLE ${'x'.repeat(80)}`),
+      make('c', 1, `NEWEST ${'x'.repeat(80)}`),
     ];
-    const txt = formatMemoryBlock(insights, 400, now);
-    expect(txt.length).toBeLessThanOrEqual(400);
+    const txt = formatMemoryBlock(insights, 150, now);
+    expect(txt.length).toBeLessThanOrEqual(150);
     // OLDEST should be the first to drop.
     expect(txt).not.toContain('OLDEST');
     expect(txt).toContain('NEWEST');

@@ -1652,10 +1652,14 @@ export function formatMemoryBlock(
     return aT - bT;
   });
 
+  // Only `title` (100 chars, tightly constrained) is replayed here.
+  // `suggestedAction` and `body` are both excluded: they're longer-form free
+  // text an earlier, manipulated Coach turn could have used to inject
+  // instructions, which would otherwise come back as trusted-looking
+  // "things you already agreed to" context in a later, unrelated session.
   const lines: string[] = sortedOldestFirst.map((i) => {
     const ago = weeksAgoLabel(i.acceptedAt ?? i.createdAt, now);
-    const action = i.suggestedAction ? `: ${i.suggestedAction}` : '';
-    return `[ACCEPTED ${ago}, status=${i.status}] ${i.title}${action}`;
+    return `[ACCEPTED ${ago}, status=${i.status}] ${i.title}`;
   });
 
   // FIFO trim: drop oldest until total length <= cap.
