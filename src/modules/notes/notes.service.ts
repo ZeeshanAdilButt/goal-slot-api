@@ -8,6 +8,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { CreateNoteDto, UpdateNoteDto, ReorderNotesDto } from './dto/notes.dto';
+import { appendNoteParagraph, matchNotesByTitle } from './note-content';
 
 @Injectable()
 export class NotesService {
@@ -138,6 +139,64 @@ export class NotesService {
 
     return this.prisma.note.delete({
       where: { id },
+    });
+  }
+
+  /**
+   * Find one of the caller's own notes by title hint and append a paragraph
+   * to it. The one write path with no `id` at all — see AppendNoteContentDto
+   * for why (the Coach is never given note titles/ids in its chat context).
+   *
+   * Ownership is implicit rather than a separate check: `matchNotesByTitle`
+   * only ever sees notes already scoped to `userId` by the `findMany` below,
+   * so there is no id from a payload to trust and no way this can reach
+   * another account's note.
+   *
+   * Throws BadRequestException (not silently falling through to "no match")
+   * when the hint is ambiguous or matches nothing, so the Coach proposal
+   * action fails loudly with an explanation instead of guessing which page
+   * was meant or creating an unwanted new one — see CoachProposalsService's
+   * APPEND_NOTE_CONTENT case for how that surfaces to the user.
+   *
+   * Not transactional: the read-modify-write can in principle lose one of
+   * two genuinely simultaneous appends to the same note. Accepted
+   * deliberately, same as CoachJournalService.appendContent — this is one
+   * person's own note, appended to at human speed.
+   */
+  async appendContentByTitleHint(
+    userId: string,
+    titleHint: string,
+    addition: string,
+  ) {
+    const candidates = await this.prisma.note.findMany({
+      where: { userId },
+      select: { id: true, title: true, content: true },
+    });
+
+    const match = matchNotesByTitle(candidates, titleHint);
+
+    if (match.status === 'ambiguous') {
+      const names = match.candidates
+        .slice(0, 5)
+        .map((n) => `"${n.title}"`)
+        .join(', ');
+      throw new BadRequestException(
+        `Found more than one page that could match "${titleHint}": ${names}. ` +
+          'Nothing was added — ask again naming the page more specifically, ' +
+          'or give it a more distinct title.',
+      );
+    }
+    if (match.status === 'no-match') {
+      throw new BadRequestException(
+        `Couldn't find a page titled "${titleHint}" to add to. Check your ` +
+          'Notes and try again with the exact (or closer) title, or create ' +
+          'the page first.',
+      );
+    }
+
+    return this.prisma.note.update({
+      where: { id: match.note.id },
+      data: { content: appendNoteParagraph(match.note.content, addition) },
     });
   }
 

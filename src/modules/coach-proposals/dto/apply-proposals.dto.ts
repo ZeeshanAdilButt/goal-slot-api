@@ -41,6 +41,11 @@ export const COACH_ACTION_TYPES = [
   // type union and a runtime array; a type missing from that array is dropped
   // before the user ever sees the card.
   'APPEND_JOURNAL_ENTRY',
+  // Appends a paragraph to an EXISTING note, matched by title hint (payload
+  // has no id — see AppendNoteContentDto). Append-only, same shape as
+  // APPEND_JOURNAL_ENTRY — see NotesService.appendContentByTitleHint. Also
+  // mirrored in packages/shared/src/api/coach.ts's runtime array.
+  'APPEND_NOTE_CONTENT',
 ] as const;
 
 export type CoachActionType = (typeof COACH_ACTION_TYPES)[number];

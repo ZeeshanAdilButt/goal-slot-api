@@ -15,6 +15,7 @@ import { CoachProposedAction } from './dto/apply-proposals.dto';
 // "$ref:N" back-reference path to stay representative.
 const CREATED_ID = '22222222-2222-4222-8222-222222222222';
 const JOURNAL_ENTRY_ID = '33333333-3333-4333-8333-333333333333';
+const NOTE_ID = '44444444-4444-4444-8444-444444444444';
 
 class SpyService {
   calls: Array<{ method: string; userId: string; id?: string; dto: any }> = [];
@@ -43,6 +44,25 @@ class SpyService {
     this.calls.push({ method: 'appendContent', userId, dto });
     return { id: JOURNAL_ENTRY_ID };
   };
+
+  // NotesService.appendContentByTitleHint's real signature is
+  // (userId, titleHint, content) — not the (userId, dto) shape every other
+  // spy method above mimics — so this is captured as its own method rather
+  // than folded into a generic one. `dto` in the recorded call is
+  // reconstructed as { titleHint, content } purely so assertions below can
+  // read it the same way they read every other spy call.
+  appendContentByTitleHint = async (
+    userId: string,
+    titleHint: string,
+    content: string,
+  ) => {
+    this.calls.push({
+      method: 'appendContentByTitleHint',
+      userId,
+      dto: { titleHint, content },
+    });
+    return { id: NOTE_ID };
+  };
 }
 
 class FakePrisma {
@@ -60,6 +80,7 @@ function buildService() {
   const insights = new SpyService();
   const activeTimer = new SpyService();
   const journal = new SpyService();
+  const notes = new SpyService();
   const service = new CoachProposalsService(
     new FakePrisma() as any,
     goals as any,
@@ -69,6 +90,7 @@ function buildService() {
     insights as any,
     activeTimer as any,
     journal as any,
+    notes as any,
   );
 
   return {
@@ -80,6 +102,7 @@ function buildService() {
     insights,
     activeTimer,
     journal,
+    notes,
   };
 }
 
@@ -379,6 +402,95 @@ describe('CoachProposalsService payload validation', () => {
     expect(journal.calls).toHaveLength(0);
   });
 
+  // APPEND_NOTE_CONTENT has no `id` field at all (see AppendNoteContentDto's
+  // doc comment: the Coach is never given note titles/ids, so matching
+  // happens server-side against `titleHint`). The mass-assignment surface is
+  // still the same shape as every other action here — a payload smuggling
+  // `userId` must be refused before NotesService is ever reached.
+  it('rejects APPEND_NOTE_CONTENT carrying a userId', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: {
+          titleHint: 'research papers',
+          content: 'read about dynamo',
+          userId: VICTIM,
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('userId');
+    expect(notes.calls).toHaveLength(0);
+  });
+
+  it('rejects APPEND_NOTE_CONTENT carrying a note id', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: {
+          titleHint: 'research papers',
+          content: 'read about dynamo',
+          id: '99999999-9999-4999-8999-999999999999',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(notes.calls).toHaveLength(0);
+  });
+
+  it('rejects fields AppendNoteContentDto does not expose', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: {
+          titleHint: 'research papers',
+          content: 'read about dynamo',
+          parentId: 'some-other-note',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('parentId');
+    expect(notes.calls).toHaveLength(0);
+  });
+
+  it('rejects an APPEND_NOTE_CONTENT missing titleHint', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: { content: 'read about dynamo' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(notes.calls).toHaveLength(0);
+  });
+
+  it('rejects an APPEND_NOTE_CONTENT with nothing but whitespace to add', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: { titleHint: 'research papers', content: '   ' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(notes.calls).toHaveLength(0);
+  });
+
   it('one poisoned action does not stop the legitimate ones in the batch', async () => {
     const { service, goals } = buildService();
 
@@ -532,6 +644,64 @@ describe('CoachProposalsService still applies legitimate proposals', () => {
       content: 'Monday was better.',
       date: '2026-08-10',
     });
+  });
+
+  it('applies APPEND_NOTE_CONTENT by dispatching to NotesService with the trimmed titleHint and content', async () => {
+    const { service, notes } = buildService();
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: {
+          titleHint: '  research papers  ',
+          content: '  read about dynamo  ',
+        },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0]).toMatchObject({ ok: true, resultId: NOTE_ID });
+    expect(notes.calls).toHaveLength(1);
+    expect(notes.calls[0].userId).toBe(ATTACKER);
+    // Matching happens inside NotesService (title-hint resolution, never an
+    // id from the payload) — this only proves the proposals service handed
+    // it the right, trimmed inputs under the caller's own id.
+    expect(notes.calls[0].dto).toEqual({
+      titleHint: 'research papers',
+      content: 'read about dynamo',
+    });
+  });
+
+  // NotesService.appendContentByTitleHint throws BadRequestException for an
+  // ambiguous or absent title match (see notes.service.spec.ts for the
+  // matching-tier coverage itself). This proves that failure surfaces as a
+  // per-action error on the result — the same "no silent failure, no
+  // guessing" path every other action's apply-time errors already take —
+  // rather than the batch throwing outright or the action reporting success.
+  it("surfaces NotesService's no-match/ambiguous message as this action's error, without touching the batch's other actions", async () => {
+    const { service, notes, goals } = buildService();
+    const { BadRequestException } = jest.requireActual('@nestjs/common');
+    notes.appendContentByTitleHint = async () => {
+      throw new BadRequestException(
+        'Couldn\'t find a page titled "research papers" to add to.',
+      );
+    };
+
+    const results = await service.apply(ATTACKER, [
+      {
+        type: 'APPEND_NOTE_CONTENT',
+        payload: { titleHint: 'research papers', content: 'x' },
+      } as CoachProposedAction,
+      {
+        type: 'RENAME_GOAL',
+        id: OWN_GOAL,
+        payload: { title: 'Still works' },
+      } as CoachProposedAction,
+    ]);
+
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error).toContain('research papers');
+    expect(results[1]).toMatchObject({ ok: true });
+    expect(goals.calls).toHaveLength(1);
   });
 
   it('still resolves $ref tokens across actions in one batch', async () => {

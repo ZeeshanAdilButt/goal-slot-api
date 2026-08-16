@@ -31,6 +31,8 @@ import {
   StopTimerSessionDto,
 } from '../active-timer/dto/active-timer.dto';
 import { CreatePracticeDto } from '../coach-insights/dto/create-practice.dto';
+import { NotesService } from '../notes/notes.service';
+import { AppendNoteContentDto } from '../notes/dto/append-content.dto';
 import {
   CoachActionResult,
   CoachActionType,
@@ -78,6 +80,7 @@ const PAYLOAD_DTO_BY_ACTION: Partial<
   STOP_TIMER: StopTimerSessionDto,
   APPEND_JOURNAL_ENTRY: AppendJournalContentDto,
   CREATE_PRACTICE: CreatePracticeDto,
+  APPEND_NOTE_CONTENT: AppendNoteContentDto,
 };
 
 /**
@@ -144,6 +147,7 @@ export class CoachProposalsService {
     private readonly insights: CoachInsightsService,
     private readonly activeTimer: ActiveTimerService,
     private readonly journal: CoachJournalService,
+    private readonly notes: NotesService,
   ) {}
 
   async apply(
@@ -553,6 +557,44 @@ export class CoachProposalsService {
           payload as unknown as AppendJournalContentDto,
         );
         return entry?.id;
+      }
+
+      // -------- Notes --------
+      // Dispatches onto NotesService, the SAME service backing the notes
+      // CRUD endpoints (notes.controller.ts) — not a Coach-only copy, so the
+      // append rule and the title-matching tiers can't drift from anywhere
+      // else that ever needs them.
+      //
+      // No `id` in the payload at all, unlike every other UPDATE-shaped
+      // action here: the Coach is never given the user's note titles/ids in
+      // its chat context (unlike goals/tasks/schedule blocks), so it has
+      // nothing to echo back. `titleHint` is resolved against the user's own
+      // notes inside appendContentByTitleHint (exact match preferred,
+      // substring fallback — see matchNotesByTitle in note-content.ts). An
+      // ambiguous or absent match throws BadRequestException with a message
+      // naming what happened, which lands in this action's per-item
+      // `error` and renders on the proposal card exactly like a stale
+      // UPDATE_SCHEDULE_BLOCK id does — no silent failure and no new page
+      // created just because the name didn't resolve.
+      //
+      // APPEND, NEVER REPLACE, same as APPEND_JOURNAL_ENTRY just above:
+      // appendContentByTitleHint only ever adds a paragraph.
+      case 'APPEND_NOTE_CONTENT': {
+        if (
+          typeof payload.titleHint !== 'string' ||
+          !payload.titleHint.trim()
+        ) {
+          throw new Error('APPEND_NOTE_CONTENT requires payload.titleHint');
+        }
+        if (typeof payload.content !== 'string' || !payload.content.trim()) {
+          throw new Error('APPEND_NOTE_CONTENT requires payload.content');
+        }
+        const updated = await this.notes.appendContentByTitleHint(
+          userId,
+          payload.titleHint.trim(),
+          payload.content.trim(),
+        );
+        return updated?.id;
       }
 
       default:
