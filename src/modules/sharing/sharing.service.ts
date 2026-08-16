@@ -468,15 +468,20 @@ export class SharingService {
 
   // ============ PUBLIC ACCESS METHODS (No auth required) ============
 
-  private async verifyPublicToken(token: string) {
-    // inviteToken is also set on personal email invitations (see
-    // inviteUser above), not just genuine public share links. Without the
-    // isPublicLink filter, a personal invite token would resolve through
-    // this unauthenticated path before the invite was ever accepted -
-    // exposing the owner's goals/time entries to anyone holding the
-    // token (forwarded mail, mail-scanning proxies, browser history).
+  // Looks up a SharedAccess row by inviteToken with no isPublicLink
+  // filter, for the metadata-only view (getPublicSharedData). That
+  // response carries no goals/time entries - just the owner's
+  // name/email/avatar and the invite's status flags - so it's safe to
+  // resolve for a personal email invite too. The web /share/accept page
+  // depends on this succeeding for personal invites specifically: that's
+  // what lets it render the "create an account or log in to accept"
+  // prompt instead of a dead end. Anyone resolving this already holds the
+  // token (a UUID emailed only to the invitee), so this doesn't add a new
+  // exposure - the two endpoints below are where actual owner data lives,
+  // and they keep the stricter check.
+  private async lookupShareByToken(token: string) {
     const share = await this.prisma.sharedAccess.findUnique({
-      where: { inviteToken: token, isPublicLink: true },
+      where: { inviteToken: token },
       include: {
         owner: { select: { id: true, email: true, name: true, avatar: true } },
       },
@@ -493,8 +498,26 @@ export class SharingService {
     return share;
   }
 
+  private async verifyPublicToken(token: string) {
+    // inviteToken is also set on personal email invitations (see
+    // inviteUser above), not just genuine public share links. Without the
+    // isPublicLink filter, a personal invite token would resolve through
+    // this unauthenticated path before the invite was ever accepted -
+    // exposing the owner's goals/time entries to anyone holding the
+    // token (forwarded mail, mail-scanning proxies, browser history).
+    // getPublicSharedData does NOT go through this check anymore - see
+    // lookupShareByToken above for why the metadata view is exempt.
+    const share = await this.lookupShareByToken(token);
+
+    if (!share.isPublicLink) {
+      throw new NotFoundException('Invalid or expired share link');
+    }
+
+    return share;
+  }
+
   async getPublicSharedData(token: string) {
-    const share = await this.verifyPublicToken(token);
+    const share = await this.lookupShareByToken(token);
 
     return {
       owner: share.owner,

@@ -148,7 +148,7 @@ function buildPublicTokenService() {
 }
 
 describe('SharingService.verifyPublicToken (via public endpoints)', () => {
-  it('rejects a personal invite token that is not a public link', async () => {
+  it('rejects a personal invite token that is not a public link from the sensitive data endpoints', async () => {
     const { prisma, service } = buildPublicTokenService();
     prisma.shares.push(
       makeShare({
@@ -162,9 +162,47 @@ describe('SharingService.verifyPublicToken (via public endpoints)', () => {
     await expect(
       service.getPublicSharedGoals('personal-invite-token'),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('still resolves metadata for a personal invite token, without exposing owner data', async () => {
+    // Regression coverage: opening a personal (emailed) invite link must
+    // not dead-end on "link expired or invalid" the moment it's clicked.
+    // The web /share/accept page's first call is always getPublicSharedData,
+    // which needs to succeed for personal invites too so it can render the
+    // "create an account or log in" prompt - only the goals/time-entries
+    // endpoints stay restricted to genuine public links.
+    const { prisma, service } = buildPublicTokenService();
+    prisma.shares.push(
+      makeShare({
+        id: 'share_personal',
+        inviteToken: 'personal-invite-token',
+        isPublicLink: false,
+        inviteEmail: 'target@example.com',
+        isAccepted: false,
+      }),
+    );
+
+    const data = await service.getPublicSharedData('personal-invite-token');
+    expect(data.shareId).toBe('share_personal');
+    expect(data.isPublicLink).toBe(false);
+    expect(data.inviteEmail).toBe('target@example.com');
+    expect(data).not.toHaveProperty('goals');
+    expect(data).not.toHaveProperty('recentEntries');
+  });
+
+  it('still enforces expiry for a personal invite token on the metadata endpoint', async () => {
+    const { prisma, service } = buildPublicTokenService();
+    prisma.shares.push(
+      makeShare({
+        inviteToken: 'expired-personal-token',
+        isPublicLink: false,
+        inviteExpires: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+
     await expect(
-      service.getPublicSharedData('personal-invite-token'),
-    ).rejects.toThrow(NotFoundException);
+      service.getPublicSharedData('expired-personal-token'),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('accepts a genuine public link token', async () => {
