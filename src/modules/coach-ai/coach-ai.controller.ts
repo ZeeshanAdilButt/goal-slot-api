@@ -17,6 +17,7 @@ import { Observable } from 'rxjs';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CoachAiService } from './coach-ai.service';
 import { ChatMessageDto } from './dto/chat-message.dto';
+import { SaveInsightTitleDto } from './dto/save-insight-title.dto';
 import { UserThrottlerGuard } from './user-throttler.guard';
 import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
@@ -133,7 +134,7 @@ export class CoachAiController {
     @Request() req: AuthenticatedRequest,
     @Param('scopeKey') scopeKey: string,
     @Param('messageId') messageId: string,
-    @Body() body: { title?: string },
+    @Body() body: SaveInsightTitleDto,
   ) {
     return this.coachAi.saveChatMessageAsInsight(
       req.user.sub,

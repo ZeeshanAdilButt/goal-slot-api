@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
-
-const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
+import { YYYY_MM_DD } from '../date';
 
 /**
  * Append a paragraph to one day's journal entry, creating that day if it does

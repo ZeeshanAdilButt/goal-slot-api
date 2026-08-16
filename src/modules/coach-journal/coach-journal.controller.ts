@@ -18,8 +18,7 @@ import { UpdateJournalContentDto } from './dto/update-content.dto';
 import { UpdateJournalMoodDto } from './dto/update-mood.dto';
 import { UpsertJournalEntryDto } from './dto/upsert-journal-entry.dto';
 import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
-
-const DATE_PARAM = '\\d{4}-\\d{2}-\\d{2}';
+import { YYYY_MM_DD_PATTERN as DATE_PARAM } from './date';
 
 @ApiTags('coach-journal')
 @Controller('coach/journal/entries')

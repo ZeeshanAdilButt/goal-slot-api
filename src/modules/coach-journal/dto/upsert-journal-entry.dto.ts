@@ -8,8 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-
-const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
+import { YYYY_MM_DD } from '../date';
 
 export class UpsertJournalEntryDto {
   @ApiProperty({ example: '2026-05-27' })
