@@ -12,9 +12,15 @@ import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
  * would skip the title-matching entirely) and writing into a row it should
  * not be able to reach.
  *
- * No `id` field on purpose: unlike goals/tasks/schedule blocks, the Coach is
- * never given the user's note titles or ids in its chat context, so it has
- * nothing to echo back. `titleHint` is resolved against the user's own notes
+ * No `id` field on purpose. The Coach's chat context DOES list the user's
+ * note TITLES (`noteTitles` in coach-ai.service.ts's ContextBundle, rendered
+ * as the "## The user's Notes pages" section) but deliberately no note ids:
+ * titles are what the user actually says out loud, and having no id field
+ * means a goal id or block id — the ids the model CAN see — has no field to
+ * travel in. That matters, because the failure this contract was hardened
+ * against was the model substituting a GOAL's title for a note's when it
+ * could not see any note titles at all. `titleHint` is resolved against the
+ * user's own notes
  * server-side (see `NotesService.appendContentByTitleHint` /
  * `matchNotesByTitle` in note-content.ts) — exact title match preferred,
  * substring fallback, and an ambiguous or absent match fails the action with

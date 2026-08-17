@@ -112,7 +112,7 @@ Rules:
 - If asked something outside your data (news, code review, off-topic), gently redirect: "I can only see your data here — what about your week is this connected to?"
 
 PROPOSING CHANGES TO USER DATA
-When the user asks you to change, add, rename, or delete their goals, schedule blocks, time entries, or tasks, DO NOT refuse and DO NOT pretend you can't. Instead, emit a structured proposal in a fenced \`\`\`coach-proposal block. The frontend will render an approval card the user clicks to apply. You never touch their data directly — the user has the final click.
+When the user asks you to change, add, rename, or delete their goals, schedule blocks, time entries, tasks, or Notes pages, DO NOT refuse and DO NOT pretend you can't. Instead, emit a structured proposal in a fenced \`\`\`coach-proposal block. The frontend will render an approval card the user clicks to apply. You never touch their data directly — the user has the final click.
 
 Format:
 
@@ -162,8 +162,13 @@ Available action types (use ids from "This week's context" verbatim — never fa
                               One action per journal ask. If they dictate several thoughts at once, join them into a single \`content\` string rather than emitting several APPEND_JOURNAL_ENTRY actions for the same day.
                               This is NOT a substitute for CREATE_PRACTICE, CREATE_TASK or CREATE_TIME_ENTRY. A commitment to do something is a practice or a task; time already spent is a time entry. The journal is for what the user thought, felt, or noticed.
 - \`APPEND_NOTE_CONTENT\`    payload: { titleHint (required), content (required, plain text) }
-                              Adds a paragraph to an EXISTING page in the user's Notes, found by title. You are NEVER given the user's note titles or ids in this context (unlike goals/tasks/schedule blocks) — set \`titleHint\` to whatever the user called the page, as close to verbatim as you can ("add this to my research papers note" -> titleHint: "research papers"). The backend matches it against the user's real notes (exact title match preferred, a looser match only when exactly one page plausibly fits) and appends there. Do NOT guess an id, do NOT invent one, and do NOT ask the user for a note id — titleHint is the only thing you provide.
-                              This can ONLY append to a page that already exists. If titleHint doesn't resolve to exactly one page, the action fails and the approval card shows why (no match, or which pages were ambiguous) — you do not need to hedge about this in your own reply, the card will say so. Never propose CREATE_* for a note; there is no note-creation action, so if the user clearly wants a brand NEW page, tell them to create it in the Notes tab first.
+                              Adds a paragraph to an EXISTING page in the user's Notes, found by title. The "## The user's Notes pages" section of the context lists EVERY page this user has. \`titleHint\` MUST be copied character-for-character from ONE of those lines. That list is the complete and only source of note targets.
+                              NEVER use a goal title, a schedule block title, a time-entry task name, or an insight title as a titleHint, and never invent a plausible-sounding page name. Those are different objects of a different type, and the backend searches ONLY the notes list, so a goal's title there ALWAYS fails. If the user says "add X to my Y notes" and no line in the Notes pages section matches Y, then you have NOT found the page — a goal called something similar is not that page.
+                              WHEN NOTHING IN THAT LIST MATCHES: do NOT emit a proposal. Say plainly that you don't see a page by that name, list the real page titles from that section (the 5 closest if there are many), and ask which one they meant. If the list says the user has no pages at all, tell them to create the page in the Notes tab first. Guessing produces an approval card that fails on Apply and wastes the user's whole turn; asking costs one sentence.
+                              WHEN EXACTLY ONE LINE PLAUSIBLY MATCHES: copy that line's title verbatim into \`titleHint\`, including its capitalisation and spacing. Do not paraphrase, pluralise, shorten, or tidy it up. ("add customize to my tech to learn notes", with a page titled "Tech to learn" on the list -> titleHint: "Tech to learn". Never "tech to learn notes", and never some goal's title.)
+                              WHEN TWO OR MORE PLAUSIBLY MATCH: ask which one, naming them. Do not pick for the user.
+                              Do NOT guess an id, do NOT invent one, and do NOT ask the user for a note id — titleHint is the only field you provide.
+                              This can ONLY append to a page that already exists. Never propose CREATE_* for a note; there is no note-creation action, so if the user clearly wants a brand NEW page, tell them to create it in the Notes tab first.
                               \`content\` is PLAIN TEXT, not HTML and not Markdown, same rule as APPEND_JOURNAL_ENTRY's content — written in the user's own words, not your summary of them.
                               Use it when the user asks you (in this chat) to add, save, jot down, or put something into a named page: "add 'read about dynamo' to my notes, research papers", "put this in my meeting notes page", "save that to my ideas note".
 
@@ -387,6 +392,27 @@ interface ContextBundle {
     >
   >;
   acceptedInsights: CoachInsight[];
+  /**
+   * The user's OWN Notes page titles, most-recently-updated first, capped at
+   * NOTE_TITLE_CAP. Titles ONLY — never `content`.
+   *
+   * This exists so the model can target a REAL page when it emits
+   * APPEND_NOTE_CONTENT. Before it existed, the prompt explicitly told the
+   * model it would never see note titles and to synthesise a `titleHint` from
+   * the user's phrasing — while the only titles it could actually see were
+   * goals, schedule blocks, time-entry task names and insight titles. So
+   * "add customize to my tech to learn notes" came back as a confident
+   * proposal against the GOAL "Tech Podcast Listening" and then failed at
+   * apply time inside NotesService.appendContentByTitleHint. No amount of
+   * fuzzier title matching can recover from being handed the name of a
+   * different object of a different type; the model has to be able to see
+   * the real list.
+   *
+   * Chat mode only (see buildContextBundle's `includeNoteTitles`): the
+   * narrative never emits APPEND_NOTE_CONTENT, so fetching or rendering
+   * these there would be pure token and DB waste. Empty array otherwise.
+   */
+  noteTitles: string[];
   weekKey: string;
 }
 
@@ -465,6 +491,31 @@ const CHECKIN_FIELD_CAP = 500;
 const REFLECTION_CAP = 40;
 const REFLECTION_FIELD_CAP = 500;
 const SCHEDULE_BLOCK_CAP = 300;
+/**
+ * How many Notes page titles reach the CHAT prompt (never the narrative one).
+ *
+ * Deliberately modest, because this list is added prompt cost on every chat
+ * turn and there is a concurrent effort to shrink Coach context spend. The
+ * account this was diagnosed on holds ~10 pages; 50 leaves five times that
+ * headroom while bounding the worst case at roughly 400 prompt tokens
+ * (~7 tokens per `  - "Title"` row, plus heading and fence markers).
+ *
+ * Ordered `updatedAt desc` so that when an account DOES exceed the cap, what
+ * falls off is the coldest pages — the ones a live conversation is least
+ * likely to be about. A truncated list is still strictly better than no list:
+ * the model is told this section is the complete and only source of note
+ * targets, so a page it cannot see produces a "which page did you mean?"
+ * question rather than a confident wrong guess.
+ */
+const NOTE_TITLE_CAP = 50;
+/**
+ * Per-title character cap for the rendered rows. Mirrors
+ * AppendNoteContentDto's `@MaxLength(200)` on `titleHint`, minus one so that
+ * sanitizeSingleLine's truncation ellipsis still leaves the row at or under
+ * 200 characters: anything the model can legally copy out of this list is a
+ * payload the DTO will accept.
+ */
+const NOTE_TITLE_CHAR_CAP = 199;
 /** Hard ceiling on the serialized JSON blob at the end of the context message. */
 const CONTEXT_JSON_CAP = 120_000;
 
@@ -787,7 +838,9 @@ export class CoachAiService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const context = await this.buildContextBundle(userId, scopeKey);
+    const context = await this.buildContextBundle(userId, scopeKey, {
+      includeNoteTitles: true,
+    });
     const messages = this.buildChatMessages(context, history);
 
     const decryptedKey =
@@ -1172,6 +1225,11 @@ export class CoachAiService {
   private async buildContextBundle(
     userId: string,
     scopeKey: string,
+    // Notes page titles are fetched for the CHAT path only — the narrative
+    // path has no action that can target a note, so both the query and the
+    // prompt section it feeds are skipped there. Defaults to off so a new
+    // call site cannot start paying for them by accident.
+    options: { includeNoteTitles: boolean } = { includeNoteTitles: false },
   ): Promise<ContextBundle> {
     const habitsProfile = await this.prisma.habitsProfile.findUnique({
       where: { userId },
@@ -1310,6 +1368,25 @@ export class CoachAiService {
       take: 20,
     });
 
+    // Titles ONLY. `content` is deliberately not selected: note bodies are
+    // long, private, and would be by far the largest untrusted region in the
+    // prompt. The model never needs a body — it only has to echo a title back
+    // as APPEND_NOTE_CONTENT's `titleHint`.
+    //
+    // `where: { userId }` matches NotesService.appendContentByTitleHint's own
+    // candidate scope exactly (owner-only — NOT the shared-note path in
+    // findOneAccessible). Listing a title the apply step cannot reach would
+    // only move the failure later.
+    const noteRows = options.includeNoteTitles
+      ? await this.prisma.note.findMany({
+          where: { userId },
+          orderBy: { updatedAt: 'desc' },
+          take: NOTE_TITLE_CAP,
+          select: { title: true },
+        })
+      : [];
+    const noteTitles = noteRows.map((n) => n.title);
+
     return {
       habitsProfile,
       recentCheckins,
@@ -1320,6 +1397,7 @@ export class CoachAiService {
       recentTimeEntries,
       scheduleBlocks: scheduleBlocksRaw,
       acceptedInsights,
+      noteTitles,
       weekKey: scopeKey,
     };
   }
@@ -1786,6 +1864,53 @@ function buildUserContextMessage(
         .join('\n')
     : '  (no time entries in the last 14 days)';
 
+  // The user's Notes page titles. This is the ONLY place the model ever sees
+  // a note target, and it is chat-only: the narrative prompt has no action
+  // that can touch a note, so it stays byte-identical to before.
+  //
+  // Titles are user-authored free text exactly like goal and block titles, so
+  // they go through sanitizeSingleLine (which strips control characters,
+  // collapses newlines, and neutralises `|` and `"`) and land inside the same
+  // nonce-fenced untrusted region as every other stored value. A title
+  // containing a newline must not be able to forge an extra row here, because
+  // a forged row is a page name the model would believe in.
+  //
+  // Deliberately NO `id=` prefix, unlike every other list in this message.
+  // AppendNoteContentDto has no id field at all (see its class doc), so there
+  // is nothing to copy — and the visibly different row shape is a structural
+  // cue that these are a different KIND of thing from the goal and block ids
+  // above. That is the point: the bug being fixed here was the model reaching
+  // into the GOALS list for a note target.
+  const noteTitleRows = (ctx.noteTitles ?? []).map((t) =>
+    sanitizeSingleLine(t, NOTE_TITLE_CHAR_CAP),
+  );
+  // Two pages whose rendered rows are identical cannot be told apart by the
+  // model OR by matchNotesByTitle, which returns 'ambiguous' and fails the
+  // apply. Say so on the row instead of letting the user find out on Apply.
+  const dupeCounts = new Map<string, number>();
+  for (const t of noteTitleRows) {
+    const key = t.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (key.length === 0) continue;
+    dupeCounts.set(key, (dupeCounts.get(key) ?? 0) + 1);
+  }
+  const notesListSection = noteTitleRows.length
+    ? noteTitleRows
+        .map((t) => {
+          if (t.length === 0) {
+            return '  - (untitled page — cannot be targeted by name)';
+          }
+          const key = t.trim().toLowerCase().replace(/\s+/g, ' ');
+          if ((dupeCounts.get(key) ?? 0) > 1) {
+            return `  - "${t}"  (WARNING: more than one page has this title, appending by name will fail — ask the user to rename one)`;
+          }
+          if (t.endsWith('…')) {
+            return `  - "${t}"  (WARNING: title too long to target by name — ask the user to shorten it)`;
+          }
+          return `  - "${t}"`;
+        })
+        .join('\n')
+    : '  (this user has no note pages at all)';
+
   const intro =
     mode === 'narrative'
       ? "Write this week's narrative for me. Reference specific data points. Close with one Socratic question."
@@ -1817,6 +1942,13 @@ function buildUserContextMessage(
     '',
     '## Recent time entries (use these IDs for UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposals — never invent an id)',
     fence(recentEntriesSection),
+    ...(mode === 'chat'
+      ? [
+          '',
+          "## The user's Notes pages — the COMPLETE list, and the ONLY valid source of an APPEND_NOTE_CONTENT titleHint. NOT goals, NOT schedule blocks, NOT tasks. No ids: that action takes none. If the page the user named is not on this list, ASK which one they meant instead of proposing.",
+          fence(notesListSection),
+        ]
+      : []),
     '',
     "## This week's context (full JSON)",
     fence(capText(JSON.stringify(sanitizeDeep(rest)), CONTEXT_JSON_CAP)),
