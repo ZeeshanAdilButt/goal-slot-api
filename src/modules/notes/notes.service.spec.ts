@@ -149,13 +149,35 @@ describe('NotesService.appendContentByTitleHint', () => {
 
   class AppendFakePrisma {
     updates: any[] = [];
+    /** Every `select` the candidate findMany asked for, so a test can assert
+     *  the matching step never pulls note bodies. */
+    findManySelects: any[] = [];
     notes: Array<{ id: string; userId: string; title: string; content: string }> = [];
 
+    /** Honours `select` the way Prisma does — returning a column the caller
+     *  did not ask for would hide exactly the regression this guards. */
+    private project(n: any, select: any) {
+      if (!select) return { ...n };
+      const out: any = {};
+      for (const k of Object.keys(select)) if (select[k]) out[k] = n[k];
+      return out;
+    }
+
     note = {
-      findMany: async ({ where }: any) =>
-        this.notes
+      findMany: async ({ where, select }: any) => {
+        this.findManySelects.push(select);
+        return this.notes
           .filter((n) => n.userId === where.userId)
-          .map((n) => ({ id: n.id, title: n.title, content: n.content })),
+          .map((n) => this.project(n, select));
+      },
+      findFirst: async ({ where, select }: any) => {
+        const row = this.notes.find(
+          (n) =>
+            n.id === where.id &&
+            (where.userId === undefined || n.userId === where.userId),
+        );
+        return row ? this.project(row, select) : null;
+      },
       update: async ({ where, data }: any) => {
         this.updates.push({ where, data });
         const row = this.notes.find((n) => n.id === where.id);
@@ -274,5 +296,58 @@ describe('NotesService.appendContentByTitleHint', () => {
       service.appendContentByTitleHint(CALLER, 'big note', 'this pushes it over'),
     ).rejects.toThrow(/65535-character limit/i);
     expect(prisma.updates).toHaveLength(0);
+  });
+
+  // The candidate query runs over EVERY note the user owns, so selecting
+  // `content` there loaded every page's full body (up to 65535 chars each)
+  // just to compare titles — and threw it all away on the ambiguous and
+  // no-match paths. Only the winning row's body is ever needed.
+  it('does not load note bodies while matching, only for the winning row', async () => {
+    const { prisma, service } = buildAppendService([
+      {
+        id: 'n1',
+        userId: CALLER,
+        title: 'Research Papers',
+        content: '<p>A</p>',
+      },
+      {
+        id: 'n2',
+        userId: CALLER,
+        title: 'Groceries',
+        content: 'x'.repeat(60000),
+      },
+    ]);
+
+    const updated = await service.appendContentByTitleHint(
+      CALLER,
+      'research papers',
+      'read about dynamo',
+    );
+
+    expect(prisma.findManySelects).toHaveLength(1);
+    expect(prisma.findManySelects[0]).toEqual({ id: true, title: true });
+    expect(prisma.findManySelects[0].content).toBeUndefined();
+    // The winning row's body still made it into the append.
+    expect((updated as any)?.content).toBe('<p>A</p><p>read about dynamo</p>');
+  });
+
+  it('writes nothing when the matched note disappears between match and read', async () => {
+    const { prisma, service } = buildAppendService([
+      {
+        id: 'n1',
+        userId: CALLER,
+        title: 'Research Papers',
+        content: '<p>A</p>',
+      },
+    ]);
+    // Simulate the row being deleted after the candidate list was built.
+    const originalFindFirst = prisma.note.findFirst;
+    prisma.note.findFirst = async () => null;
+
+    await expect(
+      service.appendContentByTitleHint(CALLER, 'research papers', 'x'),
+    ).rejects.toThrow(/couldn't find a page/i);
+    expect(prisma.updates).toHaveLength(0);
+    prisma.note.findFirst = originalFindFirst;
   });
 });

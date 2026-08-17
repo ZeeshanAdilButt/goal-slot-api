@@ -160,12 +160,22 @@ export class NotesService {
   /**
    * Find one of the caller's own notes by title hint and append a paragraph
    * to it. The one write path with no `id` at all — see AppendNoteContentDto
-   * for why (the Coach is never given note titles/ids in its chat context).
+   * for why (the Coach is given note TITLES in its chat context, never ids,
+   * so a title hint is the only thing it can echo back).
    *
    * Ownership is implicit rather than a separate check: `matchNotesByTitle`
    * only ever sees notes already scoped to `userId` by the `findMany` below,
    * so there is no id from a payload to trust and no way this can reach
    * another account's note.
+   *
+   * Read in two steps on purpose. Matching needs only id+title, so the
+   * candidate query selects only those; `content` is then fetched for the ONE
+   * row that won. Selecting `content` for every note the user owns just to
+   * append to one of them meant a single append could pull megabytes into
+   * memory (MAX_NOTE_CONTENT_LENGTH is 65535 per row, uncapped row count) and
+   * threw all of it away on the ambiguous and no-match paths, which are the
+   * common ones when the hint is wrong. Same class of fix as "Fix N+1 queries
+   * and an unbounded findMany" (8d76362).
    *
    * Throws BadRequestException (not silently falling through to "no match")
    * when the hint is ambiguous or matches nothing, so the Coach proposal
@@ -185,7 +195,7 @@ export class NotesService {
   ) {
     const candidates = await this.prisma.note.findMany({
       where: { userId },
-      select: { id: true, title: true, content: true },
+      select: { id: true, title: true },
     });
 
     const match = matchNotesByTitle(candidates, titleHint);
@@ -209,7 +219,24 @@ export class NotesService {
       );
     }
 
-    const content = appendNoteParagraph(match.note.content, addition);
+    // Only now, for the single winning row, is the body worth reading.
+    // Re-scoped to `userId` rather than looked up by id alone: the id came
+    // from the candidate list so it is already the caller's, but keeping the
+    // owner in the predicate means this stays safe if the matching step is
+    // ever changed to draw candidates from a wider set.
+    const target = await this.prisma.note.findFirst({
+      where: { id: match.note.id, userId },
+      select: { content: true },
+    });
+    if (!target) {
+      throw new BadRequestException(
+        `Couldn't find a page titled "${titleHint}" to add to. Check your ` +
+          'Notes and try again with the exact (or closer) title, or create ' +
+          'the page first.',
+      );
+    }
+
+    const content = appendNoteParagraph(target.content, addition);
     if (content.length > MAX_NOTE_CONTENT_LENGTH) {
       throw new BadRequestException(
         `Adding this would push "${match.note.title}" past the ${MAX_NOTE_CONTENT_LENGTH}-character limit. Trim that page first.`,

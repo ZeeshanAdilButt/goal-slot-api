@@ -566,11 +566,13 @@ export class CoachProposalsService {
       // else that ever needs them.
       //
       // No `id` in the payload at all, unlike every other UPDATE-shaped
-      // action here: the Coach is never given the user's note titles/ids in
-      // its chat context (unlike goals/tasks/schedule blocks), so it has
-      // nothing to echo back. `titleHint` is resolved against the user's own
-      // notes inside appendContentByTitleHint (exact match preferred,
-      // substring fallback — see matchNotesByTitle in note-content.ts). An
+      // action here: the Coach's chat context lists the user's note TITLES
+      // but deliberately no note ids, so a title is the only thing it can
+      // echo back. `titleHint` is resolved against the user's own notes
+      // inside appendContentByTitleHint (exact match preferred, then
+      // containment, with the reverse-containment tier bounded so a sentence
+      // cannot claim a short generic page — see matchNotesByTitle in
+      // note-content.ts). An
       // ambiguous or absent match throws BadRequestException with a message
       // naming what happened, which lands in this action's per-item
       // `error` and renders on the proposal card exactly like a stale
