@@ -1535,6 +1535,47 @@ describe('CoachAiService', () => {
       const extractionUser = arg.messages[1].content as string;
       expect(extractionUser).not.toContain('Tech to learn');
     });
+
+    // Regression cover for a second production failure in the same area: the
+    // user typed "add milk to my shopping notes" and the Coach emitted
+    // CREATE_TASK instead of APPEND_NOTE_CONTENT. Root cause was the
+    // CREATE_TASK entry's own worked example — "add milk to my shopping
+    // list" — a near-verbatim structural match for the real request, sitting
+    // with no counterweight anywhere in the prompt telling the model that a
+    // stated notes destination should win over a to-do-shaped content
+    // phrase. Fixed at the prompt level: a general disambiguation rule, a
+    // defused CREATE_TASK example plus an explicit exclusion clause, and an
+    // ask-instead-of-defaulting instruction on the no-match branch.
+    it('tells the model a stated notes destination outranks a to-do-shaped phrase, and never to silently default to CREATE_TASK on a no-match', async () => {
+      seedNotes();
+      const captured = capturePrompt();
+      await drain(service.streamChatReply('user_1', '2026-W22', 'hi'));
+
+      const system = captured.system();
+
+      // The old anchoring example lived inside CREATE_TASK's own entry and
+      // is a near-verbatim structural match for "add milk to my shopping
+      // notes" — it must be gone, not just supplemented.
+      expect(system).not.toContain('add milk to my shopping list');
+
+      // A general priority rule exists ahead of the action list: the user's
+      // own words for the destination outrank what the content looks like.
+      expect(system).toMatch(/DISAMBIGUATING NOTES vs\. TASKS/);
+      expect(system).toMatch(
+        /outrank what the content phrase itself looks like/,
+      );
+
+      // CREATE_TASK's own entry now explicitly defers to the notes list
+      // before assuming a task, instead of just omitting any mention of it.
+      expect(system).toMatch(
+        /Do NOT use CREATE_TASK when the sentence names a destination page/,
+      );
+
+      // The no-match branch offers "add as a task instead" and tells the
+      // model not to pick CREATE_TASK on its own — the user chooses.
+      expect(system).toMatch(/add this as a task instead/);
+      expect(system).toMatch(/Do NOT silently emit a CREATE_TASK yourself/);
+    });
   });
 });
 
