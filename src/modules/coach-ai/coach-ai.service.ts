@@ -32,6 +32,7 @@ import {
   INSIGHT_SCHEMA,
   SYSTEM_PROMPT,
 } from './coach-ai.prompts';
+import { buildRelativeDateReference, todayContextLine } from './relative-dates';
 
 /**
  * Coach AI service — orchestrates BYOK lookup, token-budget enforcement,
@@ -1563,6 +1564,12 @@ function buildUserContextMessage(
   // are the most attractive place to park an injection. Sanitised here and
   // fenced as untrusted data at the bottom of this function.
   const opLines: string[] = [];
+  // Server clock, computed fresh per request (this message is rebuilt every
+  // call and is never prompt-cached, unlike SYSTEM_PROMPT/CHAT_SYSTEM_PROMPT
+  // — see commit 5e06085), so a daily-changing value here costs nothing. This
+  // is what CREATE_TASK's relative-date handling ("in one week", "tomorrow")
+  // is anchored to. See relative-dates.ts for the full lookup table below.
+  opLines.push(todayContextLine());
   const why = sanitizeUntrusted(h?.why ?? '').trim();
   opLines.push(`why: ${why.length ? why : '(not set)'}`);
   opLines.push(`religiousContext: ${religiousContext}`);
@@ -1650,6 +1657,8 @@ function buildUserContextMessage(
   // goalsList pattern so the model can grab IDs without parsing the
   // JSON dump. Capped at 30 lines (most recent first) to keep the
   // prompt size sane; the full 80 is still in the JSON blob below.
+  const relativeDateReferenceSection = buildRelativeDateReference().join('\n');
+
   const recentEntriesSection = (ctx.recentTimeEntries ?? []).length
     ? (ctx.recentTimeEntries ?? [])
         .slice(0, 30)
@@ -1741,6 +1750,9 @@ function buildUserContextMessage(
     '',
     '## Recent time entries (use these IDs for UPDATE_TIME_ENTRY / DELETE_TIME_ENTRY proposals — never invent an id)',
     fence(recentEntriesSection),
+    '',
+    '## Relative date reference — for CREATE_TASK/UPDATE_TASK dueDate. Every relative phrase the user might use ("tomorrow", "in one week", "next Tuesday", "this weekend") has its exact YYYY-MM-DD already computed below. COPY the matching row verbatim. Never compute the arithmetic yourself, and never emit a date that is not either copied from here or explicitly stated by the user as a bare calendar date.',
+    fence(relativeDateReferenceSection),
     ...(mode === 'chat'
       ? [
           '',

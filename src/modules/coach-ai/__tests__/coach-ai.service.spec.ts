@@ -1183,6 +1183,68 @@ describe('CoachAiService', () => {
     });
   });
 
+  // ---------- Relative-date context for CREATE_TASK ----------
+  //
+  // Regression coverage for the gap that let "remind me to clean the kitchen
+  // in one week" produce an unreliable due date: the model was never told
+  // today's date, so it had nothing to compute a relative phrase from. See
+  // relative-dates.ts for the pure arithmetic this context is built from.
+  describe('relative-date context', () => {
+    function captureUserMessage(mode: 'narrative' | 'chat'): {
+      run: () => Promise<void>;
+      user: () => string;
+    } {
+      prisma.byok.set('user_1', freshByok());
+      let userMsg = '';
+      createSpy.mockImplementation((..._args: any[]) => ({
+        async *streamCompletion(messages: LlmChatMessage[], _model: string) {
+          userMsg = messages.find((m) => m.role === 'user')?.content ?? '';
+          yield { delta: 'ok', done: false };
+          yield {
+            delta: '',
+            done: true,
+            usage: { promptTokens: 1, completionTokens: 1 },
+          };
+        },
+        extractStructured: extractStructuredFn,
+      }));
+      return {
+        run: async () => {
+          if (mode === 'narrative') {
+            await drain(service.streamNarrative('user_1', '2026-W22', false));
+          } else {
+            await drain(
+              service.streamChatReply('user_1', '2026-W22', 'hi'),
+            );
+          }
+        },
+        user: () => userMsg,
+      };
+    }
+
+    it('narrative context carries a today: line and a full relative-date reference table', async () => {
+      const captured = captureUserMessage('narrative');
+      await captured.run();
+      const user = captured.user();
+
+      expect(user).toMatch(/today: \d{4}-\d{2}-\d{2} \([A-Za-z]+\)/);
+      expect(user).toContain('## Relative date reference');
+      expect(user).toMatch(/tomorrow: \d{4}-\d{2}-\d{2}/);
+      expect(user).toMatch(/in 1 week: \d{4}-\d{2}-\d{2}/);
+    });
+
+    it('chat context (the mode CREATE_TASK proposals actually stream through) also carries the reference table', async () => {
+      const captured = captureUserMessage('chat');
+      await captured.run();
+      const user = captured.user();
+
+      expect(user).toMatch(/today: \d{4}-\d{2}-\d{2} \([A-Za-z]+\)/);
+      expect(user).toContain('## Relative date reference');
+      expect(user).toMatch(/next Monday: \d{4}-\d{2}-\d{2}/);
+      expect(user).toMatch(/this weekend: \d{4}-\d{2}-\d{2}/);
+    });
+  });
+
   // ---------- Shared-key quota ----------
 
   describe('shared-key daily quota', () => {
