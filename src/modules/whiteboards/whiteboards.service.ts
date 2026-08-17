@@ -21,10 +21,39 @@ export class WhiteboardsService {
     private emailService: EmailService,
   ) {}
 
+  /**
+   * Metadata only — this deliberately does NOT return `content`.
+   *
+   * `content` is an Excalidraw scene, capped at 2 MB per row (see `update`).
+   * Returning it for every board turned a sidebar fetch into a multi-megabyte
+   * response: a 20-board account with a few pasted screenshots was single-digit
+   * megabytes, and an all-at-cap account 40 MB. The bandwidth is the smaller
+   * half of the cost — Postgres has to detoast every row, the pg driver
+   * JSON.parses it and Nest JSON.stringifies it straight back out, and both of
+   * those run on Node's single thread. That is hundreds of milliseconds of
+   * fully blocked event loop per request on a typical account, seconds at the
+   * cap, during which every other user's request queues behind it.
+   *
+   * Scene content is served by `findOne` / `findOneAccessible` instead.
+   *
+   * `publicShareToken` is omitted too: no client reads it off a list row (the
+   * share dialog fetches it from `GET /whiteboards/:id/share`), and there is no
+   * reason to hand every board's share secret out on a list.
+   */
   async findAll(userId: string) {
     return this.prisma.whiteboard.findMany({
       where: { userId, deletedAt: null },
       orderBy: [{ createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        icon: true,
+        color: true,
+        isFavorite: true,
+        userId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
   }
 
