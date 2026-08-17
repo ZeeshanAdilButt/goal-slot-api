@@ -90,6 +90,13 @@ model User {
 
   @@index([email])
   @@index([ssoProvider, ssoId])
+  // Every Stripe webhook resolves the local user by one of these two ids
+  // (stripe.service.ts's handleSubscriptionUpdated/Deleted/PaymentFailed and
+  // the invoice handler all `findFirst` on them). Neither column was indexed,
+  // so each webhook was a sequential scan of the whole User table — a cost
+  // that grows with total signups, on a path Stripe retries if it times out.
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
 }
 
 // Goals for tracking objectives
@@ -174,6 +181,18 @@ model TimeEntry {
   // directly. Leaves [userId] in place for the handful of callers (e.g.
   // sharing.service.ts's owner dashboard) that filter by userId alone.
   @@index([userId, date])
+  // taskId is filtered on its own — WITHOUT userId — by tasks.service.ts's
+  // completion path ("how much of this task was already tracked?"), so
+  // neither [userId] nor [userId, date] can serve it and Postgres fell back
+  // to a sequential scan of what is by far the fastest-growing table in this
+  // schema, on every single task completion. Postgres does not index foreign
+  // keys automatically, so this also removes the same scan from the
+  // `onDelete: SetNull` fixup that runs whenever a Task is deleted.
+  @@index([taskId])
+  // Same reasoning for the other unindexed FK: `onDelete: SetNull` on
+  // scheduleBlock means every schedule-block delete has to scan TimeEntry,
+  // and schedule.service.ts's deleteAll does that as one bulk deleteMany.
+  @@index([scheduleBlockId])
 }
 
 // A timer that is currently running (or paused) for a user.
@@ -281,6 +300,18 @@ model ScheduleBlock {
   @@index([userId])
   @@index([dayOfWeek])
   @@index([seriesId])
+  // schedule.service.ts filters userId AND dayOfWeek together in getByDay and
+  // in checkTimeConflict — and checkTimeConflict runs once per block inside
+  // the recurring-series update loop, so a daily series pays it seven times
+  // for one edit. With only the two single-column indexes above, Postgres can
+  // use just one of them ([dayOfWeek] being near-useless at 7 distinct
+  // values) and re-checks the rest row by row. Same fix, same reasoning as
+  // TimeEntry's [userId, date].
+  @@index([userId, dayOfWeek])
+  // Unindexed FK with `onDelete: SetNull`, so deleting a Goal scans every
+  // ScheduleBlock. Task.goalId and TimeEntry.goalId are both already indexed;
+  // this one was simply missed.
+  @@index([goalId])
 }
 
 // Tasks linked to schedule blocks and goals
@@ -660,7 +691,7 @@ model Whiteboard {
   // Keys: { elements: ExcalidrawElement[], appState: AppState, files: BinaryFiles }
   // If Excalidraw bumps its scene version, run a migration to backfill existing
   // content through excalidraw's restoreElements() before deploying the new client.
-  content Json @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
+  content Json    @default("{\"elements\":[],\"appState\":{},\"files\":{}}")
   icon    String?
   color   String?
 
@@ -893,6 +924,10 @@ model GoalReflection {
 
   @@unique([userId, goalId, weekKey])
   @@index([userId, weekKey])
+  // The unique above leads with userId, so it cannot serve a goalId-only
+  // lookup — which is exactly what `onDelete: Cascade` issues on every goal
+  // deletion, scanning the whole table each time.
+  @@index([goalId])
 }
 
 model JournalEntry {
