@@ -364,10 +364,18 @@ describe('NoteSummaryService.summarize', () => {
     const begin = /--- BEGIN USER-DATA ([0-9a-f]+) ---/.exec(user);
     expect(begin).not.toBeNull();
     const nonce = begin![1];
+    // Both fence markers carry the SAME per-request nonce — that pairing is
+    // what makes the boundary unforgeable by anything inside the note body.
     expect(user).toContain(`--- END USER-DATA ${nonce} ---`);
-    // The same nonce has to appear in the system prompt's guard, or the guard
-    // is describing markers that are not the ones actually used.
-    expect(system).toContain(nonce);
+
+    // The system prompt deliberately does NOT carry the live nonce. It
+    // describes the marker format with a generic placeholder so it stays
+    // byte-identical across every request and therefore stays eligible for
+    // provider prefix-caching (that system prompt is thousands of tokens and
+    // is resent on every single call). Splicing a fresh nonce into it defeated
+    // that caching for no security gain: the nonce is only load-bearing on the
+    // actual fence lines in the user message, which the model reads directly.
+    expect(system).not.toContain(nonce);
     expect(system).toContain('UNTRUSTED DATA BOUNDARY');
   });
 

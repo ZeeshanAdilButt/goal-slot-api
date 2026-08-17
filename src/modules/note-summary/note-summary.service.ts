@@ -384,7 +384,7 @@ export class NoteSummaryService {
     return [
       {
         role: 'system',
-        content: `${SUMMARY_SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+        content: `${SUMMARY_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
       },
       { role: 'user', content: userMessage },
     ];
