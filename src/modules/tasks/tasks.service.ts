@@ -73,18 +73,50 @@ export class TasksService {
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
-        timeEntries: { select: { duration: true } },
       },
     });
 
+    const trackedByTaskId = await this.sumTrackedMinutes(
+      tasks.map((task) => task.id),
+    );
+
     return tasks.map((task) => ({
       ...task,
-      trackedMinutes: task.timeEntries.reduce(
-        (sum, entry) => sum + entry.duration,
-        0,
-      ),
-      timeEntries: undefined,
+      trackedMinutes: trackedByTaskId.get(task.id) ?? 0,
     }));
+  }
+
+  /**
+   * Total tracked minutes per task, summed in the database.
+   *
+   * This replaces an `include: { timeEntries: { select: { duration: true } } }`
+   * with a `reduce` in JS. That read one row for every TimeEntry the user had
+   * ever logged, on every tasks-list load, on both clients, forever — a
+   * two-year daily user carries a couple of thousand entries and paid for all
+   * of them to compute a handful of sums that were then discarded. The
+   * aggregate is O(tasks) instead of O(entries).
+   *
+   * Deliberately NOT filtered by `source`. The reducer this replaces had no
+   * filter either, so adding one here would silently change every task's
+   * displayed minutes. (`logTime` filters on `source: TRACKER`, but that is a
+   * different code path with a different meaning.)
+   */
+  private async sumTrackedMinutes(
+    taskIds: string[],
+  ): Promise<Map<string, number>> {
+    const byTaskId = new Map<string, number>();
+    if (taskIds.length === 0) return byTaskId;
+
+    const sums = await this.prisma.timeEntry.groupBy({
+      by: ['taskId'],
+      where: { taskId: { in: taskIds } },
+      _sum: { duration: true },
+    });
+
+    for (const row of sums) {
+      if (row.taskId) byTaskId.set(row.taskId, row._sum.duration ?? 0);
+    }
+    return byTaskId;
   }
 
   async findOne(userId: string, taskId: string) {
@@ -93,7 +125,6 @@ export class TasksService {
       include: {
         goal: { select: { id: true, title: true, color: true } },
         scheduleBlock: true,
-        timeEntries: { select: { duration: true } },
       },
     });
 
@@ -101,13 +132,11 @@ export class TasksService {
       throw new NotFoundException('Task not found');
     }
 
+    const trackedByTaskId = await this.sumTrackedMinutes([task.id]);
+
     return {
       ...task,
-      trackedMinutes: task.timeEntries.reduce(
-        (sum, entry) => sum + entry.duration,
-        0,
-      ),
-      timeEntries: undefined,
+      trackedMinutes: trackedByTaskId.get(task.id) ?? 0,
     };
   }
 
