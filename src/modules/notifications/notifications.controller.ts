@@ -5,6 +5,8 @@ import {
   UseGuards,
   Request,
   Patch,
+  Delete,
+  HttpCode,
   Param,
   BadRequestException,
 } from '@nestjs/common';
@@ -89,6 +91,13 @@ export class NotificationsController {
     @Param('id') id: string,
   ) {
     return this.notificationsService.markRead(id, req.user.sub);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Delete a notification' })
+  async delete(@Request() req: AuthenticatedRequest, @Param('id') id: string) {
+    await this.notificationsService.delete(id, req.user.sub);
   }
 }
 

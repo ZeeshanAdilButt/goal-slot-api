@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
@@ -54,6 +58,7 @@ class FakePrisma {
   updateManyCalls: any[] = [];
   findManyCalls: any[] = [];
   countCalls: any[] = [];
+  deleteCalls: any[] = [];
 
   notification = {
     findMany: async (args: any) => {
@@ -101,6 +106,17 @@ class FakePrisma {
       const created = row(args.data);
       this.rows.push(created);
       return created;
+    },
+
+    delete: async (args: any) => {
+      this.deleteCalls.push(args);
+      const index = this.rows.findIndex((r) => r.id === args.where.id);
+      if (index === -1) {
+        // Prisma throws (P2025) deleting a row that no longer exists.
+        throw new Error(`row ${args.where.id} not found`);
+      }
+      const [removed] = this.rows.splice(index, 1);
+      return removed;
     },
   };
 }
@@ -387,6 +403,43 @@ describe('NotificationsService.markRead', () => {
       ForbiddenException,
     );
     expect(theirs.readAt).toBeNull();
+  });
+});
+
+// ---------- per-row delete ownership ----------
+
+describe('NotificationsService.delete', () => {
+  it('deletes the caller’s own notification', async () => {
+    const { prisma, service } = build();
+    const mine = row({ userId: 'user_a' });
+    prisma.rows = [mine];
+
+    await service.delete(mine.id, 'user_a');
+
+    expect(prisma.rows).toHaveLength(0);
+    expect(prisma.deleteCalls).toHaveLength(1);
+  });
+
+  it('throws NotFoundException for a nonexistent id', async () => {
+    const { service } = build();
+
+    await expect(
+      service.delete('does_not_exist', 'user_a'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('CANNOT delete another user’s notification (IDOR guard)', async () => {
+    const { prisma, service } = build();
+    const theirs = row({ userId: 'user_b' });
+    prisma.rows = [theirs];
+
+    await expect(service.delete(theirs.id, 'user_a')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    // The whole point: the row must still be there afterwards, untouched.
+    expect(prisma.rows).toHaveLength(1);
+    expect(prisma.rows[0].id).toBe(theirs.id);
+    expect(prisma.deleteCalls).toHaveLength(0);
   });
 });
 

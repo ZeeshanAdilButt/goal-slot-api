@@ -135,6 +135,27 @@ export class NotificationsService {
   }
 
   /**
+   * Fetch-then-check, same shape as `markRead` above: 404 if the row does
+   * not exist at all, 403 if it exists but belongs to someone else. Never a
+   * bare `deleteMany({ where: { id } })` on the unscoped id — that would
+   * delete the right row for the wrong caller with no ownership check at
+   * all, which is exactly the IDOR shape this codebase has shipped before.
+   */
+  async delete(id: string, userId: string): Promise<void> {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id },
+    });
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+    if (notification.userId !== userId) {
+      throw new ForbiddenException('You cannot delete this notification');
+    }
+
+    await this.prisma.notification.delete({ where: { id } });
+  }
+
+  /**
    * Mark every unread notification in `scope` as read, for this user only.
    *
    * ONE statement — a single `UPDATE ... WHERE "userId" = $1 AND "readAt"
