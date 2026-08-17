@@ -1231,41 +1231,162 @@ export class CoachAiService {
     // call site cannot start paying for them by accident.
     options: { includeNoteTitles: boolean } = { includeNoteTitles: false },
   ): Promise<ContextBundle> {
-    const habitsProfile = await this.prisma.habitsProfile.findUnique({
-      where: { userId },
-    });
+    const { from, to } = isoWeekRange(scopeKey);
+    // Last ~14 days of individual time entries with IDs so the model
+    // can emit precise UPDATE/DELETE proposals. Goals are inner-joined
+    // for the title — saves the model a lookup when it explains the
+    // proposal to the user.
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-    // Explicit `select` rather than the whole row. `findMany` with no select
-    // shipped id, userId, and the createdAt/updatedAt/submittedAt timestamps to
-    // a third-party LLM on every call. None of it helps the coach reason, and
-    // the internal ids are the sort of thing that should not leave the system
-    // for no reason. The free-text fields are capped for the same reason the
-    // journal is: one enormous check-in should not be able to crowd out the
-    // rest of the prompt, or the operator's shared-key spend.
-    const recentCheckinRows = await this.prisma.dailyCheckin.findMany({
-      where: { userId },
-      orderBy: { date: 'desc' },
-      take: 7,
-      select: {
-        date: true,
-        mood: true,
-        energy: true,
-        focus: true,
-        blocked: true,
-        worked: true,
-      },
-    });
+    // These nine reads are independent — none of them consumes another's
+    // result, they were just written one `await` after another, which forces
+    // the DB round trips to happen in series. Running them concurrently
+    // fetches the exact same rows, just without paying for eight extra
+    // network round trips back-to-back on the critical path of every single
+    // Coach turn (narrative AND chat both call this).
+    const [
+      habitsProfile,
+      recentCheckinRows,
+      recentJournalRaw,
+      activeGoals,
+      weekReflectionRows,
+      hoursByGoalThisWeek,
+      recentTimeEntriesRaw,
+      scheduleBlocksRaw,
+      acceptedInsights,
+      noteRows,
+    ] = await Promise.all([
+      this.prisma.habitsProfile.findUnique({ where: { userId } }),
+
+      // Explicit `select` rather than the whole row. `findMany` with no
+      // select shipped id, userId, and the createdAt/updatedAt/submittedAt
+      // timestamps to a third-party LLM on every call. None of it helps the
+      // coach reason, and the internal ids are the sort of thing that should
+      // not leave the system for no reason. The free-text fields are capped
+      // for the same reason the journal is: one enormous check-in should not
+      // be able to crowd out the rest of the prompt, or the operator's
+      // shared-key spend.
+      this.prisma.dailyCheckin.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 7,
+        select: {
+          date: true,
+          mood: true,
+          energy: true,
+          focus: true,
+          blocked: true,
+          worked: true,
+        },
+      }),
+
+      this.prisma.journalEntry.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 14,
+      }),
+
+      this.prisma.goal.findMany({
+        where: { userId, status: GoalStatus.ACTIVE },
+        select: {
+          id: true,
+          title: true,
+          deadline: true,
+          loggedHours: true,
+          status: true,
+        },
+      }),
+
+      this.prisma.goalReflection.findMany({
+        where: { userId, weekKey: scopeKey },
+        take: REFLECTION_CAP,
+        select: {
+          goalId: true,
+          weekKey: true,
+          feel: true,
+          worked: true,
+          blocked: true,
+          nextWeekFocus: true,
+        },
+      }),
+
+      this.aggregateHoursByGoal(userId, from, to),
+
+      this.prisma.timeEntry.findMany({
+        where: { userId, date: { gte: fourteenDaysAgo } },
+        orderBy: { date: 'desc' },
+        take: 80,
+        select: {
+          id: true,
+          date: true,
+          duration: true,
+          taskName: true,
+          taskId: true,
+          goalId: true,
+          notes: true,
+          goal: { select: { title: true } },
+        },
+      }),
+
+      // `take` added: this query had no bound at all, so prompt size (and,
+      // on the operator's shared key, prompt cost) scaled with however many
+      // blocks the account happened to hold. An account with thousands of
+      // blocks could drive an enormous single request. A full 7-day
+      // schedule is well under this ceiling.
+      this.prisma.scheduleBlock.findMany({
+        where: { userId },
+        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+        take: SCHEDULE_BLOCK_CAP,
+        select: {
+          id: true,
+          title: true,
+          dayOfWeek: true,
+          startTime: true,
+          endTime: true,
+          category: true,
+          isRecurring: true,
+          goalId: true,
+        },
+      }),
+
+      this.prisma.coachInsight.findMany({
+        where: { userId, status: { in: ACTIVE_INSIGHT_STATUSES } },
+        orderBy: [{ startedDoingAt: 'desc' }, { acceptedAt: 'desc' }],
+        take: 20,
+      }),
+
+      // Titles ONLY. `content` is deliberately not selected: note bodies are
+      // long, private, and would be by far the largest untrusted region in the
+      // prompt. The model never needs a body — it only has to echo a title back
+      // as APPEND_NOTE_CONTENT's `titleHint`.
+      //
+      // `where: { userId }` matches NotesService.appendContentByTitleHint's own
+      // candidate scope exactly (owner-only — NOT the shared-note path in
+      // findOneAccessible). Listing a title the apply step cannot reach would
+      // only move the failure later.
+      //
+      // Sits inside the same Promise.all as the other reads rather than after
+      // it: this is the chat path's own critical path, so serialising it would
+      // hand back the round trip the parallelisation above just saved. Resolves
+      // to [] on the narrative path without touching the DB at all.
+      options.includeNoteTitles
+        ? this.prisma.note.findMany({
+            where: { userId },
+            orderBy: { updatedAt: 'desc' },
+            take: NOTE_TITLE_CAP,
+            select: { title: true },
+          })
+        : Promise.resolve([] as { title: string }[]),
+    ]);
+
+    const noteTitles = noteRows.map((n) => n.title);
+
     const recentCheckins = recentCheckinRows.map((c) => ({
       ...c,
       blocked: capText(c.blocked, CHECKIN_FIELD_CAP),
       worked: capText(c.worked, CHECKIN_FIELD_CAP),
     }));
 
-    const recentJournalRaw = await this.prisma.journalEntry.findMany({
-      where: { userId },
-      orderBy: { date: 'desc' },
-      take: 14,
-    });
     const recentJournal = recentJournalRaw.map((j) => ({
       date: j.date,
       mood: j.mood,
@@ -1273,29 +1394,6 @@ export class CoachAiService {
       content: capText(stripHtml(j.content), 500),
     }));
 
-    const activeGoals = await this.prisma.goal.findMany({
-      where: { userId, status: GoalStatus.ACTIVE },
-      select: {
-        id: true,
-        title: true,
-        deadline: true,
-        loggedHours: true,
-        status: true,
-      },
-    });
-
-    const weekReflectionRows = await this.prisma.goalReflection.findMany({
-      where: { userId, weekKey: scopeKey },
-      take: REFLECTION_CAP,
-      select: {
-        goalId: true,
-        weekKey: true,
-        feel: true,
-        worked: true,
-        blocked: true,
-        nextWeekFocus: true,
-      },
-    });
     const weekReflections = weekReflectionRows.map((r) => ({
       ...r,
       worked: capText(r.worked, REFLECTION_FIELD_CAP),
@@ -1303,33 +1401,6 @@ export class CoachAiService {
       nextWeekFocus: capText(r.nextWeekFocus, REFLECTION_FIELD_CAP),
     }));
 
-    const { from, to } = isoWeekRange(scopeKey);
-    const hoursByGoalThisWeek = await this.aggregateHoursByGoal(
-      userId,
-      from,
-      to,
-    );
-
-    // Last ~14 days of individual time entries with IDs so the model
-    // can emit precise UPDATE/DELETE proposals. Goals are inner-joined
-    // for the title — saves the model a lookup when it explains the
-    // proposal to the user.
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-    const recentTimeEntriesRaw = await this.prisma.timeEntry.findMany({
-      where: { userId, date: { gte: fourteenDaysAgo } },
-      orderBy: { date: 'desc' },
-      take: 80,
-      select: {
-        id: true,
-        date: true,
-        duration: true,
-        taskName: true,
-        taskId: true,
-        goalId: true,
-        notes: true,
-        goal: { select: { title: true } },
-      },
-    });
     const recentTimeEntries = recentTimeEntriesRaw.map((e) => ({
       id: e.id,
       date: e.date.toISOString().slice(0, 10),
@@ -1340,52 +1411,6 @@ export class CoachAiService {
       goalTitle: e.goal?.title ?? null,
       notes: e.notes,
     }));
-
-    // `take` added: this query had no bound at all, so prompt size (and, on the
-    // operator's shared key, prompt cost) scaled with however many blocks the
-    // account happened to hold. An account with thousands of blocks could
-    // drive an enormous single request. A full 7-day schedule is well under
-    // this ceiling.
-    const scheduleBlocksRaw = await this.prisma.scheduleBlock.findMany({
-      where: { userId },
-      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
-      take: SCHEDULE_BLOCK_CAP,
-      select: {
-        id: true,
-        title: true,
-        dayOfWeek: true,
-        startTime: true,
-        endTime: true,
-        category: true,
-        isRecurring: true,
-        goalId: true,
-      },
-    });
-
-    const acceptedInsights = await this.prisma.coachInsight.findMany({
-      where: { userId, status: { in: ACTIVE_INSIGHT_STATUSES } },
-      orderBy: [{ startedDoingAt: 'desc' }, { acceptedAt: 'desc' }],
-      take: 20,
-    });
-
-    // Titles ONLY. `content` is deliberately not selected: note bodies are
-    // long, private, and would be by far the largest untrusted region in the
-    // prompt. The model never needs a body — it only has to echo a title back
-    // as APPEND_NOTE_CONTENT's `titleHint`.
-    //
-    // `where: { userId }` matches NotesService.appendContentByTitleHint's own
-    // candidate scope exactly (owner-only — NOT the shared-note path in
-    // findOneAccessible). Listing a title the apply step cannot reach would
-    // only move the failure later.
-    const noteRows = options.includeNoteTitles
-      ? await this.prisma.note.findMany({
-          where: { userId },
-          orderBy: { updatedAt: 'desc' },
-          take: NOTE_TITLE_CAP,
-          select: { title: true },
-        })
-      : [];
-    const noteTitles = noteRows.map((n) => n.title);
 
     return {
       habitsProfile,
@@ -1437,7 +1462,7 @@ export class CoachAiService {
     return [
       {
         role: 'system',
-        content: `${SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+        content: `${SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
       },
       {
         role: 'user',
@@ -1454,7 +1479,7 @@ export class CoachAiService {
     const messages: LlmChatMessage[] = [
       {
         role: 'system',
-        content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+        content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
       },
       { role: 'user', content: buildUserContextMessage(ctx, 'chat', nonce) },
       // The user-context message above plays the role of "Context" the chat
@@ -1516,7 +1541,7 @@ export class CoachAiService {
       const messages: LlmChatMessage[] = [
         {
           role: 'system',
-          content: `${EXTRACTION_SYSTEM_PROMPT}\n\n${injectionGuardPrompt(nonce)}`,
+          content: `${EXTRACTION_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
         },
         { role: 'user', content: userMessage },
       ];

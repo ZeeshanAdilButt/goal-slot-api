@@ -134,10 +134,15 @@ describe('untrusted region markers', () => {
   });
 
   it('tells the model the region is data, not instructions', () => {
-    const guard = injectionGuardPrompt('abc123');
-    expect(guard).toContain(untrustedBeginMarker('abc123'));
-    expect(guard).toContain(untrustedEndMarker('abc123'));
+    const guard = injectionGuardPrompt();
     expect(guard).toMatch(/NEVER instructions/i);
     expect(guard).toMatch(/do not comply/i);
+  });
+
+  it('is byte-identical across calls, so the system prompt built from it stays a stable, provider-cacheable prefix', () => {
+    // The nonce lives only in the actual marker lines wrapped around the
+    // untrusted data in the user message (see wrapUntrusted), never in this
+    // instruction block, so this must not vary run to run.
+    expect(injectionGuardPrompt()).toBe(injectionGuardPrompt());
   });
 });

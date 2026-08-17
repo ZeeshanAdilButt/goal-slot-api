@@ -1035,8 +1035,13 @@ describe('CoachAiService', () => {
       const system = captured.system();
       const user = captured.user();
 
-      // The system prompt carries the boundary rules and a per-request nonce.
-      const nonceMatch = /--- BEGIN USER-DATA ([0-9a-f]{18}) ---/.exec(system);
+      // The system prompt carries the boundary rules, but NOT a live nonce:
+      // it stays byte-identical across requests (a `<id>` placeholder only)
+      // so providers can cache it. The real, per-request nonce lives only in
+      // the marker lines actually wrapped around the untrusted data in the
+      // user message.
+      expect(system).toContain('--- BEGIN USER-DATA <id> ---');
+      const nonceMatch = /--- BEGIN USER-DATA ([0-9a-f]{18}) ---/.exec(user);
       expect(nonceMatch).not.toBeNull();
       const nonce = nonceMatch![1];
 
@@ -1328,8 +1333,13 @@ describe('CoachAiService', () => {
       return {
         system: () => systemMsg,
         user: () => userMsg,
-        nonce: () =>
-          /--- BEGIN USER-DATA ([0-9a-f]{18}) ---/.exec(systemMsg)![1],
+        // Read off the USER message, not the system prompt. The system prompt
+        // deliberately no longer carries a live nonce — it describes the
+        // marker format with a generic placeholder so it stays byte-identical
+        // across calls and thus eligible for provider prefix-caching. The real
+        // per-request nonce only ever appears on the actual fence lines
+        // wrapping untrusted data, which is the only place it is load-bearing.
+        nonce: () => /--- BEGIN USER-DATA ([0-9a-f]{18}) ---/.exec(userMsg)![1],
       };
     }
 
