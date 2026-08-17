@@ -237,3 +237,456 @@ export function matchNotesByTitle<T extends NoteMatchCandidate>(
 
   return { status: 'no-match' };
 }
+
+// ---------------------------------------------------------------------------
+// Note summarization: model input, and model output
+//
+// Both helpers below exist for the note-summary module (POST /notes/:id/summary
+// — see ../note-summary/note-summary.service.ts). They live here, next to the
+// other pure note-content helpers, because they are the same kind of thing: a
+// rule about the shape of `Note.content`, testable without a database, a
+// network, or Nest's DI container.
+// ---------------------------------------------------------------------------
+
+/** Block-level elements whose CLOSING tag ends a line of prose. */
+const TEXT_BLOCK_CLOSERS =
+  /<\/(?:p|div|h[1-6]|blockquote|li|tr|section|article|pre|figcaption|td|th)\s*>/gi;
+
+/**
+ * Flatten a note's stored HTML into the plain text the summarization model is
+ * actually given, PRESERVING block structure as newlines.
+ *
+ * WHY NOT REUSE THE MOBILE `htmlToPlainText` SHAPE. goalslot-mobile has a
+ * helper of nearly this name (apps/mobile/src/lib/note-content.ts) and it is
+ * the wrong rule to copy here, which is worth stating explicitly because
+ * copying it looks like the consistent thing to do. That one replaces EVERY
+ * tag with a single space and then collapses all whitespace runs to one space,
+ * because it feeds a one-line list-row preview where a newline would be
+ * meaningless. Run a two-hour lecture through it and the model receives 50 KB
+ * of unbroken single-line text — and paragraph and heading boundaries are the
+ * single strongest signal a summarizer has for where one topic ends and the
+ * next begins. Quality collapses on exactly the input this feature exists for.
+ *
+ * So: headings become `## `-prefixed lines, list items become `- ` bullets,
+ * table cells keep a tab between them, and every block close is a newline. The
+ * result is a markdown-ish rendering, which is a format every model on the
+ * whitelist reads fluently and which costs far fewer tokens than the tags did.
+ *
+ * NOT A SANITIZER, exactly like its mobile cousin — the output is prompt text,
+ * never markup written back anywhere. `sanitizeSummaryHtml` is the function
+ * that defends the write path.
+ */
+export function noteHtmlToStructuredText(html: string): string {
+  const content = normalizeNoteContent(html);
+  if (content === '') return '';
+
+  const withBreaks = content
+    // Script/style bodies are not prose; dropping the tags alone would feed
+    // their source code to the model as if the user had written it.
+    .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    // Headings open with a markdown hash run so the model can see the outline
+    // depth, not merely that "a line ended here".
+    .replace(/<h([1-6])(?:\s[^>]*)?>/gi, (_m, level: string) => {
+      return `\n${'#'.repeat(Number(level))} `;
+    })
+    .replace(/<li(?:\s[^>]*)?>/gi, '\n- ')
+    // A cell boundary is a tab, not a newline: a table row should read as one
+    // line of related values rather than as several unrelated ones. Web-
+    // authored lecture notes really can contain tables (the web editor has
+    // them), so this is a live path, not a defensive one.
+    .replace(/<\/(?:td|th)\s*>/gi, '\t')
+    .replace(TEXT_BLOCK_CLOSERS, '\n')
+    .replace(/<[^>]*>/g, '');
+
+  // One line per block, and runs of newlines collapse to a single one.
+  // A block open and the preceding block's close each contribute a newline,
+  // so without this every heading and list item would arrive preceded by a
+  // blank line; and a note with a dozen empty paragraphs in it (dictation
+  // leaves those behind) would otherwise spend real context on whitespace.
+  // The structure the model needs is carried by the `#` and `- ` markers
+  // above, not by how many newlines separate two blocks.
+  return decodeNoteEntities(withBreaks)
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line) => line !== '')
+    .join('\n')
+    .trim();
+}
+
+/**
+ * The inverse of `escapeNoteHtml`, plus the `&nbsp;` TipTap emits for runs of
+ * spaces. Mirrors goalslot-mobile's `decodeNoteEntities` including the reason
+ * it is a single pass rather than a chain of `.replace` calls: chained decoding
+ * is order-dependent and double-decodes (running `&amp;` first turns a literal
+ * `&amp;lt;` into `&lt;` and then into `<`), whereas one scan never re-examines
+ * what it just wrote.
+ */
+export function decodeNoteEntities(text: string): string {
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&nbsp;': ' ',
+  };
+  return text.replace(
+    /&(?:amp|lt|gt|quot|#39|nbsp);/g,
+    (entity) => entities[entity] ?? entity,
+  );
+}
+
+/**
+ * ===========================================================================
+ * sanitizeSummaryHtml — the allowlist the model's HTML must pass to be stored
+ * ===========================================================================
+ *
+ * This is the FIRST path in this API that writes model-authored MARKUP into
+ * the database. Every existing writer of `Note.content` either passes through
+ * something a human typed into a real editor, or escapes text wholesale
+ * (`appendNoteParagraph` above). So the trust boundary here is new, and the
+ * enforcement has to be a parser, not a prompt instruction — the prompt says
+ * the same thing, but a prompt is a request and this is the guarantee.
+ *
+ * THREE separate reasons the allowlist is this narrow, all of which have to
+ * hold at once:
+ *
+ *  1. RENDERING. Whatever comes out of here is parsed by TipTap on both
+ *     clients. ProseMirror silently DISCARDS content it has no schema node
+ *     for, so markup outside both schemas isn't a cosmetic problem — it is
+ *     content the user never gets to see, in a note whose whole purpose is to
+ *     be the readable version of something long.
+ *
+ *  2. THE MOBILE FORMAT LOCK. goalslot-mobile ships
+ *     `hasUnsupportedMobileMarkup` (apps/mobile/src/lib/note-content.ts),
+ *     which makes a note READ-ONLY on the phone when it contains a table, an
+ *     `<hr>`, a `<pre>`, a `text-align` style or a `data-indent` — because the
+ *     mobile editor's schema has no node for those and its autosave would
+ *     otherwise write its own lossy re-serialization back over the good copy.
+ *     A summary emitted with any of them would therefore be born locked: the
+ *     user asks for a tidy version of their lecture and receives a page they
+ *     cannot edit on the device they are holding. This allowlist can emit none
+ *     of those five things, which is asserted directly in note-content.spec.ts.
+ *
+ *  3. SECURITY. The stored HTML is rendered by goal-slot-web's
+ *     `html-content.tsx` through `dangerouslySetInnerHTML` on some surfaces,
+ *     and a note can be shared by public link. "It always goes through
+ *     ProseMirror first" is defence-in-depth by accident, not by design, and
+ *     is not something to bet a stored-XSS on.
+ *
+ * WHY IT REJECTS RATHER THAN REPAIRS. A response cut off by the provider's
+ * output cap ends mid-document — often mid-tag. Repairing that (auto-closing
+ * the open elements) would persist half a summary that LOOKS complete, under a
+ * title claiming to summarize the whole lecture, with no signal anything went
+ * wrong. That is the worst possible outcome here: silent, plausible, and
+ * wrong. An unbalanced document is therefore a hard failure the caller
+ * surfaces as "try again", which costs one retry instead of one lie.
+ */
+
+/** Emitted as-is (after aliasing), with only the attributes listed below. */
+const SUMMARY_ALLOWED_TAGS = new Set([
+  'h1',
+  'h2',
+  'h3',
+  'p',
+  'ul',
+  'ol',
+  'li',
+  'blockquote',
+  'strong',
+  'em',
+  'u',
+  's',
+  'code',
+  'a',
+  'mark',
+  'br',
+]);
+
+/** Allowed, but written without a closing tag and never pushed on the stack. */
+const SUMMARY_VOID_TAGS = new Set(['br']);
+
+/**
+ * Spellings that mean something already on the allowlist. Normalising instead
+ * of rejecting: a model that writes `<b>` rather than `<strong>` has produced
+ * exactly the content asked for and differs only in a synonym, and failing a
+ * 30-second call over that would be pedantry the user pays for. `h4`-`h6`
+ * collapse to `h3` because the web editor's Heading extension is configured
+ * for levels 1-3 only, so a level-4 heading has no node to parse into and
+ * would vanish entirely — a flattened heading is strictly better than a
+ * deleted one.
+ */
+const SUMMARY_TAG_ALIASES: Record<string, string> = {
+  b: 'strong',
+  i: 'em',
+  del: 's',
+  strike: 's',
+  ins: 'u',
+  h4: 'h3',
+  h5: 'h3',
+  h6: 'h3',
+};
+
+/**
+ * Carry no meaning of their own: the tag is dropped and the CHILDREN ARE KEPT.
+ * These show up when a model wraps its answer in a container out of habit, and
+ * discarding the wrapper loses nothing at all.
+ */
+const SUMMARY_UNWRAP_TAGS = new Set([
+  'div',
+  'span',
+  'section',
+  'article',
+  'main',
+  'header',
+  'footer',
+  'figure',
+  'body',
+  'html',
+  'small',
+  'font',
+]);
+
+/** Dropped outright — they have no text content to preserve. `hr` is here
+ *  rather than on the allowlist specifically because of the mobile format
+ *  lock (reason 2 above). */
+const SUMMARY_DROP_TAGS = new Set(['hr', 'img', 'wbr']);
+
+/** Dropped WITH their contents. Unwrapping these would splice a stylesheet or
+ *  a script body into the document as visible prose. */
+const SUMMARY_DROP_WITH_CONTENT = new Set(['script', 'style', 'template']);
+
+/** Link schemes that may survive into stored markup. Anything else — most
+ *  importantly `javascript:`, but also `data:` — makes the anchor unwrap to
+ *  its own text, so the words survive and the URL does not. */
+const SAFE_LINK_SCHEME = /^(?:https?:|mailto:)/i;
+
+export type SanitizeSummaryHtmlResult =
+  | { status: 'ok'; html: string }
+  | { status: 'rejected'; reason: string };
+
+/** Escape a text run for re-emission. `<` cannot appear here (the tokenizer
+ *  splits on it), so the only real work is a bare `&` — one that does not
+ *  already begin a well-formed entity, which must be escaped or it will be
+ *  re-read as markup on the way back in. Valid entities are left alone so an
+ *  `&mdash;` the model wrote stays an em dash instead of becoming literal
+ *  text. */
+function escapeSummaryText(text: string): string {
+  return text
+    .replace(/&(?!#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]{1,31};)/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * Find the `>` that ends the tag starting at `start`, skipping any `>` that
+ * sits inside a quoted attribute value (`<a href="a?x>y">` is one tag, not
+ * two). Returns -1 when the tag never closes, which is the truncation case.
+ */
+function findTagEnd(html: string, start: number): number {
+  let quote: string | null = null;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === '>') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+const ATTRIBUTE_PATTERN =
+  /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+
+function parseAttributes(source: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  ATTRIBUTE_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ATTRIBUTE_PATTERN.exec(source)) !== null) {
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    attrs[match[1].toLowerCase()] = value;
+  }
+  return attrs;
+}
+
+/**
+ * Rebuild the attribute list for an allowed tag, keeping only what the two
+ * editors actually read. Everything else is dropped SILENTLY rather than
+ * rejected: attributes are decoration, and dropping `style="text-align:center"`
+ * is the intended outcome (reason 2 above), not an error worth failing a call
+ * over. Structure is what gets the strict treatment.
+ *
+ * Returns null when the tag itself should be unwrapped instead — currently
+ * only an anchor whose href is missing or carries an unsafe scheme, where
+ * keeping the words and dropping the link is better than either storing the
+ * URL or losing the sentence.
+ */
+function summaryAttributesFor(
+  tag: string,
+  attrs: Record<string, string>,
+): string | null {
+  if (tag === 'a') {
+    const href = (attrs.href ?? '').trim();
+    if (!href || !SAFE_LINK_SCHEME.test(href)) return null;
+    return ` href="${escapeSummaryText(href).replace(/"/g, '&quot;')}"`;
+  }
+  // TipTap's TaskList/TaskItem are addressed entirely through these two data
+  // attributes on otherwise ordinary <ul>/<li> — both platforms parse them
+  // (mobile's bundle carries TaskListBridge), so a checklist is one of the
+  // few genuinely rich things a summary can safely use.
+  if (tag === 'ul' && attrs['data-type'] === 'taskList') {
+    return ' data-type="taskList"';
+  }
+  if (tag === 'li' && attrs['data-type'] === 'taskItem') {
+    const checked = attrs['data-checked'] === 'true' ? 'true' : 'false';
+    return ` data-type="taskItem" data-checked="${checked}"`;
+  }
+  return '';
+}
+
+/**
+ * Validate and normalise the model's HTML against the allowlist above.
+ *
+ * Exported for direct unit testing — it is the security boundary of this
+ * feature and the thing most worth pinning down without a provider in the
+ * loop.
+ */
+export function sanitizeSummaryHtml(html: string): SanitizeSummaryHtmlResult {
+  const source = typeof html === 'string' ? html : '';
+  const out: string[] = [];
+  /** Open elements. `emitted: false` marks one that was unwrapped, so its
+   *  closing tag is swallowed too instead of appearing unmatched. */
+  const stack: { name: string; emitted: boolean }[] = [];
+  let i = 0;
+
+  while (i < source.length) {
+    const lt = source.indexOf('<', i);
+    if (lt === -1) {
+      out.push(escapeSummaryText(source.slice(i)));
+      break;
+    }
+    if (lt > i) out.push(escapeSummaryText(source.slice(i, lt)));
+
+    if (source.startsWith('<!--', lt)) {
+      const end = source.indexOf('-->', lt + 4);
+      if (end === -1) {
+        return { status: 'rejected', reason: 'unterminated comment' };
+      }
+      i = end + 3;
+      continue;
+    }
+    if (source.startsWith('<!', lt)) {
+      const end = findTagEnd(source, lt + 2);
+      if (end === -1) {
+        return { status: 'rejected', reason: 'unterminated declaration' };
+      }
+      i = end + 1;
+      continue;
+    }
+
+    const end = findTagEnd(source, lt + 1);
+    if (end === -1) {
+      return {
+        status: 'rejected',
+        reason: 'a tag is never closed, so the response was cut short',
+      };
+    }
+    const inner = source.slice(lt + 1, end);
+    i = end + 1;
+
+    // ----- closing tag -----
+    if (inner.startsWith('/')) {
+      const rawName = inner.slice(1).trim().toLowerCase();
+      const name = SUMMARY_TAG_ALIASES[rawName] ?? rawName;
+      if (
+        SUMMARY_DROP_TAGS.has(rawName) ||
+        SUMMARY_VOID_TAGS.has(name) ||
+        SUMMARY_DROP_WITH_CONTENT.has(rawName)
+      ) {
+        // A stray close for something that never opened an element here.
+        continue;
+      }
+      const top = stack.pop();
+      if (!top || top.name !== name) {
+        return {
+          status: 'rejected',
+          reason: `closing </${rawName}> does not match the open element`,
+        };
+      }
+      if (top.emitted) out.push(`</${name}>`);
+      continue;
+    }
+
+    // ----- opening tag -----
+    const selfClosing = inner.endsWith('/');
+    const body = selfClosing ? inner.slice(0, -1) : inner;
+    const nameMatch = /^([a-zA-Z][a-zA-Z0-9-]*)/.exec(body.trim());
+    if (!nameMatch) {
+      return { status: 'rejected', reason: 'malformed tag' };
+    }
+    const rawName = nameMatch[1].toLowerCase();
+    const name = SUMMARY_TAG_ALIASES[rawName] ?? rawName;
+
+    if (SUMMARY_DROP_WITH_CONTENT.has(rawName)) {
+      const closeIndex = source.toLowerCase().indexOf(`</${rawName}`, i);
+      if (closeIndex === -1) {
+        return {
+          status: 'rejected',
+          reason: `<${rawName}> is never closed`,
+        };
+      }
+      const closeEnd = findTagEnd(source, closeIndex + 2);
+      i = closeEnd === -1 ? source.length : closeEnd + 1;
+      continue;
+    }
+
+    if (SUMMARY_DROP_TAGS.has(rawName)) continue;
+
+    if (SUMMARY_UNWRAP_TAGS.has(rawName)) {
+      if (!selfClosing) stack.push({ name: rawName, emitted: false });
+      continue;
+    }
+
+    if (!SUMMARY_ALLOWED_TAGS.has(name)) {
+      return {
+        status: 'rejected',
+        reason: `<${rawName}> is not allowed in a summary`,
+      };
+    }
+
+    if (SUMMARY_VOID_TAGS.has(name)) {
+      out.push(`<${name}>`);
+      continue;
+    }
+
+    const attrs = summaryAttributesFor(name, parseAttributes(body));
+    if (attrs === null) {
+      // Unwrap (see summaryAttributesFor): keep the text, drop the element.
+      if (!selfClosing) stack.push({ name, emitted: false });
+      continue;
+    }
+    if (selfClosing) {
+      out.push(`<${name}${attrs}></${name}>`);
+      continue;
+    }
+    stack.push({ name, emitted: true });
+    out.push(`<${name}${attrs}>`);
+  }
+
+  if (stack.length > 0) {
+    return {
+      status: 'rejected',
+      reason: `<${stack[stack.length - 1].name}> is never closed, so the response was cut short`,
+    };
+  }
+
+  const result = out.join('').trim();
+  if (result.replace(/<[^>]*>/g, '').trim() === '') {
+    return { status: 'rejected', reason: 'the summary has no text in it' };
+  }
+  return { status: 'ok', html: result };
+}

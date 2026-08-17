@@ -77,14 +77,23 @@ export class OpenRouterProvider implements CoachLlmProvider {
     model: string;
     schemaName: string;
     schema: Record<string, unknown>;
+    maxTokens?: number;
   }): Promise<{ data: T; usage: LlmUsage }> {
     // OpenRouter supports OpenAI's `response_format` on models that
     // expose JSON-mode upstream (most modern ones do). Fall back to
     // plain text + JSON.parse if the model refuses the format flag.
+    // `maxTokens` has to be applied to BOTH calls below — the fallback is a
+    // second, independent request, and a cap that only reached the first one
+    // would silently stop applying for exactly the models that need the
+    // fallback.
+    const maxTokensConfig = args.maxTokens
+      ? { max_tokens: args.maxTokens }
+      : {};
     try {
       const completion = await this.client.chat.completions.create({
         model: args.model,
         temperature: 0.2,
+        ...maxTokensConfig,
         response_format: {
           type: 'json_schema',
           json_schema: {
@@ -109,6 +118,7 @@ export class OpenRouterProvider implements CoachLlmProvider {
       const completion = await this.client.chat.completions.create({
         model: args.model,
         temperature: 0.2,
+        ...maxTokensConfig,
         messages: args.messages.map((m) => ({
           role: m.role,
           content: m.content,

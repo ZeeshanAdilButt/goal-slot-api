@@ -87,6 +87,7 @@ export class GeminiProvider implements CoachLlmProvider {
     model: string;
     schemaName: string;
     schema: Record<string, unknown>;
+    maxTokens?: number;
   }): Promise<{ data: T; usage: LlmUsage }> {
     const { systemInstruction, history } = this.splitSystem(args.messages);
     const m = this.client.getGenerativeModel({
@@ -100,6 +101,9 @@ export class GeminiProvider implements CoachLlmProvider {
         responseMimeType: 'application/json',
         responseSchema: args.schema as unknown as ResponseSchema,
         temperature: 0.2,
+        // Absent unless the caller asks, so existing callers keep Gemini's
+        // own (very large) default rather than acquiring a cap they never had.
+        ...(args.maxTokens ? { maxOutputTokens: args.maxTokens } : {}),
       },
     });
 

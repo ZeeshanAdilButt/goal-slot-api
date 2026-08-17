@@ -855,6 +855,82 @@ export class CoachAiService {
     };
   }
 
+  /**
+   * Resolve the caller's key AND take the same quota gates the streaming entry
+   * points take, for a one-shot metered call made from another module.
+   *
+   * WHY THIS EXISTS RATHER THAN THE CALLER DOING IT. `assertWithinBudget` and
+   * `reserveSharedQuotaSlot` are private, and must stay private: the shared
+   * one is only correct because its check and its increment are a single
+   * atomic upsert (see its comment — the read-then-write version it replaced
+   * let N concurrent streams all pass a stale read and charge for one). A
+   * second module reimplementing that would reintroduce exactly that bug, out
+   * of sight of the comment explaining it. So the gate is exported as a whole
+   * operation, in the right order, with the release path attached.
+   *
+   * DELIBERATELY NOT the exemption CoachVoiceIntentService takes. That service
+   * skips these gates on purpose, because it fires on nearly every utterance
+   * and a per-utterance call sharing the daily MESSAGE counter would drain a
+   * week of chat allowance in minutes. Note summarization is the opposite of
+   * that on every axis — rare, very large input, expensive — so it is exactly
+   * what these counters exist to meter, and it goes through them.
+   *
+   * `release()` hands a reserved shared slot back. Call it when the provider
+   * call fails before producing anything, so an outage does not silently eat
+   * the user's daily allowance. It is a no-op for BYOK callers (nothing was
+   * reserved) and safe to call more than once only in the sense that each call
+   * decrements, so call it exactly once, on the failure path.
+   */
+  async beginMeteredCall(userId: string): Promise<{
+    resolved: Awaited<ReturnType<CoachAiService['resolveCoachKey']>>;
+    release: () => Promise<void>;
+  }> {
+    const resolved = await this.resolveCoachKey(userId);
+    if (resolved.kind === 'byok') {
+      await this.assertWithinBudget(resolved.byok);
+      return { resolved, release: async () => undefined };
+    }
+    await this.reserveSharedQuotaSlot(userId);
+    return {
+      resolved,
+      release: () => this.releaseSharedQuotaSlot(userId),
+    };
+  }
+
+  /**
+   * Charge a completed one-shot metered call's tokens against a BYOK user's
+   * monthly budget, mirroring what `runAndPersist` does at the end of a stream.
+   *
+   * Shared-key callers are intentionally a no-op: that counter is per MESSAGE,
+   * not per token, and it was already incremented by `beginMeteredCall` before
+   * the provider ran — incrementing again here would double-count, which is the
+   * same reasoning `runAndPersist` spells out at its own `isShared` branch.
+   *
+   * Best-effort by design. The work the user asked for has already succeeded by
+   * the time this runs; failing their request because the meter could not be
+   * updated would trade a real result for a bookkeeping error.
+   */
+  async chargeMeteredUsage(
+    userId: string,
+    resolvedKind: 'byok' | 'shared',
+    totalTokens: number,
+  ): Promise<void> {
+    if (resolvedKind === 'shared' || totalTokens <= 0) return;
+    try {
+      await this.prisma.encryptedByokKey.update({
+        where: { userId },
+        data: {
+          tokensUsedThisMonth: { increment: totalTokens },
+          lastValidatedAt: new Date(),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `failed to charge metered usage user=${userId}: ${err?.message ?? err}`,
+      );
+    }
+  }
+
   private async assertWithinBudget(byok: {
     userId: string;
     tokensUsedThisMonth: number;

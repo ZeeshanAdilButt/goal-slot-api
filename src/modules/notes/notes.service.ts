@@ -14,7 +14,13 @@ import { appendNoteParagraph, matchNotesByTitle } from './note-content';
 // content has no DB-level or DTO-level length limit, so without this a
 // single note could be grown without bound — trivially reachable at volume
 // via repeated Coach APPEND_NOTE_CONTENT actions targeting the same title.
-const MAX_NOTE_CONTENT_LENGTH = 65535;
+// Exported because `create` deliberately does NOT enforce it (a create has no
+// prior content to have grown past a ceiling) while `update` does — which
+// means anything generating a note body elsewhere has to check the ceiling
+// itself BEFORE creating the row, or it produces a note that saves once and
+// then rejects every edit the editor's autosave ever makes, forever, with no
+// visible cause. See note-summary.service.ts, which is exactly that case.
+export const MAX_NOTE_CONTENT_LENGTH = 65535;
 
 @Injectable()
 export class NotesService {

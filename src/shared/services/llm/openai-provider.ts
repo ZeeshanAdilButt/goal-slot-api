@@ -65,10 +65,16 @@ export class OpenAiProvider implements CoachLlmProvider {
     model: string;
     schemaName: string;
     schema: Record<string, unknown>;
+    maxTokens?: number;
   }): Promise<{ data: T; usage: LlmUsage }> {
     const completion = await this.client.chat.completions.create({
       model: args.model,
       temperature: 0.2,
+      // Spread rather than `max_tokens: args.maxTokens` so an omitted value
+      // leaves the key off the request entirely (an explicit `undefined` is
+      // fine for this SDK, but "absent unless asked for" is the contract the
+      // interface promises and is what keeps this a zero-change edit).
+      ...(args.maxTokens ? { max_tokens: args.maxTokens } : {}),
       response_format: {
         type: 'json_schema',
         json_schema: {

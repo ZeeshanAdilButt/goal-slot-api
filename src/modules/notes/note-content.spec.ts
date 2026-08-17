@@ -3,6 +3,8 @@ import {
   escapeNoteHtml,
   matchNotesByTitle,
   normalizeNoteContent,
+  noteHtmlToStructuredText,
+  sanitizeSummaryHtml,
 } from './note-content';
 
 describe('normalizeNoteContent', () => {
@@ -260,5 +262,230 @@ describe('matchNotesByTitle', () => {
         note: notes[1],
       });
     });
+  });
+});
+
+describe('noteHtmlToStructuredText', () => {
+  it('keeps block boundaries as newlines rather than collapsing to one line', () => {
+    // The whole reason this is not a copy of the mobile one-line preview
+    // helper: paragraph boundaries are the summarizer's strongest signal for
+    // where one topic ends and the next begins.
+    expect(
+      noteHtmlToStructuredText('<p>First point</p><p>Second point</p>'),
+    ).toBe('First point\nSecond point');
+  });
+
+  it('renders headings with their outline depth', () => {
+    expect(
+      noteHtmlToStructuredText('<h1>Lecture</h1><h2>Part one</h2><p>Body</p>'),
+    ).toBe('# Lecture\n## Part one\nBody');
+  });
+
+  it('renders list items as bullets', () => {
+    expect(
+      noteHtmlToStructuredText('<ul><li>Alpha</li><li>Beta</li></ul>'),
+    ).toBe('- Alpha\n- Beta');
+  });
+
+  it('keeps table cells on one line, separated', () => {
+    // Web-authored notes really can contain tables, so this is a live path.
+    expect(
+      noteHtmlToStructuredText(
+        '<table><tr><td>Term</td><td>Meaning</td></tr></table>',
+      ),
+    ).toBe('Term Meaning');
+  });
+
+  it('decodes entities so the model sees the characters the user typed', () => {
+    expect(noteHtmlToStructuredText('<p>Tom &amp; Jerry &lt;3</p>')).toBe(
+      'Tom & Jerry <3',
+    );
+  });
+
+  it('drops script and style bodies instead of feeding them to the model', () => {
+    expect(
+      noteHtmlToStructuredText(
+        '<p>Real</p><script>alert(1)</script><style>p{color:red}</style>',
+      ),
+    ).toBe('Real');
+  });
+
+  it('treats the legacy empty placeholder as an empty document', () => {
+    expect(noteHtmlToStructuredText('[]')).toBe('');
+  });
+
+  it('drops the empty paragraphs dictation leaves behind', () => {
+    // One line per block, not one line per tag — otherwise a long dictated
+    // note spends a real slice of the context window on whitespace.
+    expect(
+      noteHtmlToStructuredText('<p>A</p><p></p><p></p><p></p><p>B</p>'),
+    ).toBe('A\nB');
+  });
+});
+
+describe('sanitizeSummaryHtml', () => {
+  /** Convenience: assert acceptance and return the normalized markup. */
+  const accept = (html: string): string => {
+    const result = sanitizeSummaryHtml(html);
+    if (result.status !== 'ok') {
+      throw new Error(`expected acceptance, got rejected: ${result.reason}`);
+    }
+    return result.html;
+  };
+
+  const reject = (html: string): string => {
+    const result = sanitizeSummaryHtml(html);
+    if (result.status !== 'rejected') {
+      throw new Error(`expected rejection, got: ${result.html}`);
+    }
+    return result.reason;
+  };
+
+  it('passes through the full allowed vocabulary unchanged', () => {
+    const html =
+      '<h1>Title</h1><h2>Section</h2><h3>Sub</h3><p>Body with ' +
+      '<strong>bold</strong>, <em>italic</em>, <u>under</u>, <s>struck</s>, ' +
+      '<code>inline</code> and <mark>highlight</mark>.</p>' +
+      '<ul><li>Bullet</li></ul><ol><li>Numbered</li></ol>' +
+      '<blockquote><p>Quoted</p></blockquote>';
+    expect(accept(html)).toBe(html);
+  });
+
+  it('keeps TipTap task lists, which both editors can parse', () => {
+    const html =
+      '<ul data-type="taskList">' +
+      '<li data-type="taskItem" data-checked="true"><p>Done</p></li>' +
+      '<li data-type="taskItem" data-checked="false"><p>Todo</p></li>' +
+      '</ul>';
+    expect(accept(html)).toBe(html);
+  });
+
+  it('keeps safe links and drops the anchor (not the words) on an unsafe one', () => {
+    expect(accept('<p><a href="https://x.test/a">docs</a></p>')).toBe(
+      '<p><a href="https://x.test/a">docs</a></p>',
+    );
+    expect(accept('<p><a href="javascript:alert(1)">click</a></p>')).toBe(
+      '<p>click</p>',
+    );
+    expect(accept('<p><a href="data:text/html,x">click</a></p>')).toBe(
+      '<p>click</p>',
+    );
+  });
+
+  it('normalizes synonym tags rather than failing a whole call over them', () => {
+    expect(accept('<p><b>bold</b> and <i>italic</i></p>')).toBe(
+      '<p><strong>bold</strong> and <em>italic</em></p>',
+    );
+  });
+
+  it('flattens h4-h6 to h3, because the editors have no node past level 3', () => {
+    // A deleted heading is worse than a flattened one — ProseMirror would
+    // discard a level it has no schema entry for.
+    expect(accept('<h4>Deep</h4>')).toBe('<h3>Deep</h3>');
+  });
+
+  it('unwraps meaningless containers, keeping their children', () => {
+    expect(accept('<div><p>Kept</p></div>')).toBe('<p>Kept</p>');
+    expect(accept('<div><section><p>Kept</p></section></div>')).toBe(
+      '<p>Kept</p>',
+    );
+  });
+
+  it('strips every attribute the editors do not read', () => {
+    expect(
+      accept(
+        '<p class="lead" style="text-align: center" data-indent="2">X</p>',
+      ),
+    ).toBe('<p>X</p>');
+  });
+
+  it('drops script and style along with their contents', () => {
+    expect(accept('<p>Safe</p><script>alert(1)</script>')).toBe('<p>Safe</p>');
+    expect(accept('<p>Safe</p><style>p{color:red}</style>')).toBe(
+      '<p>Safe</p>',
+    );
+  });
+
+  it('escapes a bare ampersand but leaves a real entity alone', () => {
+    expect(accept('<p>Tom & Jerry &mdash; also &amp; fine</p>')).toBe(
+      '<p>Tom &amp; Jerry &mdash; also &amp; fine</p>',
+    );
+  });
+
+  it('is not fooled by a > inside an attribute value', () => {
+    expect(accept('<p><a href="https://x.test/?a=1>2">link</a></p>')).toBe(
+      '<p><a href="https://x.test/?a=1&gt;2">link</a></p>',
+    );
+  });
+
+  // ---- rejection: structure, not decoration ----
+
+  it('rejects an unclosed element, because that means a truncated response', () => {
+    // The single most important case. A provider that stops at its output cap
+    // ends mid-document; auto-closing would persist half a summary that looks
+    // complete under a title claiming to cover the whole lecture.
+    expect(reject('<h1>Summary</h1><p>It started well')).toMatch(/cut short/);
+  });
+
+  it('rejects a tag cut off mid-way', () => {
+    expect(reject('<p>Fine</p><p>Next</p><stro')).toMatch(/cut short/);
+  });
+
+  it('rejects mismatched nesting', () => {
+    expect(reject('<p><strong>x</p></strong>')).toMatch(/does not match/);
+  });
+
+  it('rejects markup with no text at all', () => {
+    expect(reject('<p></p><p>   </p>')).toMatch(/no text/);
+    expect(reject('')).toMatch(/no text/);
+  });
+
+  it('rejects elements it cannot degrade safely', () => {
+    expect(reject('<table><tr><td>a</td></tr></table>')).toMatch(
+      /<table> is not allowed/,
+    );
+    expect(reject('<pre><code>x</code></pre>')).toMatch(/<pre> is not allowed/);
+    expect(reject('<p>a</p><iframe src="https://x.test"></iframe>')).toMatch(
+      /<iframe> is not allowed/,
+    );
+  });
+
+  // ---- the invariant that keeps a generated summary editable on the phone ----
+
+  it('can never emit markup that would lock the note on mobile', () => {
+    // goalslot-mobile's `hasUnsupportedMobileMarkup` makes a note READ-ONLY on
+    // the phone when it sees a table, an <hr>, a <pre>, a text-align style or a
+    // data-indent. A summary carrying any of those would be born un-editable on
+    // the device the user is holding — the exact opposite of what they asked
+    // for. The five patterns below are that guard's list, kept in step by hand
+    // (the guard itself lives in the mobile repo and cannot be imported here).
+    const mobileFormatLockPatterns = [
+      /<table[\s/>]/i,
+      /<hr[\s/>]/i,
+      /<pre[\s/>]/i,
+      /style="[^"]*text-align/i,
+      /\sdata-indent="/i,
+    ];
+
+    // Everything the sanitizer is willing to ACCEPT, including the inputs most
+    // likely to smuggle one of those through.
+    const accepted = [
+      accept('<h1>T</h1><h2>S</h2><p><strong>b</strong> <em>i</em></p>'),
+      accept('<p style="text-align: center" data-indent="3">Centered</p>'),
+      accept('<div><p>Wrapped</p></div>'),
+      accept(
+        '<ul data-type="taskList"><li data-type="taskItem" ' +
+          'data-checked="false"><p>Task</p></li></ul>',
+      ),
+      accept('<p><a href="https://x.test">link</a></p>'),
+      accept('<blockquote><p>Source: Lecture, 16 Aug</p></blockquote>'),
+      accept('<p>&lt;hr&gt; and &lt;table&gt; written as text</p>'),
+    ];
+
+    for (const html of accepted) {
+      for (const pattern of mobileFormatLockPatterns) {
+        expect(pattern.test(html)).toBe(false);
+      }
+    }
   });
 });

@@ -47,5 +47,21 @@ export interface CoachLlmProvider {
     model: string;
     schemaName: string;
     schema: Record<string, unknown>;
+    /**
+     * Ceiling on the response length, in tokens. Optional, and every provider
+     * keeps its previous behaviour when it is omitted — so no existing caller
+     * changes.
+     *
+     * It exists because the Anthropic SDK REQUIRES `max_tokens` on every
+     * request, so that provider had to hardcode one (1500). That is ample for
+     * the insight-extraction call this interface was written for, and far too
+     * small for a note summary: ~1500 tokens is roughly 6 KB of HTML including
+     * tags, which a structured summary of a two-hour lecture blows straight
+     * through. Anthropic stops mid-token when it hits the cap, so the result is
+     * not a short summary — it is a truncated one, cut off mid-tag, which the
+     * summary sanitiser then rejects for being unbalanced. The other three
+     * providers set no cap at all and only need to honour this when asked.
+     */
+    maxTokens?: number;
   }): Promise<{ data: T; usage: LlmUsage }>;
 }

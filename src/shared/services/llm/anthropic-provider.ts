@@ -93,6 +93,7 @@ export class AnthropicProvider implements CoachLlmProvider {
     model: string;
     schemaName: string;
     schema: Record<string, unknown>;
+    maxTokens?: number;
   }): Promise<{ data: T; usage: LlmUsage }> {
     const systemParts: string[] = [];
     const turns: { role: 'user' | 'assistant'; content: string }[] = [];
@@ -106,7 +107,11 @@ export class AnthropicProvider implements CoachLlmProvider {
 
     const res = await this.client.messages.create({
       model: args.model,
-      max_tokens: 1500,
+      // The Anthropic SDK requires this, so unlike the other three providers
+      // there is no "leave it unset" option — 1500 is the historical default
+      // every caller got before `maxTokens` existed, kept so nothing changes
+      // for them. See the interface for why a note summary must raise it.
+      max_tokens: args.maxTokens ?? 1500,
       temperature: 0.2,
       system: systemParts.join('\n\n') || undefined,
       messages: turns,
