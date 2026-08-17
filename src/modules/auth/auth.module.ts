@@ -13,6 +13,7 @@ import {
 } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { OtpAttemptTrackerService } from './otp-attempt-tracker.service';
 import { UsersModule } from '../users/users.module';
 import { SubscriptionGuard } from './guards/subscription.guard';
@@ -65,6 +66,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
   providers: [
     AuthService,
     JwtStrategy,
+    JwtRefreshStrategy,
     SubscriptionGuard,
     OtpAttemptTrackerService,
   ],

@@ -21,8 +21,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: {
     sub: string;
     tokenVersion?: number;
+    typ?: string;
     [claim: string]: unknown;
   }): Promise<AuthenticatedUser> {
+    // Refresh tokens are minted with the same secret and an otherwise
+    // identical payload, so without this check they authenticate every
+    // API route just as well as an access token does -- turning a stolen
+    // refresh token into a 30-day (rather than 7-day) full-access
+    // credential. Only the `typ` claim distinguishes them.
+    //
+    // A missing `typ` is deliberately still accepted: tokens minted
+    // before this claim existed carry none, and rejecting them would log
+    // out every live session the moment this deploys. Those tokens all
+    // expire within 7 days (JWT_EXPIRATION) of the deploy, after which
+    // only the refresh-token side of the transition remains -- see
+    // jwt-refresh.strategy.ts.
+    if (payload.typ === 'refresh') {
+      throw new UnauthorizedException(
+        'Refresh token cannot be used for API access',
+      );
+    }
+
     // Look the user up on every authenticated request instead of trusting
     // the JWT payload blindly. Without this, disabling a user
     // (POST /users/admin/toggle-status/:userId) has no effect on tokens

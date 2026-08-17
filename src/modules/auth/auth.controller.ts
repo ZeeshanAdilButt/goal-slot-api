@@ -30,6 +30,7 @@ import {
   ChangePasswordDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { JwtRefreshAuthGuard } from './guards/jwt-refresh-auth.guard';
 import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 // check-email is unauthenticated by design (it runs before the user has any
@@ -163,11 +164,16 @@ export class AuthController {
     return this.authService.validateUser(req.user.sub);
   }
 
+  // Deliberately NOT JwtAuthGuard: this is the one endpoint that must
+  // accept a refresh token, and it must reject an access token so a
+  // stolen access token cannot be laundered into a fresh 30-day pair.
   @Post('refresh')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtRefreshAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Refresh access token' })
+  @ApiOperation({
+    summary: 'Refresh access token (send the refresh token as the bearer)',
+  })
   async refreshToken(@Request() req: AuthenticatedRequest) {
     return this.authService.refreshToken(req.user.sub);
   }

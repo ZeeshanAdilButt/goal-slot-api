@@ -184,3 +184,81 @@ describe('JwtStrategy.validate', () => {
     ).rejects.toThrow('Session has been invalidated by a password change');
   });
 });
+
+describe('JwtStrategy.validate token-type separation', () => {
+  const activeUser = {
+    id: 'user_1',
+    email: 'real@example.com',
+    role: 'USER',
+    isDisabled: false,
+    tokenVersion: 0,
+  };
+
+  it('rejects a refresh token presented as an API access token', async () => {
+    // Access and refresh tokens are signed with the same secret and carry
+    // an otherwise identical payload, so before the `typ` claim existed a
+    // stolen refresh token authenticated every API route -- making the
+    // effective lifetime of a stolen credential 30 days rather than 7.
+    const { strategy } = buildStrategy([activeUser]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        tokenVersion: 0,
+        typ: 'refresh',
+      }),
+    ).rejects.toThrow('Refresh token cannot be used for API access');
+  });
+
+  it('does not even reach the database for a refresh token', async () => {
+    const { strategy, findUnique } = buildStrategy([activeUser]);
+
+    await expect(
+      strategy.validate({ sub: 'user_1', tokenVersion: 0, typ: 'refresh' }),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it('accepts an access-typed token', async () => {
+    const { strategy } = buildStrategy([activeUser]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        tokenVersion: 0,
+        typ: 'access',
+      }),
+    ).resolves.toEqual({
+      sub: 'user_1',
+      email: 'real@example.com',
+      role: 'USER',
+      isDisabled: false,
+    });
+  });
+
+  it('still accepts a legacy token minted before the typ claim existed', async () => {
+    // Guards against over-tightening: every token in the wild at deploy
+    // time carries no `typ`, and rejecting those would log out the entire
+    // user base on the first request after the API auto-deploys.
+    const { strategy } = buildStrategy([activeUser]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        tokenVersion: 0,
+      }),
+    ).resolves.toEqual({
+      sub: 'user_1',
+      email: 'real@example.com',
+      role: 'USER',
+      isDisabled: false,
+    });
+  });
+});

@@ -567,8 +567,25 @@ export class SharingService {
   async getPublicSharedGoals(token: string) {
     const share = await this.verifyPublicToken(token);
 
+    // Explicit projection, not a bare findMany. This response goes to an
+    // unauthenticated holder of a public link, and the default full-row
+    // shape shipped every column -- including `description`, which is
+    // free-form user prose the owner never chose to publish (the public
+    // page renders only title/color/hours, so it leaked in the JSON
+    // only). Keep this in sync with the SharedGoal interface in
+    // goal-slot-web/src/features/sharing/utils/types.ts; anything not
+    // listed there does not belong in a public response.
     return this.prisma.goal.findMany({
       where: { userId: share.ownerId },
+      select: {
+        id: true,
+        title: true,
+        color: true,
+        category: true,
+        targetHours: true,
+        loggedHours: true,
+        status: true,
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

@@ -230,3 +230,126 @@ describe('SharingService.verifyPublicToken (via public endpoints)', () => {
     ).rejects.toThrow(NotFoundException);
   });
 });
+
+// ---------- Public-link field projection ----------
+//
+// getPublicSharedGoals answers an unauthenticated request (anyone holding
+// the link). It used to be a bare findMany with no `select`, so every Goal
+// column went out on the wire -- notably `description`, free-form prose the
+// owner never chose to publish. The public page only ever renders
+// title/color/hours, so the leak was invisible in the UI and visible only
+// in the JSON response.
+
+class FakePrismaWithGoalSelect {
+  shares: any[] = [];
+  lastGoalFindManyArgs: any = null;
+
+  // The full row as Prisma would return it with no `select`.
+  private readonly storedGoal = {
+    id: 'goal_1',
+    title: 'Ship the feature',
+    description: '<p>Private notes: negotiating an offer at BigCo</p>',
+    category: 'Career',
+    targetHours: 40,
+    loggedHours: 12.5,
+    deadline: null,
+    status: 'ACTIVE',
+    color: '#FFD700',
+    order: 0,
+    templateId: null,
+    templateGoalRef: null,
+    userId: 'owner_1',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  sharedAccess = {
+    findUnique: async ({ where }: any) =>
+      this.shares.find((s) => {
+        if (
+          where.inviteToken !== undefined &&
+          s.inviteToken !== where.inviteToken
+        ) {
+          return false;
+        }
+        if (
+          where.isPublicLink !== undefined &&
+          s.isPublicLink !== where.isPublicLink
+        ) {
+          return false;
+        }
+        return true;
+      }) ?? null,
+  };
+
+  goal = {
+    // Emulates Prisma's projection: with no `select` the caller gets the
+    // whole row, which is exactly the bug.
+    findMany: async (args: any) => {
+      this.lastGoalFindManyArgs = args;
+      if (!args?.select) return [{ ...this.storedGoal }];
+      const projected: Record<string, unknown> = {};
+      for (const [field, wanted] of Object.entries(args.select)) {
+        if (wanted) projected[field] = (this.storedGoal as any)[field];
+      }
+      return [projected];
+    },
+  };
+
+  timeEntry = { findMany: async () => [] };
+}
+
+describe('SharingService.getPublicSharedGoals field projection', () => {
+  function build() {
+    const prisma = new FakePrismaWithGoalSelect();
+    prisma.shares.push(
+      makeShare({
+        id: 'share_public',
+        inviteToken: 'public-link-token',
+        isPublicLink: true,
+      }),
+    );
+    const service = new SharingService(
+      prisma as any,
+      new FakeEmailService() as any,
+    );
+    return { prisma, service };
+  }
+
+  it('does not leak goal.description to an unauthenticated public-link holder', async () => {
+    const { service } = build();
+
+    const goals = await service.getPublicSharedGoals('public-link-token');
+
+    expect(goals).toHaveLength(1);
+    expect(goals[0]).not.toHaveProperty('description');
+    expect(JSON.stringify(goals)).not.toContain('negotiating an offer');
+  });
+
+  it('does not leak internal columns (userId, order, template provenance) either', async () => {
+    const { service } = build();
+
+    const goals = await service.getPublicSharedGoals('public-link-token');
+
+    expect(goals[0]).not.toHaveProperty('userId');
+    expect(goals[0]).not.toHaveProperty('order');
+    expect(goals[0]).not.toHaveProperty('templateId');
+    expect(goals[0]).not.toHaveProperty('deadline');
+  });
+
+  it('still returns every field the public share page actually renders', async () => {
+    const { service } = build();
+
+    const goals = await service.getPublicSharedGoals('public-link-token');
+
+    expect(goals[0]).toEqual({
+      id: 'goal_1',
+      title: 'Ship the feature',
+      color: '#FFD700',
+      category: 'Career',
+      targetHours: 40,
+      loggedHours: 12.5,
+      status: 'ACTIVE',
+    });
+  });
+});

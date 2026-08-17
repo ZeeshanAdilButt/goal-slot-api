@@ -671,8 +671,20 @@ export class AuthService {
     // change actually revoke outstanding sessions).
     const payload = { sub: userId, email, role, tokenVersion };
 
-    const accessToken = this.jwtService.sign(payload);
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '30d' });
+    // `typ` separates the two credentials. Before it existed both tokens
+    // carried an identical payload signed with the same secret, so they
+    // were fully interchangeable: a stolen refresh token was a 30-day
+    // full-access API credential, and -- because POST /auth/refresh sat
+    // behind the ordinary JwtAuthGuard -- either token could be laundered
+    // into a fresh 30-day pair indefinitely. JwtStrategy now refuses a
+    // 'refresh' token for API access and JwtRefreshStrategy refuses an
+    // 'access' token at /auth/refresh, so the refresh token is only ever
+    // good for exchanging itself.
+    const accessToken = this.jwtService.sign({ ...payload, typ: 'access' });
+    const refreshToken = this.jwtService.sign(
+      { ...payload, typ: 'refresh' },
+      { expiresIn: '30d' },
+    );
 
     return { accessToken, refreshToken };
   }
