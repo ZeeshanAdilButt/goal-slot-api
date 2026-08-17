@@ -45,7 +45,49 @@ export class ScheduleService {
     }
   }
 
+  /**
+   * Rejects any block whose end is not strictly after its start.
+   *
+   * This is the real "schedule still double" root cause, and it is separate
+   * from the serializable-transaction race fixed above. `checkTimeConflict`
+   * compares raw minute offsets (`newStart < blockEnd && newEnd > blockStart`)
+   * with no midnight wrap-around, so for a block like 23:00-00:00 it computes
+   * `1380 < 0` — false — even against a byte-identical existing row. The
+   * conflict check therefore returns "no conflict" and the duplicate inserts.
+   *
+   * That duplicates SEQUENTIALLY; no concurrency is involved, which is why
+   * the serializable transaction never closed it. A serializable transaction
+   * makes a check atomic, it cannot make a wrong check correct: the retry
+   * loser re-reads, sees the winner's committed row, evaluates the same
+   * broken comparison, gets false, and inserts anyway.
+   *
+   * Three separate clients could mint such a range:
+   *   - mobile quick-add, whose `% (24 * 60)` wrapped every slot created
+   *     between 22:30 and 23:29 into 23:00-00:00 or 23:30-00:30
+   *     (goalslot-mobile apps/mobile/src/hooks/useQuickAdd.ts);
+   *   - the web block modal, which offered all 96 quarter-hours in BOTH
+   *     dropdowns with no ordering constraint, so "22:00 -> 08:00" was two
+   *     clicks away;
+   *   - the Coach proposal path, which routes through this same `create`.
+   *
+   * Validating here rather than in the DTO is deliberate: it is the single
+   * choke point all three share, it also covers `update` (whose
+   * `UpdateScheduleBlockDto` is a `PartialType` and so cannot express a
+   * cross-field rule at all), and it protects installed mobile builds that
+   * will never receive the client-side fix.
+   *
+   * Note the side effect this also cures: an inverted row overlaps nothing,
+   * so it was invisible to conflict detection permanently — duplicable
+   * without limit, and never blocking any other create.
+   */
+  private assertValidRange(startTime: string, endTime: string) {
+    if (this.timeToMinutes(endTime) <= this.timeToMinutes(startTime)) {
+      throw new BadRequestException('End time must be after start time');
+    }
+  }
+
   async create(userId: string, dto: CreateScheduleBlockDto) {
+    this.assertValidRange(dto.startTime, dto.endTime);
     await this.validateGoalOwnership(userId, dto.goalId);
 
     // Check plan limits
@@ -198,6 +240,10 @@ export class ScheduleService {
           const nextStart =
             sanitizedSeriesData.startTime ?? seriesBlock.startTime;
           const nextEnd = sanitizedSeriesData.endTime ?? seriesBlock.endTime;
+          // Merged effective values, not the raw patch: a request that sends
+          // only `startTime: '23:00'` against a block ending 10:00 inverts
+          // that block, and the patch alone doesn't show it.
+          this.assertValidRange(nextStart, nextEnd);
           const conflict = await this.checkTimeConflict(
             userId,
             targetDay,
@@ -222,6 +268,16 @@ export class ScheduleService {
         where: { id: blockId },
         include: { goal: true },
       });
+    }
+
+    if (updateData.startTime || updateData.endTime) {
+      // Same merge rule as the series branch above. Without this an existing
+      // healthy block could be edited INTO an inverted range, after which it
+      // became invisible to `checkTimeConflict` and freely duplicable.
+      this.assertValidRange(
+        updateData.startTime ?? block.startTime,
+        updateData.endTime ?? block.endTime,
+      );
     }
 
     if (

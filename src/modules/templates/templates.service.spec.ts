@@ -20,6 +20,11 @@ interface DeleteCall {
 class FakeTx {
   deletes: DeleteCall[] = [];
   createdGoals: any[] = [];
+  // Schedule blocks the user already owns, read back by `import`'s dedupe
+  // pass. Tests seed this to stand in for a previous import of the same
+  // template.
+  existingBlocks: any[] = [];
+  createdBlocks: any[] = [];
 
   goal = {
     deleteMany: async ({ where }: any) => {
@@ -44,7 +49,11 @@ class FakeTx {
       this.deletes.push({ model: 'scheduleBlock', where });
       return { count: 0 };
     },
-    createMany: async ({ data }: any) => ({ count: data.length }),
+    findMany: async () => this.existingBlocks,
+    createMany: async ({ data }: any) => {
+      this.createdBlocks.push(...data);
+      return { count: data.length };
+    },
   };
 
   task = {
@@ -170,5 +179,79 @@ describe('TemplatesService replaceExisting scope', () => {
       expect(goal.templateId).toBe(TEMPLATE.id);
       expect(goal.templateGoalRef).toBeTruthy();
     }
+  });
+});
+
+// Regression cover for template import duplicating schedule blocks.
+//
+// `import` wrote its blocks with a bare `tx.scheduleBlock.createMany(...)`:
+// no conflict check, no idempotency key, and no unique constraint behind it,
+// so re-importing a template inserted every one of its blocks a second time.
+//
+// `replaceExisting` did not save it either. The cleanup only deletes blocks
+// whose goalId is one of this template's goals — ScheduleBlock has no
+// templateId column — and a template block with no `goalRef` is written with
+// `goalId: null`, so it is never deleted and duplicates on every re-import.
+// The import now dedupes against the blocks the user already has, keyed on
+// the same (dayOfWeek, startTime, endTime, title) tuple the diagnostic in
+// scripts/find-duplicate-schedule-blocks.ts groups duplicates by.
+describe('TemplatesService.import schedule block duplication', () => {
+  const importSchedule = async (existingBlocks: any[]) => {
+    const { prisma, service } = buildService();
+    prisma.tx.existingBlocks = existingBlocks;
+    const result = await service.import(USER, TEMPLATE.id, {
+      goals: false,
+      schedule: true,
+      tasks: false,
+    });
+    return { prisma, result };
+  };
+
+  it('writes every block on a first import', async () => {
+    const { prisma, result } = await importSchedule([]);
+
+    expect(prisma.tx.createdBlocks).toHaveLength(TEMPLATE.schedule!.length);
+    expect(result.scheduleBlocksCreated).toBe(TEMPLATE.schedule!.length);
+  });
+
+  // The bug itself: same template, imported twice, without replaceExisting.
+  // Pre-fix this wrote a full second copy of every block.
+  it('writes nothing on a re-import when the user already has every block', async () => {
+    const existing = TEMPLATE.schedule!.map((b) => ({
+      dayOfWeek: b.dayOfWeek,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      title: b.title,
+    }));
+
+    const { prisma, result } = await importSchedule(existing);
+
+    expect(prisma.tx.createdBlocks).toHaveLength(0);
+    expect(result.scheduleBlocksCreated).toBe(0);
+  });
+
+  it('writes only the blocks the user is actually missing', async () => {
+    const [first, ...rest] = TEMPLATE.schedule!;
+    const existing = [
+      {
+        dayOfWeek: first.dayOfWeek,
+        startTime: first.startTime,
+        endTime: first.endTime,
+        title: first.title,
+      },
+    ];
+
+    const { prisma } = await importSchedule(existing);
+
+    expect(prisma.tx.createdBlocks).toHaveLength(rest.length);
+    expect(
+      prisma.tx.createdBlocks.some(
+        (b) =>
+          b.dayOfWeek === first.dayOfWeek &&
+          b.startTime === first.startTime &&
+          b.endTime === first.endTime &&
+          b.title === first.title,
+      ),
+    ).toBe(false);
   });
 });

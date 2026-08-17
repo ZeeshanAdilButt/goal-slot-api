@@ -176,7 +176,52 @@ export class TemplatesService {
             goalId: b.goalRef ? (goalRefMap.get(b.goalRef) ?? null) : null,
           });
         }
-        const result = await tx.scheduleBlock.createMany({ data: inputs });
+        // `createMany` writes blindly — no conflict check, no idempotency,
+        // no unique constraint behind it — so importing the same template
+        // twice used to insert every block a second time. `replaceExisting`
+        // did not save it either: the cleanup above only deletes blocks
+        // whose goalId is one of this template's goals, and a template block
+        // with no `goalRef` is inserted with `goalId: null` (below), so it
+        // is never cleaned up and duplicates on every single re-import.
+        //
+        // Dedupe on the block's identity — the same tuple the diagnostic in
+        // scripts/find-duplicate-schedule-blocks.ts groups by — against both
+        // what the user already has and what this batch has already staged.
+        // Exact-shape only, deliberately: skipping merely *overlapping*
+        // blocks would silently drop template content that clashes with
+        // hand-created blocks, which is a different (and louder) decision
+        // than not writing a row the user demonstrably already has.
+        const existingBlocks = await tx.scheduleBlock.findMany({
+          where: { userId },
+          select: {
+            dayOfWeek: true,
+            startTime: true,
+            endTime: true,
+            title: true,
+          },
+        });
+        const shapeId = (b: {
+          dayOfWeek: number;
+          startTime: string;
+          endTime: string;
+          title: string;
+        }) => `${b.dayOfWeek}|${b.startTime}|${b.endTime}|${b.title}`;
+        const seen = new Set(existingBlocks.map(shapeId));
+        const deduped = inputs.filter((b) => {
+          const key = shapeId(
+            b as {
+              dayOfWeek: number;
+              startTime: string;
+              endTime: string;
+              title: string;
+            },
+          );
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        const result = await tx.scheduleBlock.createMany({ data: deduped });
         scheduleBlocksCreated = result.count;
       }
 

@@ -385,3 +385,140 @@ class RacyFakePrisma {
     return fn(tx);
   };
 }
+
+// Regression cover for the ACTUAL "duplicate schedule blocks" root cause,
+// which is not the race the block above fixes.
+//
+// `checkTimeConflict` compares raw minute offsets with no midnight
+// wrap-around: `newStart < blockEnd && newEnd > blockStart`. For a block
+// like 23:00-00:00 that is `1380 < 0` — false — even when compared against a
+// byte-identical existing row. So the conflict check said "no conflict" and
+// the duplicate inserted. This needs NO concurrency: it duplicates on two
+// plainly sequential requests, which is precisely why the serializable
+// transaction never closed it (a serializable transaction makes a check
+// atomic; it cannot make a wrong check correct).
+//
+// `ScheduleService.assertValidRange` now rejects `endTime <= startTime` at
+// the service level — the one choke point create, update and the Coach
+// proposal path all share, and the only layer that also protects already
+// installed mobile builds. Each of these tests inserts a real second row
+// against the pre-fix code.
+describe('ScheduleService inverted / zero-length time ranges', () => {
+  const LATE = { ...baseCreate, startTime: '23:00', endTime: '00:00' };
+
+  it('refuses to create a block whose end time wraps past midnight', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(service.create(ATTACKER, { ...LATE } as any)).rejects.toThrow(
+      'End time must be after start time',
+    );
+
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('refuses to create a zero-length block', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.create(ATTACKER, {
+        ...baseCreate,
+        startTime: '09:00',
+        endTime: '09:00',
+      } as any),
+    ).rejects.toThrow('End time must be after start time');
+
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  // The user-visible bug, stated exactly as the wife's iPhone produced it:
+  // mobile quick-add used between 22:30 and 23:29 minted 23:00-00:00, which
+  // renders as the entirely innocent-looking "11:00 PM - 12:00 AM". Pre-fix
+  // this left TWO rows and `prisma.created` at length 1 (the second insert),
+  // on top of the seeded one.
+  it('does not insert a second copy of an existing block that wraps past midnight', async () => {
+    const { prisma, service } = buildService();
+    // A legacy inverted row already in the table — the shape that was
+    // invisible to conflict detection and therefore duplicable without limit.
+    prisma.scheduleBlocks.push({
+      id: 'legacy-inverted-block',
+      userId: ATTACKER,
+      dayOfWeek: LATE.dayOfWeek,
+      startTime: LATE.startTime,
+      endTime: LATE.endTime,
+      title: LATE.title,
+    });
+
+    await expect(service.create(ATTACKER, { ...LATE } as any)).rejects.toThrow(
+      'End time must be after start time',
+    );
+
+    expect(prisma.created).toHaveLength(0);
+    expect(
+      prisma.scheduleBlocks.filter(
+        (b) => b.startTime === '23:00' && b.endTime === '00:00',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('leaves only one row after two sequential identical late-night creates', async () => {
+    const { prisma, service } = buildService();
+
+    const outcomes = await Promise.allSettled([
+      service.create(ATTACKER, { ...LATE } as any),
+      service.create(ATTACKER, { ...LATE } as any),
+    ]);
+
+    expect(outcomes.every((o) => o.status === 'rejected')).toBe(true);
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('refuses to edit a healthy block into an inverted range', async () => {
+    // The worse half of the same defect: an ordinary 09:00-10:00 block could
+    // be edited to start at 23:00, after which it overlapped nothing and
+    // became duplicable. The DTO cannot catch this — UpdateScheduleBlockDto
+    // is a PartialType, so the patch carries only `startTime` and the
+    // inversion is only visible once merged with the stored row.
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.update(ATTACKER, OWN_BLOCK, { startTime: '23:00' } as any),
+    ).rejects.toThrow('End time must be after start time');
+
+    expect(prisma.updated).toHaveLength(0);
+  });
+
+  it('refuses to invert a whole series through a series-scope edit', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.update(ATTACKER, OWN_BLOCK, {
+        startTime: '23:00',
+        updateScope: 'series',
+      } as any),
+    ).rejects.toThrow('End time must be after start time');
+
+    expect(prisma.updatedMany).toHaveLength(0);
+  });
+
+  // Guards the fix against over-rejecting: a block ending at 23:59 is a
+  // perfectly ordinary late-evening block and must still go through.
+  it('still allows a legitimate late block that ends before midnight', async () => {
+    const { prisma, service } = buildService();
+
+    await service.create(ATTACKER, {
+      ...baseCreate,
+      startTime: '23:00',
+      endTime: '23:59',
+    } as any);
+
+    expect(prisma.created).toHaveLength(1);
+  });
+
+  it('still allows an ordinary edit that keeps the range valid', async () => {
+    const { prisma, service } = buildService();
+
+    await service.update(ATTACKER, OWN_BLOCK, { startTime: '09:30' } as any);
+
+    expect(prisma.updated).toHaveLength(1);
+  });
+});
