@@ -1630,13 +1630,61 @@ describe('CoachAiService', () => {
       // CREATE_TASK's own entry now explicitly defers to the notes list
       // before assuming a task, instead of just omitting any mention of it.
       expect(system).toMatch(
-        /Do NOT use CREATE_TASK when the sentence names a destination page/,
+        /Do NOT use CREATE_TASK when the sentence names notes as the destination/,
       );
 
       // The no-match branch offers "add as a task instead" and tells the
       // model not to pick CREATE_TASK on its own — the user chooses.
       expect(system).toMatch(/add this as a task instead/);
       expect(system).toMatch(/Do NOT silently emit a CREATE_TASK yourself/);
+    });
+
+    // Regression cover for a third production failure in the same area: the
+    // user typed "add to my notes that I want to buy milk" — no specific
+    // page named at all, just "my notes". Every rule the prior two fixes
+    // added only ever handled a NAMED page ("to my Y notes"); a bare "my
+    // notes" reference left the model with no defined action, so it either
+    // produced a confused non-answer or fell back to CREATE_TASK despite the
+    // user saying "notes". Fixed by teaching the prompt to resolve the
+    // implied target off the count of pages already in context: one page ->
+    // use it; two-plus -> ask which, naming them; zero -> tell the user to
+    // create one first. Never CREATE_TASK just because there was no title
+    // fragment to extract.
+    it('resolves a generic "add to my notes" with no page named from the notes-page count, and never falls back to CREATE_TASK', async () => {
+      seedNotes();
+      const captured = capturePrompt();
+      await drain(
+        service.streamChatReply(
+          'user_1',
+          '2026-W22',
+          'add to my notes that I want to buy milk',
+        ),
+      );
+
+      const system = captured.system();
+
+      // The DISAMBIGUATING paragraph explicitly covers the generic,
+      // no-page-named phrasing, not just the named-page one.
+      expect(system).toMatch(
+        /names notes generically with NO specific page at all/,
+      );
+      expect(system).toMatch(/"add this to my notes"/);
+
+      // The CREATE_TASK entry's exclusion now also covers the generic case,
+      // not only a sentence that names a specific page.
+      expect(system).toMatch(
+        /generic with no page named \("add this to my notes"\)/,
+      );
+
+      // APPEND_NOTE_CONTENT spells out the resolve-by-count rule for when
+      // there is no title fragment to extract at all.
+      expect(system).toMatch(/WHEN THE USER NAMES NO SPECIFIC PAGE AT ALL/);
+      expect(system).toMatch(/exactly ONE page.*implied target/);
+      expect(system).toMatch(/TWO OR MORE.*ask which one/);
+      expect(system).toMatch(/NONE.*create a page in the Notes tab first/);
+      expect(system).toMatch(
+        /Do NOT emit CREATE_TASK in this situation just because the content phrase reads like a to-do/,
+      );
     });
   });
 });
