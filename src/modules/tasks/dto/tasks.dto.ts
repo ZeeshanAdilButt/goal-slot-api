@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
 import {
   IsString,
   IsOptional,
@@ -7,6 +12,7 @@ import {
   IsNumber,
   Min,
   IsDateString,
+  ValidateIf,
 } from 'class-validator';
 import { TaskStatus } from '@prisma/client';
 
@@ -64,7 +70,37 @@ export class CreateTaskDto {
   notes?: string;
 }
 
-export class UpdateTaskDto extends PartialType(CreateTaskDto) {}
+/**
+ * `dueDate` is omitted from the inherited shape and redeclared below so it can
+ * accept an explicit `null`. Creating a task with a null due date is
+ * meaningless (just leave the field out), but UPDATING one to null is the only
+ * way a client can say "clear this" — omitting the key means "leave
+ * unchanged". Widening `CreateTaskDto.dueDate` instead would let a null through
+ * on create for no benefit, and TS rejects narrowing-vs-base anyway.
+ */
+export class UpdateTaskDto extends PartialType(
+  OmitType(CreateTaskDto, ['dueDate'] as const),
+) {
+  /**
+   * The runtime validator already tolerated null — class-validator's
+   * `@IsOptional` skips every other decorator for null as well as undefined —
+   * so the payload was never what blocked clearing; `update` in the service
+   * was. What actually changes here is the TYPE and the API contract: the
+   * field is now `string | null`, so the service can branch on null instead of
+   * having it silently widened away, and Swagger documents null as meaningful.
+   * `@ValidateIf` is belt-and-braces, making the intent explicit rather than
+   * leaving it resting on `@IsOptional`'s null handling. Every other value is
+   * validated exactly as before — 'today', 'ASAP' and '' are still rejected.
+   */
+  @ApiPropertyOptional({
+    description: 'Due date for the task; null clears an existing due date',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
+  @IsDateString()
+  dueDate?: string | null;
+}
 
 export class CompleteTaskDto {
   @ApiProperty({ example: 60, description: 'Actual minutes spent' })

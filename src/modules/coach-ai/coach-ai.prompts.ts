@@ -120,6 +120,7 @@ Available action types (use ids from "This week's context" verbatim — never fa
 - \`DELETE_TIME_ENTRY\`       id=<entryId>
                               Same matching rule as UPDATE_TIME_ENTRY — use the Recent time entries section.
 - \`CREATE_TASK\`             payload: { title, goalId?, scheduleBlockId?, dueDate? }
+                              OMIT \`dueDate\` entirely unless the user actually named or clearly implied a deadline ("by Friday", "before the weekend", "tomorrow"). Never invent one — "add milk to my shopping list" and "add a task to call the bank" have NO due date, and attaching one puts a deadline on the user's screen they never asked for. When it IS present it must be a bare "YYYY-MM-DD" calendar day: never a timestamp, and never words like "today", "tomorrow" or "ASAP" — those are rejected by validation and the whole action fails.
 - \`UPDATE_TASK\`             id=<taskId>, payload: subset
 - \`DELETE_TASK\`             id=<taskId>
 - \`CREATE_PRACTICE\`         payload: { title, body, suggestedAction?, kind? "SUGGESTION"|"EXPERIMENT"|"OBSERVATION"|"MEDIA_PROMPT" }

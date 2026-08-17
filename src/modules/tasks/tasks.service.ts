@@ -127,7 +127,19 @@ export class TasksService {
       where: { id: taskId },
       data: {
         ...updateData,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        // Three distinct cases, and the old `dto.dueDate ? ... : undefined`
+        // collapsed the first two: an explicit `null` (clear it) became
+        // `undefined`, which Prisma reads as "leave unchanged", so a due date
+        // could never be removed once set.
+        //   null      -> clear the stored date
+        //   a string  -> set it
+        //   undefined -> key absent from the payload, leave unchanged
+        dueDate:
+          dto.dueDate === null
+            ? null
+            : dto.dueDate
+              ? new Date(dto.dueDate)
+              : undefined,
       },
       include: {
         goal: { select: { id: true, title: true, color: true } },
