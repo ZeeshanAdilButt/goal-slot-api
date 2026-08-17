@@ -5,6 +5,7 @@ import {
   normalizeNoteContent,
   noteHtmlToStructuredText,
   sanitizeSummaryHtml,
+  stripDanglingNoteReference,
 } from './note-content';
 
 describe('normalizeNoteContent', () => {
@@ -53,6 +54,101 @@ describe('appendNoteParagraph', () => {
       '<p>Existing</p><p>&lt;b&gt;urgent&lt;/b&gt; call back</p>',
     );
     expect(result).not.toContain('<b>urgent</b>');
+  });
+});
+
+describe('stripDanglingNoteReference', () => {
+  it('trims the exact reported case: content that dangles on a bare "to my"', () => {
+    expect(
+      stripDanglingNoteReference('computer science , learning to my'),
+    ).toBe('computer science , learning');
+  });
+
+  it('trims a bare dangling "for my" / "in my" / "on my" / "into my" / "onto my"', () => {
+    expect(stripDanglingNoteReference('buy milk for my')).toBe('buy milk');
+    expect(stripDanglingNoteReference('left a reminder in my')).toBe(
+      'left a reminder',
+    );
+    expect(stripDanglingNoteReference('jot this down on my')).toBe(
+      'jot this down',
+    );
+    expect(stripDanglingNoteReference('filed the receipt into my')).toBe(
+      'filed the receipt',
+    );
+    expect(stripDanglingNoteReference('add this onto my')).toBe('add this');
+  });
+
+  it('trims a dangling preposition + possessive followed by a bare generic note word', () => {
+    expect(stripDanglingNoteReference('buy milk to my notes')).toBe(
+      'buy milk',
+    );
+    expect(stripDanglingNoteReference('buy milk to my note')).toBe(
+      'buy milk',
+    );
+    expect(stripDanglingNoteReference('buy milk to my page')).toBe(
+      'buy milk',
+    );
+    expect(stripDanglingNoteReference('buy milk to my notebook')).toBe(
+      'buy milk',
+    );
+  });
+
+  it('trims a dangling "our" form the same way as "my"', () => {
+    expect(stripDanglingNoteReference('add this to our')).toBe('add this');
+  });
+
+  it('trims a comma directly preceding the dangling phrase', () => {
+    expect(stripDanglingNoteReference('buy milk, to my')).toBe('buy milk');
+  });
+
+  it('is case-insensitive', () => {
+    expect(stripDanglingNoteReference('buy milk TO MY')).toBe('buy milk');
+  });
+
+  it('leaves ordinary content that legitimately ends in a phrasal verb alone', () => {
+    // A bare trailing preposition with no possessive after it is a normal,
+    // complete English sentence — never touched.
+    expect(stripDanglingNoteReference('left the porch light on')).toBe(
+      'left the porch light on',
+    );
+    expect(stripDanglingNoteReference('turn the timer off')).toBe(
+      'turn the timer off',
+    );
+    expect(stripDanglingNoteReference('the door was left open')).toBe(
+      'the door was left open',
+    );
+  });
+
+  it('leaves content alone when "to"/"in"/"on" is part of a longer word, not a standalone preposition', () => {
+    expect(stripDanglingNoteReference('study of ancient Latin my')).toBe(
+      'study of ancient Latin my',
+    );
+    expect(stripDanglingNoteReference('upload the photo my')).toBe(
+      'upload the photo my',
+    );
+  });
+
+  it('leaves content alone when "my"/"our" is followed by a real noun other than a generic note word', () => {
+    // "my" + a specific, non-generic noun is a complete, meaningful phrase —
+    // stripping it would delete real content, so it is never touched.
+    expect(stripDanglingNoteReference('grateful for my family')).toBe(
+      'grateful for my family',
+    );
+    expect(stripDanglingNoteReference('proud of what we built for our team')).toBe(
+      'proud of what we built for our team',
+    );
+  });
+
+  it('leaves content alone when the preposition + possessive is not at the very end', () => {
+    expect(
+      stripDanglingNoteReference('went back to my desk and kept working'),
+    ).toBe('went back to my desk and kept working');
+  });
+
+  it('returns the content unchanged when there is nothing dangling', () => {
+    expect(stripDanglingNoteReference('finished the report early today')).toBe(
+      'finished the report early today',
+    );
   });
 });
 

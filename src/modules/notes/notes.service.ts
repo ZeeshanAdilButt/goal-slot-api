@@ -8,7 +8,11 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { CreateNoteDto, UpdateNoteDto, ReorderNotesDto } from './dto/notes.dto';
-import { appendNoteParagraph, matchNotesByTitle } from './note-content';
+import {
+  appendNoteParagraph,
+  matchNotesByTitle,
+  stripDanglingNoteReference,
+} from './note-content';
 
 // Same ceiling coach-journal.service.ts enforces on journal entries. Notes
 // content has no DB-level or DTO-level length limit, so without this a
@@ -242,7 +246,17 @@ export class NotesService {
       );
     }
 
-    const content = appendNoteParagraph(target.content, addition);
+    // Defensive normalization for the Coach's content/titleHint boundary:
+    // when the model's split lands wrong on an ambiguous, comma-spliced
+    // sentence, the tail left stuck to `addition` is a dangling "to my" /
+    // "for my notes" style fragment reaching for the target page it failed
+    // to fully separate out (see note-content.ts's stripDanglingNoteReference
+    // doc comment). Falls back to the untouched `addition` if stripping
+    // would leave nothing, so a pathological all-boilerplate string is never
+    // turned into an empty paragraph.
+    const sanitizedAddition = stripDanglingNoteReference(addition) || addition;
+
+    const content = appendNoteParagraph(target.content, sanitizedAddition);
     if (content.length > MAX_NOTE_CONTENT_LENGTH) {
       throw new BadRequestException(
         `Adding this would push "${match.note.title}" past the ${MAX_NOTE_CONTENT_LENGTH}-character limit. Trim that page first.`,

@@ -81,6 +81,55 @@ export function appendNoteParagraph(
 }
 
 /**
+ * Trims a dangling trailing "to my"/"for my"/"in my"/"on my"/"into
+ * my"/"onto my" (optionally followed by a bare, generic note word, and
+ * optionally preceded by a comma or semicolon) off the END of a Coach-
+ * proposed `content` string, before it is stored.
+ *
+ * WHY THIS IS SAFE. English requires a noun after a possessive determiner —
+ * a clause never legitimately *ends* on "...to my" or "...for my". When the
+ * Coach model's content/titleHint split lands in the wrong place on an
+ * ungrammatical, comma-spliced, transcription-noisy sentence (see
+ * coach-ai.prompts.ts's APPEND_NOTE_CONTENT boundary rule), the tail it
+ * leaves stuck to `content` is always this kind of dangling preposition
+ * phrase, reaching for a target-page reference it failed to fully separate
+ * out. Stripping it recovers real content ("computer science, learning to
+ * my" -> "computer science, learning") without guessing at the model's
+ * intent for anything else.
+ *
+ * WHY THE GENERIC-NOUN TAIL IS BOUNDED, NOT OPEN-ENDED. The same dangling
+ * phrase can also arrive with a bare, non-specific note word still attached
+ * ("...to my notes"), which is stripped too. But the pattern stops there
+ * deliberately: it does NOT reach past a generic noun to swallow a specific
+ * page title ("...to my todo notes" keeps "todo" — there is no way to tell,
+ * from `content` alone, that "todo" is a leaked title fragment rather than
+ * the user's own words, and guessing would risk deleting real content this
+ * function has no business touching). That narrower leak is only reliably
+ * fixed by getting the boundary right in the first place (the prompt rule),
+ * not by this defensive trim.
+ *
+ * WHY BARE TRAILING PREPOSITIONS ("...turn it on", "...left the light on")
+ * ARE NOT TOUCHED. Those are complete, ordinary phrasal verbs a real
+ * sentence can end on — only the preposition + possessive-determiner
+ * combination is the unambiguous artifact.
+ *
+ * This is a narrow, deterministic safety net, not a parser: it cannot catch
+ * every shape a boundary mistake can take (e.g. a specific title fragment
+ * left dangling, as above), and it is not a substitute for the model
+ * drawing the boundary correctly to begin with.
+ */
+// \b around each word (not just \s* separators) matters: without it, "in"
+// or "to" would match as a bare substring of an ordinary word immediately
+// before "my" ("...Latin my" or "...photo my"), stripping into the middle
+// of a real word instead of only ever matching a standalone preposition.
+const DANGLING_TARGET_REFERENCE =
+  /[,;]?\s*\b(?:to|for|in|on|into|onto)\b\s+\b(?:my|our)\b(?:\s+\b(?:notes?|notebooks?|pages?)\b)?\s*$/i;
+
+export function stripDanglingNoteReference(content: string): string {
+  return content.replace(DANGLING_TARGET_REFERENCE, '').trimEnd();
+}
+
+/**
  * Normalize a title for comparison: lowercase, fold the punctuation a person
  * types differently from how their page is titled, collapse internal
  * whitespace runs to a single space, trim.

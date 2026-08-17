@@ -250,6 +250,25 @@ describe('NotesService.appendContentByTitleHint', () => {
     );
   });
 
+  // Regression cover for the Coach content/titleHint boundary bug: when the
+  // model's split leaves a dangling "to my" on `addition`, it must not be
+  // written into the note verbatim.
+  it('strips a dangling "to my" left on the addition by a mis-split Coach payload', async () => {
+    const { service } = buildAppendService([
+      { id: 'n1', userId: CALLER, title: 'Todo', content: '[]' },
+    ]);
+
+    const updated = await service.appendContentByTitleHint(
+      CALLER,
+      'todo',
+      'computer science , learning to my',
+    );
+
+    expect((updated as any)?.content).toBe(
+      '<p>computer science , learning</p>',
+    );
+  });
+
   it('rejects with a clear message and writes nothing when no note matches', async () => {
     const { prisma, service } = buildAppendService([
       { id: 'n1', userId: CALLER, title: 'Groceries', content: '' },
