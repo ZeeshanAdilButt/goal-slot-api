@@ -16,7 +16,7 @@ import {
   ApiBearerAuth,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { ThrottlerGuard, Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import {
   RegisterDto,
@@ -40,6 +40,14 @@ import { AuthenticatedRequest } from '../../shared/types/authenticated-request.i
 export const CHECK_EMAIL_THROTTLE_TTL_MS = 60_000; // 1 minute
 export const CHECK_EMAIL_THROTTLE_LIMIT = 10;
 
+// Per-IP backstop on /auth/login, on top of the per-account lockout in
+// AuthService#login. Deliberately generous: shared IPs (offices, campus
+// NAT, mobile carrier CGNAT) legitimately produce many real login attempts
+// per minute, and this bucket only needs to blunt a scripted credential
+// spray, not police normal traffic.
+export const LOGIN_THROTTLE_TTL_MS = 60_000; // 1 minute
+export const LOGIN_THROTTLE_LIMIT = 20;
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -53,6 +61,13 @@ export class AuthController {
       ttl: CHECK_EMAIL_THROTTLE_TTL_MS,
     },
   })
+  // AuthModule registers 'check-email' and 'login' in the same
+  // ThrottlerModule.forRoot() array, so ThrottlerGuard evaluates both
+  // buckets on every guarded route in this controller unless skipped.
+  // Without this, check-email traffic would also be capped by the
+  // 'login' bucket's default limit for no reason -- this route has
+  // nothing to do with login attempts.
+  @SkipThrottle({ login: true })
   @ApiOperation({ summary: 'Check if email is already registered' })
   @ApiQuery({ name: 'email', type: String })
   @ApiResponse({ status: 200, description: 'Email existence check result' })
@@ -117,6 +132,12 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ login: { limit: LOGIN_THROTTLE_LIMIT, ttl: LOGIN_THROTTLE_TTL_MS } })
+  // See the matching comment on check-email above: without this, login
+  // traffic would silently also be capped by 'check-email's tighter
+  // default limit, undermining the more generous limit set above.
+  @SkipThrottle({ 'check-email': true })
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })

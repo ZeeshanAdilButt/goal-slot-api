@@ -8,6 +8,8 @@ import {
   AuthController,
   CHECK_EMAIL_THROTTLE_LIMIT,
   CHECK_EMAIL_THROTTLE_TTL_MS,
+  LOGIN_THROTTLE_LIMIT,
+  LOGIN_THROTTLE_TTL_MS,
 } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -37,11 +39,23 @@ import { PrismaModule } from '../../prisma/prisma.module';
     // used to mass-enumerate registered accounts. Kept in its own named
     // throttler bucket, separate from any other module's ThrottlerModule
     // config (see coach-ai for the same pattern).
+    //
+    // 'login' is a second, per-IP bucket (deliberately more generous --
+    // shared office/NAT IPs log in far more often than they check
+    // unregistered emails) that backstops the per-account lockout in
+    // AuthService#login: that lockout alone stops brute-forcing one known
+    // email, but does nothing against a spray attack trying one leaked
+    // password across many different accounts from a single IP.
     ThrottlerModule.forRoot([
       {
         name: 'check-email',
         ttl: CHECK_EMAIL_THROTTLE_TTL_MS,
         limit: CHECK_EMAIL_THROTTLE_LIMIT,
+      },
+      {
+        name: 'login',
+        ttl: LOGIN_THROTTLE_TTL_MS,
+        limit: LOGIN_THROTTLE_LIMIT,
       },
     ]),
     UsersModule,

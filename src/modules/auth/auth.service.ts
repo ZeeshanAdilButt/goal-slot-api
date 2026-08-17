@@ -37,6 +37,19 @@ const MAX_OTP_REQUESTS_PER_HOUR = 5;
 const MAX_OTP_VERIFICATION_ATTEMPTS = 5; // Max failed attempts before lockout
 const OTP_VERIFICATION_LOCKOUT_DURATION = 900000; // 15 minutes in milliseconds
 
+// POST /auth/login had no brute-force protection at all: unlike OTP
+// verification (locked out via OtpAttemptTrackerService above) or
+// check-email (IP-throttled in AuthController), a wrong password could be
+// retried without limit. bcrypt's cost factor slows a single guess but
+// does not stop a scripted loop from trying thousands of passwords against
+// one known email. Reuses OtpAttemptTrackerService (keyed by
+// `${LOGIN_LOCKOUT_PURPOSE}:${email}`) rather than a new store, so the
+// same atomic, unbounded, non-evicting semantics documented on that class
+// apply here too.
+const LOGIN_LOCKOUT_PURPOSE = 'login';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_DURATION = 900000; // 15 minutes in milliseconds
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -267,7 +280,15 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { password: hashedPassword },
+      // tokenVersion increments so any JWT issued before this reset --
+      // including one an attacker obtained by compromising the account in
+      // the first place -- fails JwtStrategy's version check on its very
+      // next use, instead of staying valid for the rest of its natural
+      // lifetime. Safe to do unconditionally here: resetPassword only ever
+      // runs from the logged-out forgot-password flow, so there is no
+      // "current session" of the caller's own to disrupt -- they get a
+      // fresh token pair from the login they do right after this.
+      data: { password: hashedPassword, tokenVersion: { increment: 1 } },
     });
 
     const otpKey = this.getOTPKey(email, OTPPurpose.FORGOT_PASSWORD);
@@ -368,10 +389,17 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     try {
-      // Update password
+      // Update password. tokenVersion increments for the same reason as in
+      // resetPassword above -- this revokes every outstanding JWT for the
+      // account, including any the caller doesn't know about (a stolen
+      // token being used elsewhere). Unlike resetPassword, this route runs
+      // from an authenticated session, so the caller's own current token
+      // is also revoked by this: their next request 401s, the web/mobile
+      // clients' existing refresh-then-logout interceptor already handles
+      // that gracefully, and they simply sign back in.
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { password: hashedPassword },
+        data: { password: hashedPassword, tokenVersion: { increment: 1 } },
       });
 
       // Delete OTP after successful password change
@@ -440,7 +468,12 @@ export class AuthService {
       });
 
       // Generate tokens
-      const tokens = await this.generateTokens(user.id, user.email, user.role);
+      const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
 
       return {
         user: this.sanitizeUser(user),
@@ -455,16 +488,29 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    const { email } = dto;
+
+    // Checked before any DB/bcrypt work so a locked-out email fails the
+    // same way whether or not the account exists -- no timing or response
+    // difference for an attacker to enumerate accounts with.
+    if (this.otpAttemptTracker.isLockedOut(email, LOGIN_LOCKOUT_PURPOSE)) {
+      throw new UnauthorizedException(
+        'Too many failed login attempts. Please try again in 15 minutes.',
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email },
     });
 
     if (!user || !user.password) {
+      this.recordFailedLogin(email);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const isPasswordValid = await bcrypt.compare(dto.password, user.password);
     if (!isPasswordValid) {
+      this.recordFailedLogin(email);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -472,12 +518,31 @@ export class AuthService {
       throw new UnauthorizedException('This account has been disabled');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    // Successful login clears any prior failed-attempt count, same as OTP
+    // verification does on success.
+    this.otpAttemptTracker.reset(email, LOGIN_LOCKOUT_PURPOSE);
+
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
 
     return {
       user: this.sanitizeUser(user),
       ...tokens,
     };
+  }
+
+  private recordFailedLogin(email: string): void {
+    this.otpAttemptTracker.recordFailedAttempt(
+      email,
+      LOGIN_LOCKOUT_PURPOSE,
+      MAX_LOGIN_ATTEMPTS,
+      LOGIN_LOCKOUT_DURATION,
+      LOGIN_LOCKOUT_DURATION,
+    );
   }
 
   async ssoLogin(dto: SSOLoginDto) {
@@ -548,7 +613,12 @@ export class AuthService {
       throw new UnauthorizedException('This account has been disabled');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
 
     return {
       user: this.sanitizeUser(user),
@@ -581,11 +651,25 @@ export class AuthService {
       throw new UnauthorizedException('This account has been disabled');
     }
 
-    return this.generateTokens(user.id, user.email, user.role);
+    return this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
   }
 
-  private async generateTokens(userId: string, email: string, role: UserRole) {
-    const payload = { sub: userId, email, role };
+  private async generateTokens(
+    userId: string,
+    email: string,
+    role: UserRole,
+    tokenVersion: number,
+  ) {
+    // tokenVersion travels in every minted token so JwtStrategy can compare
+    // it against the User row on each request -- see the field's doc
+    // comment in schema.prisma for why (this is what makes a password
+    // change actually revoke outstanding sessions).
+    const payload = { sub: userId, email, role, tokenVersion };
 
     const accessToken = this.jwtService.sign(payload);
     const refreshToken = this.jwtService.sign(payload, { expiresIn: '30d' });

@@ -13,6 +13,18 @@ model User {
   id       String  @id @default(uuid())
   email    String  @unique
   password String? // Null if SSO user
+
+  // Bumped on every password change (self-service change-password and
+  // forgot-password/reset-password). JwtStrategy compares this against the
+  // `tokenVersion` claim on each request's JWT and rejects a mismatch, so
+  // a token minted before a password change stops working immediately —
+  // instead of remaining valid for its full remaining lifetime (up to the
+  // 30-day refresh token) the way isDisabled alone could not prevent for
+  // an attacker who already holds a stolen token. A token with no claim
+  // (anything minted before this field existed) is treated as version 0,
+  // matching this column's default, so existing sessions are not forced
+  // to log out on deploy.
+  tokenVersion Int @default(0)
   name     String
   avatar   String?
 

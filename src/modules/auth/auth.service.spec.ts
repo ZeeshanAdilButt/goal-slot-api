@@ -51,7 +51,16 @@ class FakeUserStore {
   update = async (args: any) => {
     const user = this.users.find((u) => u.id === args.where.id);
     if (!user) throw new Error('user not found in fake store');
-    Object.assign(user, args.data);
+    for (const [key, value] of Object.entries(args.data)) {
+      // Mirrors Prisma's atomic { increment: n } field-update operator,
+      // which AuthService relies on for tokenVersion so this fake behaves
+      // the same way the real client does.
+      if (value && typeof value === 'object' && 'increment' in (value as any)) {
+        user[key] = (user[key] ?? 0) + (value as any).increment;
+      } else {
+        user[key] = value;
+      }
+    }
     return user;
   };
 }
@@ -461,6 +470,144 @@ describe('AuthService.login / refreshToken with a disabled account', () => {
   });
 });
 
+// ---------- Login brute-force lockout ----------
+
+describe('AuthService.login brute-force lockout', () => {
+  it('trips a lockout after 5 wrong passwords against the same email, rejecting even the correct password on the 6th attempt', async () => {
+    const { authService, prisma } = buildAuthService();
+    const hashed = await bcrypt.hash('correct-password', 10);
+    prisma.users.push({
+      id: 'user_1',
+      email: 'victim@example.com',
+      password: hashed,
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+    });
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        authService.login({
+          email: 'victim@example.com',
+          password: 'wrong-password',
+        }),
+      ).rejects.toThrow('Invalid credentials');
+    }
+
+    // The 5th failed attempt above trips the lockout; the correct password
+    // is now rejected too, proving this isn't just a slow-down but an
+    // actual lockout that would stop a real brute-force loop.
+    await expect(
+      authService.login({
+        email: 'victim@example.com',
+        password: 'correct-password',
+      }),
+    ).rejects.toThrow('Too many failed login attempts');
+  });
+
+  it('locks out further attempts against an email with no account too, so lockout timing cannot be used to enumerate accounts', async () => {
+    const { authService } = buildAuthService();
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        authService.login({
+          email: 'no-such-account@example.com',
+          password: 'whatever',
+        }),
+      ).rejects.toThrow('Invalid credentials');
+    }
+
+    await expect(
+      authService.login({
+        email: 'no-such-account@example.com',
+        password: 'whatever',
+      }),
+    ).rejects.toThrow('Too many failed login attempts');
+  });
+
+  it('a successful login resets the failed-attempt counter', async () => {
+    const { authService, prisma } = buildAuthService();
+    const hashed = await bcrypt.hash('correct-password', 10);
+    prisma.users.push({
+      id: 'user_1',
+      email: 'active@example.com',
+      password: hashed,
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+    });
+
+    // A few wrong attempts, well under the lockout threshold.
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        authService.login({
+          email: 'active@example.com',
+          password: 'wrong-password',
+        }),
+      ).rejects.toThrow('Invalid credentials');
+    }
+
+    // Succeeding clears the counter, so the account is not left partway
+    // toward a lockout an attacker (or a fat-fingering legitimate user)
+    // could complete later with fewer attempts than the real threshold.
+    await authService.login({
+      email: 'active@example.com',
+      password: 'correct-password',
+    });
+
+    for (let i = 0; i < 4; i++) {
+      await expect(
+        authService.login({
+          email: 'active@example.com',
+          password: 'wrong-password',
+        }),
+      ).rejects.toThrow('Invalid credentials');
+    }
+  });
+
+  it('does not lock out a different email after failed attempts against one email', async () => {
+    const { authService, prisma } = buildAuthService();
+    const hashed = await bcrypt.hash('correct-password', 10);
+    prisma.users.push(
+      {
+        id: 'user_1',
+        email: 'attacked@example.com',
+        password: hashed,
+        role: 'USER',
+        isDisabled: false,
+        userType: 'EXTERNAL',
+        plan: 'FREE',
+      },
+      {
+        id: 'user_2',
+        email: 'unrelated@example.com',
+        password: hashed,
+        role: 'USER',
+        isDisabled: false,
+        userType: 'EXTERNAL',
+        plan: 'FREE',
+      },
+    );
+
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        authService.login({
+          email: 'attacked@example.com',
+          password: 'wrong-password',
+        }),
+      ).rejects.toThrow('Invalid credentials');
+    }
+
+    const result = await authService.login({
+      email: 'unrelated@example.com',
+      password: 'correct-password',
+    });
+    expect(result.user.email).toBe('unrelated@example.com');
+  });
+});
+
 // ---------- Email enumeration fixes ----------
 
 describe('AuthService email enumeration fixes', () => {
@@ -538,5 +685,95 @@ describe('AuthService email enumeration fixes', () => {
     expect((realResult as PromiseRejectedResult).reason.status).toBe(
       (fakeResult as PromiseRejectedResult).reason.status,
     );
+  });
+});
+
+// ---------- Password changes revoke outstanding sessions ----------
+
+describe('AuthService password changes bump tokenVersion', () => {
+  it('resetPassword increments tokenVersion, invalidating tokens minted before the reset', async () => {
+    const { authService, prisma, cacheManager } = buildAuthService();
+    prisma.users.push({
+      id: 'user_1',
+      email: 'reset@example.com',
+      password: 'old-hash',
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+      tokenVersion: 3,
+    });
+
+    await authService.sendOTP({
+      email: 'reset@example.com',
+      purpose: OTPPurpose.FORGOT_PASSWORD,
+    });
+    const otp = await cacheManager.get<string>(
+      'otp:reset@example.com:FORGOT_PASSWORD',
+    );
+    expect(otp).toBeDefined();
+
+    await authService.resetPassword({
+      email: 'reset@example.com',
+      otp: otp!,
+      newPassword: 'NewPassword123!',
+    });
+
+    const updatedUser = prisma.users.find((u) => u.id === 'user_1');
+    expect(updatedUser.tokenVersion).toBe(4);
+  });
+
+  it('changePassword increments tokenVersion, invalidating tokens minted before the change (including the caller\'s own current one)', async () => {
+    const { authService, prisma, cacheManager } = buildAuthService();
+    const hashed = await bcrypt.hash('current-password', 10);
+    prisma.users.push({
+      id: 'user_1',
+      email: 'change@example.com',
+      password: hashed,
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+      tokenVersion: 1,
+    });
+
+    await authService.sendChangePasswordOTP('user_1', 'current-password');
+    const otp = await cacheManager.get<string>(
+      'otp:change@example.com:CHANGE_PASSWORD',
+    );
+    expect(otp).toBeDefined();
+
+    await authService.changePassword(
+      'user_1',
+      'current-password',
+      otp!,
+      'NewPassword123!',
+    );
+
+    const updatedUser = prisma.users.find((u) => u.id === 'user_1');
+    expect(updatedUser.tokenVersion).toBe(2);
+  });
+
+  it('login mints a token payload carrying the user\'s current tokenVersion', async () => {
+    const { authService, prisma } = buildAuthService();
+    const hashed = await bcrypt.hash('correct-password', 10);
+    prisma.users.push({
+      id: 'user_1',
+      email: 'versioned@example.com',
+      password: hashed,
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+      tokenVersion: 5,
+    });
+
+    const result = await authService.login({
+      email: 'versioned@example.com',
+      password: 'correct-password',
+    });
+
+    const payload = JSON.parse(result.accessToken.replace('fake-token:', ''));
+    expect(payload.tokenVersion).toBe(5);
   });
 });

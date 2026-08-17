@@ -6,13 +6,17 @@ interface FakeUserRecord {
   email: string;
   role: string;
   isDisabled: boolean;
+  tokenVersion?: number;
 }
 
 function buildStrategy(users: FakeUserRecord[]) {
   const findUnique = jest.fn(
     async (args: { where: { id: string }; select?: any }) => {
       const user = users.find((u) => u.id === args.where.id);
-      return user ?? null;
+      // Real Prisma always returns the column; default it here so tests
+      // written before tokenVersion existed don't all need updating just
+      // to opt into the default value new rows get.
+      return user ? { tokenVersion: 0, ...user } : null;
     },
   );
   const prisma = { user: { findUnique } };
@@ -104,5 +108,79 @@ describe('JwtStrategy.validate', () => {
       role: 'USER',
       isDisabled: false,
     });
+  });
+
+  it('rejects a token whose tokenVersion is behind the user\'s current one (revoked by a password change)', async () => {
+    const { strategy } = buildStrategy([
+      {
+        id: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        isDisabled: false,
+        tokenVersion: 2,
+      },
+    ]);
+
+    // Token was minted back when the column was at version 1; the user has
+    // since changed their password once (bumping it to 2), so this token
+    // -- despite being cryptographically valid and unexpired -- must be
+    // rejected.
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        tokenVersion: 1,
+      }),
+    ).rejects.toThrow('Session has been invalidated by a password change');
+  });
+
+  it('accepts a token with no tokenVersion claim when the user is still at the column default of 0', async () => {
+    // Tokens minted before this field existed carry no tokenVersion claim
+    // at all. A user who has never changed their password since is still
+    // at the default (0), so payload.tokenVersion ?? 0 must match without
+    // forcing every pre-existing session to log out on deploy.
+    const { strategy } = buildStrategy([
+      {
+        id: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        isDisabled: false,
+        tokenVersion: 0,
+      },
+    ]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+      }),
+    ).resolves.toEqual({
+      sub: 'user_1',
+      email: 'real@example.com',
+      role: 'USER',
+      isDisabled: false,
+    });
+  });
+
+  it('rejects a claim-less token once the user has changed their password at least once', async () => {
+    const { strategy } = buildStrategy([
+      {
+        id: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+        isDisabled: false,
+        tokenVersion: 1,
+      },
+    ]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        email: 'real@example.com',
+        role: 'USER',
+      }),
+    ).rejects.toThrow('Session has been invalidated by a password change');
   });
 });
