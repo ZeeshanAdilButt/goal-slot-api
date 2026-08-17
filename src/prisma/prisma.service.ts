@@ -20,7 +20,21 @@ export class PrismaService
     }
 
     try {
-      const adapter = new PrismaPg({ connectionString });
+      // node-postgres' own defaults (max: 10, connectionTimeoutMillis: 0)
+      // are wrong for a single long-lived server process handling
+      // concurrent requests: 10 connections caps throughput well below
+      // what the app needs under real load, and an unset connection
+      // timeout means a request that can't get a pooled connection hangs
+      // forever instead of failing fast. Both are overridable via env so
+      // a deploy can tune them without a code change.
+      const adapter = new PrismaPg({
+        connectionString,
+        max: Number(process.env.DATABASE_POOL_MAX) || 20,
+        idleTimeoutMillis:
+          Number(process.env.DATABASE_POOL_IDLE_TIMEOUT_MS) || 30_000,
+        connectionTimeoutMillis:
+          Number(process.env.DATABASE_POOL_CONNECTION_TIMEOUT_MS) || 10_000,
+      });
       return { adapter };
     } catch (error) {
       if (error instanceof Error) {
