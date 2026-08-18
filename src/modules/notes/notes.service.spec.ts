@@ -122,16 +122,15 @@ describe('NotesService parent-ownership scope', () => {
     expect(prisma.updateManyCalls).toHaveLength(1);
   });
 
-  it('update rejects content past the length ceiling and writes nothing', async () => {
+  it('update allows content past MAX_NOTE_CONTENT_LENGTH (ordinary human edits are self-limiting; only Coach appends are capped)', async () => {
     const { prisma, service } = buildService();
 
-    await expect(
-      service.update(OWNER_NOTE, OWNER, {
-        content: 'x'.repeat(65536),
-      } as any),
-    ).rejects.toThrow(/65535-character limit/i);
+    await service.update(OWNER_NOTE, OWNER, {
+      content: 'x'.repeat(65536),
+    } as any);
 
-    expect(prisma.updates).toHaveLength(0);
+    expect(prisma.updates).toHaveLength(1);
+    expect(prisma.updates[0].data.content).toHaveLength(65536);
   });
 });
 

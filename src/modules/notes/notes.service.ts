@@ -15,15 +15,21 @@ import {
 } from './note-content';
 
 // Same ceiling coach-journal.service.ts enforces on journal entries. Notes
-// content has no DB-level or DTO-level length limit, so without this a
-// single note could be grown without bound — trivially reachable at volume
-// via repeated Coach APPEND_NOTE_CONTENT actions targeting the same title.
-// Exported because `create` deliberately does NOT enforce it (a create has no
-// prior content to have grown past a ceiling) while `update` does — which
-// means anything generating a note body elsewhere has to check the ceiling
-// itself BEFORE creating the row, or it produces a note that saves once and
-// then rejects every edit the editor's autosave ever makes, forever, with no
-// visible cause. See note-summary.service.ts, which is exactly that case.
+// content has no DB-level or DTO-level length limit, so without this the
+// Coach's APPEND_NOTE_CONTENT action could grow a single note without bound
+// via repeated automated appends targeting the same title.
+//
+// Deliberately enforced ONLY on appendContentByTitleHint below, not on the
+// general-purpose `update()` that every human edit (web + mobile editors,
+// via autosave) goes through. Ordinary human edits are self-limiting by
+// definition; a cap on `update()` previously rejected them once a note's
+// content crossed this length — trivially reachable once an editor embeds a
+// pasted image as base64 — and once a note was over the cap, every
+// subsequent autosave failed the same way forever, with no visible cause to
+// the user. `create` also deliberately does NOT enforce it, since a create
+// has no prior content to have grown past a ceiling. Anything generating a
+// note body via automated appends elsewhere has to check the ceiling itself
+// BEFORE writing, same as this method does — see note-summary.service.ts.
 export const MAX_NOTE_CONTENT_LENGTH = 65535;
 
 @Injectable()
@@ -135,14 +141,16 @@ export class NotesService {
       }
     }
 
-    if (
-      dto.content !== undefined &&
-      dto.content.length > MAX_NOTE_CONTENT_LENGTH
-    ) {
-      throw new BadRequestException(
-        `This note's content would exceed the ${MAX_NOTE_CONTENT_LENGTH}-character limit. Trim it and try again.`,
-      );
-    }
+    // No MAX_NOTE_CONTENT_LENGTH check here on purpose. This is the shared
+    // write path for every human edit (web + mobile editors autosave through
+    // it), and content is self-limiting by definition when a person is
+    // typing it. The ceiling only guards against *unbounded automated*
+    // growth, which is exclusively possible via Coach's
+    // appendContentByTitleHint — that's where it's enforced (below). A cap
+    // here previously rejected ordinary edits once a note's content crossed
+    // 65535 chars, which normal rich text reaches easily once an embedded
+    // image's base64 data is included — and once rejected, every future
+    // autosave for that note failed the same way, forever.
 
     return this.prisma.note.update({
       where: { id },
