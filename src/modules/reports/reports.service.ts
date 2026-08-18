@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { GoalStatus } from '@prisma/client';
+import { GoalStatus, TimeEntrySource } from '@prisma/client';
 import {
   ReportFiltersDto,
   ReportViewType,
@@ -23,6 +23,13 @@ import {
   SchedulePattern,
   ScheduleDayData,
 } from './dto';
+
+// getDetailedReport/getSummaryReport/getDayByTaskReport/getDayTotalReport/
+// getScheduleReport are also the query methods generateExport() calls to
+// build export data, so they accept the export-only `excludeEntryIds` field
+// too. It's always undefined when called from the plain report endpoints,
+// which only ever pass a ReportFiltersDto (no such field on that type).
+type ReportQueryFilters = ReportFiltersDto & { excludeEntryIds?: string[] };
 
 interface TopActivity {
   taskName: string;
@@ -409,7 +416,7 @@ export class ReportsService {
    */
   async getDetailedReport(
     userId: string,
-    filters: ReportFiltersDto,
+    filters: ReportQueryFilters,
   ): Promise<DetailedReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
@@ -434,6 +441,10 @@ export class ReportsService {
           ? { taskId: { in: taskIdArray } }
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
+        source: this.buildSourceFilter(filters.sources),
+        ...(filters.excludeEntryIds && filters.excludeEntryIds.length > 0
+          ? { id: { notIn: filters.excludeEntryIds } }
+          : {}),
       },
       include: {
         goal: {
@@ -595,7 +606,7 @@ export class ReportsService {
    */
   async getSummaryReport(
     userId: string,
-    filters: ReportFiltersDto,
+    filters: ReportQueryFilters,
   ): Promise<SummaryReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
@@ -620,6 +631,10 @@ export class ReportsService {
           ? { taskId: { in: taskIdArray } }
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
+        source: this.buildSourceFilter(filters.sources),
+        ...(filters.excludeEntryIds && filters.excludeEntryIds.length > 0
+          ? { id: { notIn: filters.excludeEntryIds } }
+          : {}),
       },
       include: {
         goal: {
@@ -692,7 +707,7 @@ export class ReportsService {
    */
   async getDayByTaskReport(
     userId: string,
-    filters: ReportFiltersDto,
+    filters: ReportQueryFilters,
   ): Promise<DayByTaskReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
@@ -717,6 +732,10 @@ export class ReportsService {
           ? { taskId: { in: taskIdArray } }
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
+        source: this.buildSourceFilter(filters.sources),
+        ...(filters.excludeEntryIds && filters.excludeEntryIds.length > 0
+          ? { id: { notIn: filters.excludeEntryIds } }
+          : {}),
       },
       // No `task` include here: the displayed name is always the entry's
       // own snapshot `taskName` (see the comment below on why), and taskId
@@ -848,7 +867,7 @@ export class ReportsService {
    */
   async getDayTotalReport(
     userId: string,
-    filters: ReportFiltersDto,
+    filters: ReportQueryFilters,
   ): Promise<DayTotalReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
@@ -873,6 +892,10 @@ export class ReportsService {
           ? { taskId: { in: taskIdArray } }
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
+        source: this.buildSourceFilter(filters.sources),
+        ...(filters.excludeEntryIds && filters.excludeEntryIds.length > 0
+          ? { id: { notIn: filters.excludeEntryIds } }
+          : {}),
       },
       // `task` trimmed to just `title` (the only field this report reads —
       // as a fallback when the entry has no per-entry taskName snapshot).
@@ -1012,7 +1035,7 @@ export class ReportsService {
    */
   async getScheduleReport(
     userId: string,
-    filters: ReportFiltersDto,
+    filters: ReportQueryFilters,
   ): Promise<ScheduleReportResponse> {
     const start = new Date(filters.startDate);
     start.setHours(0, 0, 0, 0);
@@ -1047,6 +1070,10 @@ export class ReportsService {
           ? { taskId: { in: taskIdArray } }
           : {}),
         ...(filters.category ? { goal: { category: filters.category } } : {}),
+        source: this.buildSourceFilter(filters.sources),
+        ...(filters.excludeEntryIds && filters.excludeEntryIds.length > 0
+          ? { id: { notIn: filters.excludeEntryIds } }
+          : {}),
       },
       // Both relations trimmed to the fields the pattern-matching loop below
       // actually reads: task.title (taskName fallback) and
@@ -1569,6 +1596,35 @@ export class ReportsService {
     }
 
     return lines.join('\n');
+  }
+
+  /**
+   * Builds the `source` clause shared by every TimeEntry report/export query.
+   *
+   * TasksService.complete writes a TimeEntry tagged `source: COMPLETION`
+   * purely to credit Goal.loggedHours when a task is finished without a
+   * manual timer (mobile's swipe-to-complete silently logs
+   * `task.estimatedMinutes ?? 1`, which is often not real tracked time).
+   * Reports default to excluding those entries so they read as genuine
+   * tracked time, while still letting a caller opt back in by explicitly
+   * listing COMPLETION in `sources`. This never touches goal-progress
+   * crediting itself — GoalsService.updateProgress still sums every
+   * TimeEntry unfiltered.
+   */
+  private buildSourceFilter(
+    sources?: string,
+  ): { in: TimeEntrySource[] } | { not: TimeEntrySource } {
+    const validSources = new Set<string>(Object.values(TimeEntrySource));
+    const sourceArray = sources
+      ?.split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => validSources.has(s)) as TimeEntrySource[] | undefined;
+
+    if (sourceArray && sourceArray.length > 0) {
+      return { in: sourceArray };
+    }
+
+    return { not: TimeEntrySource.COMPLETION };
   }
 
   private getSortOrder(sortBy?: ReportSortBy) {

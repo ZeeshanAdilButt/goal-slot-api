@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsEnum, IsDateString } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsDateString,
+  IsArray,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
+import { TimeEntrySource } from '@prisma/client';
 
 export enum ReportViewType {
   DETAILED = 'detailed',
@@ -117,6 +124,19 @@ export class ReportFiltersDto {
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   includeTaskNotes?: boolean;
+
+  @ApiPropertyOptional({
+    enum: TimeEntrySource,
+    isArray: true,
+    description:
+      'Comma-separated list of time entry sources to include (e.g. "TRACKER" or "TRACKER,COMPLETION"). ' +
+      'When omitted, COMPLETION-sourced entries (auto-logged when a task is marked done without a manual ' +
+      'timer, so they may not reflect real tracked time) are excluded by default. Pass "COMPLETION" ' +
+      'explicitly to opt back in.',
+  })
+  @IsOptional()
+  @IsString()
+  sources?: string;
 }
 
 export class ExportReportDto extends ReportFiltersDto {
@@ -150,6 +170,17 @@ export class ExportReportDto extends ReportFiltersDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Time entry IDs to leave out of this export only — the underlying entries are not deleted or ' +
+      'otherwise modified, they are just filtered out of the exported data.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  excludeEntryIds?: string[];
 }
 
 // Response types for detailed and summary reports
