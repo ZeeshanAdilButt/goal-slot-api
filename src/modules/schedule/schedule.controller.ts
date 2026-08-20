@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ScheduleService } from './schedule.service';
 import {
   CreateScheduleBlockDto,
+  CreateScheduleBlocksBatchDto,
   UpdateScheduleBlockDto,
 } from './dto/schedule.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,6 +33,23 @@ export class ScheduleController {
     @Body() dto: CreateScheduleBlockDto,
   ) {
     return this.scheduleService.create(req.user.sub, dto);
+  }
+
+  // Atomic multi-day create: e.g. the "New Block" modal's day picker, where
+  // several per-day payloads share one seriesId and must succeed or fail
+  // together. See ScheduleService.createBatch — kept as an ADDITIVE endpoint
+  // alongside the single-block POST above (untouched, still used standalone
+  // by e.g. the Coach proposal path), not a replacement for it.
+  @Post('batch')
+  @ApiOperation({
+    summary:
+      'Create a group of schedule blocks atomically (all-or-nothing) — used for multi-day creates',
+  })
+  async createBatch(
+    @Request() req: AuthenticatedRequest,
+    @Body() dto: CreateScheduleBlocksBatchDto,
+  ) {
+    return this.scheduleService.createBatch(req.user.sub, dto);
   }
 
   @Get()

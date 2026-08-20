@@ -8,7 +8,12 @@ import {
   Max,
   Matches,
   IsIn,
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateScheduleBlockDto {
@@ -83,6 +88,34 @@ export class CreateScheduleBlockDto {
   @IsOptional()
   @IsUUID()
   seriesId?: string;
+}
+
+/**
+ * One request, one atomic outcome for a multi-day create (schedule-block
+ * modal's "select multiple days" flow). Each entry is the same shape as
+ * CreateScheduleBlockDto — including its own `seriesId`, since the client
+ * mints one shared seriesId and stamps it onto every day's entry itself
+ * rather than this DTO inferring it. See ScheduleService.createBatch: every
+ * entry's conflict check runs BEFORE any entry is inserted, all inside one
+ * Serializable transaction, so a genuine conflict on one day rolls back the
+ * whole group instead of leaving the earlier days silently created (the
+ * "Time slot conflicts" bug — a fan-out of N parallel POST /schedule calls
+ * behind Promise.all had no such guarantee: one 400 still left up to N-1
+ * rows committed).
+ */
+export class CreateScheduleBlocksBatchDto {
+  @ApiProperty({
+    type: [CreateScheduleBlockDto],
+    description:
+      'Per-day block payloads to create atomically — all or nothing.',
+    maxItems: 7,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(7)
+  @ValidateNested({ each: true })
+  @Type(() => CreateScheduleBlockDto)
+  blocks: CreateScheduleBlockDto[];
 }
 
 export class UpdateScheduleBlockDto extends PartialType(

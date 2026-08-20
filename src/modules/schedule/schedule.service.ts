@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import {
   CreateScheduleBlockDto,
+  CreateScheduleBlocksBatchDto,
   UpdateScheduleBlockDto,
 } from './dto/schedule.dto';
 
@@ -19,6 +20,23 @@ import {
 type ScheduleBlockClient = Pick<PrismaService, 'scheduleBlock'>;
 
 const MAX_CONFLICT_RETRIES = 3;
+
+// Matches CreateScheduleBlockDto.dayOfWeek's documented convention
+// (0=Sunday, ..., 6=Saturday). Used only to make a batch conflict message
+// self-explanatory ("... on Wednesday") without the client having to map the
+// number back to a name itself — the global PostHogExceptionFilter forwards
+// only an HttpException's `message`, not any other field on the response
+// body, so the day name has to live inside the message string itself rather
+// than a sibling `dayOfWeek` field.
+const DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
 
 @Injectable()
 export class ScheduleService {
@@ -168,6 +186,166 @@ export class ScheduleService {
         return this.createWithConflictGuard(userId, dto, attempt + 1);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Atomic counterpart to `create` for a GROUP of blocks that logically
+   * belong together (schedule-block modal's "select multiple days" flow,
+   * which shares one `seriesId` across the group).
+   *
+   * Before this endpoint existed, the web client fanned the group out into N
+   * parallel `POST /schedule` calls via `Promise.all`. `Promise.all` fails
+   * fast on the first rejection, but the other requests were already
+   * in-flight on the server and completed independently — there was no
+   * transaction spanning the group. If even one day genuinely conflicted,
+   * that day 400'd, the caller saw ONE error and assumed nothing happened,
+   * while up to N-1 blocks were silently created. This is that fix: every
+   * day in the batch is checked for a conflict BEFORE any of them are
+   * inserted, all inside one transaction, so a conflict on one day rolls
+   * back the whole group — zero blocks created, not N-1 — exactly like
+   * `createWithConflictGuard` does for a single block.
+   */
+  async createBatch(userId: string, dto: CreateScheduleBlocksBatchDto) {
+    for (const block of dto.blocks) {
+      this.assertValidRange(block.startTime, block.endTime);
+    }
+
+    // Dedupe goalIds so a batch that links every day to the same goal (the
+    // common case) only pays for one ownership lookup, not N.
+    const goalIds = new Set(
+      dto.blocks.map((b) => b.goalId).filter((id): id is string => !!id),
+    );
+    for (const goalId of goalIds) {
+      await this.validateGoalOwnership(userId, goalId);
+    }
+
+    // Same plan-limit gate as the single-create path, applied once per block
+    // being added — i.e. as if the caller had run `create` N times in a row.
+    // Deliberately outside the transaction below (same looseness the
+    // existing single-create path already accepts: this check and the
+    // conflict-guarded insert are not one atomic unit against a *concurrent*
+    // create elsewhere, only against each other within this batch).
+    const currentSchedules = await this.prisma.scheduleBlock.count({
+      where: { userId },
+    });
+    for (let i = 0; i < dto.blocks.length; i++) {
+      await this.authService.checkPlanLimit(
+        userId,
+        'schedules',
+        currentSchedules + i,
+      );
+    }
+
+    return this.createBatchWithConflictGuard(userId, dto);
+  }
+
+  /**
+   * Same SERIALIZABLE check-then-insert pattern as `createWithConflictGuard`
+   * (see that method's comment for the race it closes), extended to a group:
+   *
+   *   1. Check every block in the batch against the *committed* table state
+   *      for a conflict. Nothing is inserted yet, so this phase alone would
+   *      miss two entries in the SAME batch conflicting with each other.
+   *   2. Guard against that separately, in-memory, before touching the DB:
+   *      group the batch by dayOfWeek and pairwise-check overlaps within
+   *      each group. The web client can't actually produce this today (its
+   *      day picker dedupes selections), but the endpoint's contract
+   *      ("all-or-nothing for whatever's in the array") shouldn't silently
+   *      depend on that.
+   *   3. Only once every block has cleared both checks are any rows
+   *      inserted, all inside the same transaction.
+   *
+   * A conflict at either phase throws and rolls back the whole transaction —
+   * zero rows created — and identifies which day it was in the message
+   * (see DAY_NAMES).
+   */
+  private async createBatchWithConflictGuard(
+    userId: string,
+    dto: CreateScheduleBlocksBatchDto,
+    attempt = 0,
+  ): Promise<
+    Array<Awaited<ReturnType<PrismaService['scheduleBlock']['create']>>>
+  > {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          this.assertNoSelfConflict(dto.blocks);
+
+          for (const block of dto.blocks) {
+            const hasConflict = await this.checkTimeConflict(
+              userId,
+              block.dayOfWeek,
+              block.startTime,
+              block.endTime,
+              undefined,
+              tx,
+            );
+            if (hasConflict) {
+              throw new BadRequestException(
+                `Time slot conflicts with an existing schedule block on ${DAY_NAMES[block.dayOfWeek]}`,
+              );
+            }
+          }
+
+          const created: Array<
+            Awaited<ReturnType<PrismaService['scheduleBlock']['create']>>
+          > = [];
+          for (const block of dto.blocks) {
+            created.push(
+              await tx.scheduleBlock.create({
+                data: {
+                  ...block,
+                  id: block.id ?? undefined,
+                  userId,
+                },
+                include: { goal: true },
+              }),
+            );
+          }
+          return created;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializationFailure(error) && attempt < MAX_CONFLICT_RETRIES) {
+        return this.createBatchWithConflictGuard(userId, dto, attempt + 1);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pairwise overlap check across entries of the SAME batch, for the day
+   * they'd land on. Independent of `checkTimeConflict`, which only ever
+   * compares a candidate against rows already committed to the table — two
+   * not-yet-inserted entries in this same call are invisible to each other
+   * there.
+   */
+  private assertNoSelfConflict(blocks: CreateScheduleBlockDto[]) {
+    const byDay = new Map<number, CreateScheduleBlockDto[]>();
+    for (const block of blocks) {
+      const group = byDay.get(block.dayOfWeek) ?? [];
+      group.push(block);
+      byDay.set(block.dayOfWeek, group);
+    }
+
+    for (const [dayOfWeek, group] of byDay) {
+      for (let i = 0; i < group.length; i++) {
+        const a = group[i];
+        const aStart = this.timeToMinutes(a.startTime);
+        const aEnd = this.timeToMinutes(a.endTime);
+        for (let j = i + 1; j < group.length; j++) {
+          const b = group[j];
+          const bStart = this.timeToMinutes(b.startTime);
+          const bEnd = this.timeToMinutes(b.endTime);
+          if (aStart < bEnd && aEnd > bStart) {
+            throw new BadRequestException(
+              `Two blocks in this request overlap on ${DAY_NAMES[dayOfWeek]}`,
+            );
+          }
+        }
+      }
     }
   }
 

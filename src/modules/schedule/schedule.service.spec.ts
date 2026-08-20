@@ -72,7 +72,10 @@ class FakePrisma {
     findMany: async ({ where }: any) =>
       this.scheduleBlocks.filter((b) => this.matches(b, where)),
     create: async ({ data }: any) => {
-      const row: Row = { ...data, id: data.id ?? `new-block-${this.created.length}` };
+      const row: Row = {
+        ...data,
+        id: data.id ?? `new-block-${this.created.length}`,
+      };
       this.created.push(row);
       // Feeds the row back into the "table" `findMany`/`checkTimeConflict`
       // read from, so a second create in the same test correctly sees the
@@ -520,5 +523,141 @@ describe('ScheduleService inverted / zero-length time ranges', () => {
     await service.update(ATTACKER, OWN_BLOCK, { startTime: '09:30' } as any);
 
     expect(prisma.updated).toHaveLength(1);
+  });
+});
+
+// Regression cover for the multi-day fan-out bug: the web client used to send
+// N parallel `POST /schedule` requests (one per selected day, sharing a
+// seriesId) via `Promise.all`. That fails fast on the first rejection, but
+// the OTHER requests were already in flight and completed independently —
+// nothing spanned the group. A genuine conflict on one day 400'd, the user
+// saw ONE error and assumed nothing happened, while up to N-1 blocks were
+// silently created. `ScheduleService.createBatch` /
+// `createBatchWithConflictGuard` fix this the same way `createWithConflictGuard`
+// closes the single-block race: every day is checked for a conflict BEFORE
+// any day is inserted, all inside one Serializable transaction, so a
+// conflict anywhere rolls back the whole group.
+describe('ScheduleService.createBatch atomic group create', () => {
+  const monday = { ...baseCreate, dayOfWeek: 1, seriesId: SERIES_ID };
+  const wednesday = { ...baseCreate, dayOfWeek: 3, seriesId: SERIES_ID };
+  const friday = { ...baseCreate, dayOfWeek: 5, seriesId: SERIES_ID };
+
+  it('creates all N rows when every day is conflict-free', async () => {
+    const { prisma, service } = buildService();
+
+    const result = await service.createBatch(ATTACKER, {
+      blocks: [monday, wednesday, friday] as any,
+    });
+
+    expect(result).toHaveLength(3);
+    expect(prisma.created).toHaveLength(3);
+    expect(prisma.created.map((b) => b.dayOfWeek).sort()).toEqual([1, 3, 5]);
+    expect(prisma.created.every((b) => b.seriesId === SERIES_ID)).toBe(true);
+  });
+
+  it('rolls back the ENTIRE batch when just one day genuinely conflicts — row count stays unchanged, not N-1', async () => {
+    const { prisma, service } = buildService();
+    // Wednesday already has a block sitting in this exact slot.
+    prisma.scheduleBlocks.push({
+      id: 'existing-wed-block',
+      userId: ATTACKER,
+      dayOfWeek: 3,
+      startTime: baseCreate.startTime,
+      endTime: baseCreate.endTime,
+    });
+
+    await expect(
+      service.createBatch(ATTACKER, {
+        blocks: [monday, wednesday, friday] as any,
+      }),
+    ).rejects.toThrow(
+      'Time slot conflicts with an existing schedule block on Wednesday',
+    );
+
+    // Zero rows created — NOT 2 (Monday and Friday, which had no conflict of
+    // their own, must not have been left behind either).
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('identifies the specific conflicting day by name in the error message', async () => {
+    const { prisma, service } = buildService();
+    prisma.scheduleBlocks.push({
+      id: 'existing-fri-block',
+      userId: ATTACKER,
+      dayOfWeek: 5,
+      startTime: baseCreate.startTime,
+      endTime: baseCreate.endTime,
+    });
+
+    await expect(
+      service.createBatch(ATTACKER, {
+        blocks: [monday, wednesday, friday] as any,
+      }),
+    ).rejects.toThrow('Friday');
+  });
+
+  it('rejects (and creates nothing) when two entries in the SAME request overlap on the same day, before ever touching the DB', async () => {
+    const { prisma, service } = buildService();
+    const overlappingMonday = {
+      ...baseCreate,
+      dayOfWeek: 1,
+      startTime: '11:30',
+      endTime: '12:30',
+      seriesId: SERIES_ID,
+    };
+
+    await expect(
+      service.createBatch(ATTACKER, {
+        blocks: [monday, overlappingMonday] as any,
+      }),
+    ).rejects.toThrow('Two blocks in this request overlap on Monday');
+
+    expect(prisma.created).toHaveLength(0);
+  });
+
+  it('runs the batch check-then-insert inside one Serializable prisma.$transaction', async () => {
+    const { prisma, service } = buildService();
+    const transactionSpy = jest.spyOn(prisma, '$transaction');
+
+    await service.createBatch(ATTACKER, { blocks: [monday, wednesday] as any });
+
+    expect(transactionSpy).toHaveBeenCalledTimes(1);
+    expect(transactionSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'Serializable' }),
+    );
+  });
+
+  it('retries the whole batch transaction on a P2034 serialization conflict, and succeeds once the retry wins', async () => {
+    const { prisma, service } = buildService();
+    let attempts = 0;
+    const realTransaction = prisma.$transaction.bind(prisma);
+    prisma.$transaction = (async (fn: any, opts: any) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw { code: 'P2034', message: 'Transaction write conflict' };
+      }
+      return realTransaction(fn, opts);
+    }) as any;
+
+    const result = await service.createBatch(ATTACKER, {
+      blocks: [monday, wednesday] as any,
+    });
+
+    expect(attempts).toBe(2);
+    expect(result).toHaveLength(2);
+    expect(prisma.created).toHaveLength(2);
+  });
+
+  it('refuses to link any block in the batch to another user goal, and creates nothing', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.createBatch(ATTACKER, {
+        blocks: [monday, { ...wednesday, goalId: VICTIM_GOAL }] as any,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.created).toHaveLength(0);
   });
 });
