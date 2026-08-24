@@ -183,5 +183,8 @@ export const envValidationSchema = Joi.object({
     .allow(''),
   // Dedicated HMAC signing key for OAuth state tokens (all integrations share this).
   // Optional: falls back to JWT_SECRET if not set so existing dev envs keep working.
-  INTEGRATION_STATE_SECRET: Joi.string().optional(),
+  // .allow('') because .env.example ships it blank -- without it, copying the
+  // example verbatim fails validation and the whole API refuses to boot, which
+  // is exactly what the "accepts .env.example as shipped" guard test caught.
+  INTEGRATION_STATE_SECRET: Joi.string().optional().allow(''),
 });

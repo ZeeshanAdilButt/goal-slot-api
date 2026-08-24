@@ -523,26 +523,33 @@ export class NotionIntegrationService {
         const db = await notion.databases.retrieve({ database_id: pageId }) as DatabaseObjectResponse;
         const title = this.getTitleFromSearchResult(db);
 
-        const dataSourceId = (db as any).data_sources?.[0]?.id;
-        let pages: any[] = [];
-
-        if (dataSourceId) {
-          let cursor: string | undefined;
-          do {
-            const queryResult = await notion.dataSources.query({
-              data_source_id: dataSourceId,
-              page_size: 100,
-              ...(cursor ? { start_cursor: cursor } : {}),
+        // Queried by database_id rather than through a data source. The
+        // `data_sources` array and `dataSources.query` belong to Notion's
+        // 2025-09-03 API; this client pins no notionVersion, so it speaks
+        // 2022-06-28, where that field is absent from the response and the
+        // method does not exist on the SDK client at all. Reading it there
+        // always yielded undefined, so the block below never ran and every
+        // database returned an empty page list - and `dataSources.query`
+        // did not compile against the installed SDK. `databases.query` is
+        // the equivalent on this API version and matches the rest of this
+        // service (search / databases.retrieve / pages.retrieve /
+        // blocks.children.list are all 2022-06-28 calls).
+        const pages: any[] = [];
+        let cursor: string | undefined;
+        do {
+          const queryResult = await notion.databases.query({
+            database_id: pageId,
+            page_size: 100,
+            ...(cursor ? { start_cursor: cursor } : {}),
+          });
+          for (const r of queryResult.results) {
+            pages.push({
+              notionPageId: r.id,
+              title: this.getTitleFromSearchResult(r as any),
             });
-            for (const r of queryResult.results) {
-              pages.push({
-                notionPageId: r.id,
-                title: this.getTitleFromSearchResult(r as any),
-              });
-            }
-            cursor = queryResult.has_more ? (queryResult.next_cursor ?? undefined) : undefined;
-          } while (cursor);
-        }
+          }
+          cursor = queryResult.has_more ? (queryResult.next_cursor ?? undefined) : undefined;
+        } while (cursor);
 
         return {
           contentType: 'database',
