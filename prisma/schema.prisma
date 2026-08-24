@@ -101,6 +101,7 @@ model User {
   activeTimerSession       ActiveTimerSession?
   integrationConnections   IntegrationConnection[]
   notionPageIndex          NotionPageIndex[]
+  calendarConnections      CalendarConnection[]
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -307,6 +308,10 @@ model ScheduleBlock {
   timeEntries         TimeEntry[]
   tasks               Task[]
   activeTimerSessions ActiveTimerSession[]
+  // Present only on blocks created by the Google Calendar import, so a
+  // re-preview can mark the source event as already imported. Deleting the
+  // block clears it and makes the event importable again.
+  importedFrom        ImportedCalendarEvent?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1082,6 +1087,73 @@ model NotionTarget {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@index([connectionId])
+}
+
+// ============================================================
+// Google Calendar import
+// ============================================================
+
+// One OAuth grant per user per provider. The refresh token is encrypted at
+// rest exactly like EncryptedByokKey: AES-256-GCM output as a Bytes triplet
+// plus keyVersion, so a future key rotation can tell old rows from new.
+//
+// Separate from IntegrationConnection (Notion) rather than reusing it: that
+// model requires a workspaceId/workspaceName and stores an access token, none
+// of which a Google Calendar grant has. Overloading it would mean three
+// nullable columns and a comment explaining when each applies.
+model CalendarConnection {
+  id           String @id @default(cuid())
+  userId       String
+  provider     String // "google"
+  accountEmail String
+
+  refreshCiphertext Bytes
+  refreshIv         Bytes
+  refreshAuthTag    Bytes
+  keyVersion        Int   @default(1)
+
+  scopes String[]
+  // "active" | "stale". Set to stale when Google answers invalid_grant, which
+  // means the user revoked access and must reconnect; there is nothing to
+  // retry, so the Settings card prompts instead of failing every click.
+  status String   @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  importedEvents ImportedCalendarEvent[]
+
+  // One Google account per user. Reconnecting with a different address
+  // replaces the grant in place rather than accumulating dead connections.
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+// Remembers that a Google event already became a schedule block, so the review
+// screen can mark it and the import can refuse to create it twice.
+//
+// This is a mapping table rather than a column on ScheduleBlock because the
+// relationship is about the import, not about the block: it cascades away with
+// the connection (disconnecting forgets the history) and with the block
+// (deleting an imported block makes the event importable again), and it keeps
+// integration-specific columns off a model on the schedule hot path.
+model ImportedCalendarEvent {
+  id              String @id @default(cuid())
+  connectionId    String
+  externalCalId   String
+  externalEventId String
+  scheduleBlockId String @unique
+
+  importedAt DateTime @default(now())
+
+  connection    CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  scheduleBlock ScheduleBlock      @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
+
+  // The idempotency guarantee: a second import of the same event hits this
+  // constraint instead of creating a duplicate block.
+  @@unique([connectionId, externalEventId])
   @@index([connectionId])
 }
 

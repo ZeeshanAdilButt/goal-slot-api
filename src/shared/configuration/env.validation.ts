@@ -33,6 +33,18 @@ export const envValidationSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
   GOOGLE_CALLBACK_URL: Joi.string().uri().optional().allow(''),
 
+  // Google Calendar import (optional), which reuses GOOGLE_CLIENT_ID and
+  // GOOGLE_CLIENT_SECRET above and only needs its own redirect URI — the
+  // calendar callback is a different path from the sign-in one, so Google has
+  // to have it registered separately.
+  //
+  // This variable doubles as the feature switch: while it is blank the
+  // /api/integrations/google-calendar/* routes 404 and nothing else changes.
+  // `.allow('')` is not decoration — a deployment copying .env.example ships a
+  // blank value, and a schema that rejected it would refuse to boot the API
+  // over a feature that is meant to be off by default.
+  GOOGLE_CALENDAR_REDIRECT_URI: Joi.string().uri().optional().allow(''),
+
   // Where the OAuth callback sends the browser once tokens are minted.
   // Falls back to APP_URL when unset (see resolveFrontendUrl).
   FRONTEND_URL: Joi.string().uri().optional().allow(''),
