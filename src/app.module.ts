@@ -40,6 +40,7 @@ import { LlmModule } from './shared/modules/llm.module';
 import { PostHogModule } from './shared/modules/posthog.module';
 import { IdempotencyModule } from './shared/idempotency/idempotency.module';
 import { WhiteboardsModule } from './modules/whiteboards/whiteboards.module';
+import { GoogleCalendarModule } from './modules/google-calendar/google-calendar.module';
 import { PushSubscriptionsModule } from './modules/push-subscriptions/push-subscriptions.module';
 import { InstructionsModule } from './modules/instructions/instructions.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
@@ -89,6 +90,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     NotificationsModule,
     ReleaseNotesModule,
     WhiteboardsModule,
+    GoogleCalendarModule,
     TemplatesModule,
     InstructionsModule,
     PushSubscriptionsModule,
