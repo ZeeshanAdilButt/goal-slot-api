@@ -86,6 +86,7 @@ export class UsersService {
       data: {
         name: dto.name,
         avatar: dto.avatar,
+        dailyFocusGoalMinutes: dto.dailyFocusGoalMinutes,
       },
     });
 

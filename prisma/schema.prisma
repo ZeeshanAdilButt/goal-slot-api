@@ -28,6 +28,13 @@ model User {
   name     String
   avatar   String?
 
+  // Daily focus target in minutes, used by the dashboard Focus Streak card
+  // for the streak threshold, the progress bar, and the "goal met" toast.
+  // Defaults to 4h. The 240 is a default, not a floor -- users may set
+  // anything from 15 minutes to 1440 (24h); the range is enforced in
+  // UpdateUserDto so a lower target stays available to casual users.
+  dailyFocusGoalMinutes Int @default(240)
+
   role     UserRole @default(USER)
   userType UserType @default(EXTERNAL)
   plan     PlanType @default(FREE)
