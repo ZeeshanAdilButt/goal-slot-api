@@ -3,18 +3,16 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
-
-const WEEK_KEY = /^\d{4}-W\d{2}$/;
+import { IsIsoWeekKey } from './is-iso-week-key.decorator';
 
 export class UpsertGoalReflectionDto {
   @ApiProperty({ example: '2026-W22' })
   @IsString()
-  @Matches(WEEK_KEY, { message: 'weekKey must match YYYY-Www, e.g. 2026-W22' })
+  @IsIsoWeekKey()
   weekKey!: string;
 
   @ApiProperty({ minimum: 1, maximum: 5 })
