@@ -171,4 +171,20 @@ export const envValidationSchema = Joi.object({
       is: Joi.string().min(1).required(),
       then: Joi.string().required(),
     }),
+  // Notion Integration
+  NOTION_CLIENT_ID: Joi.string().optional().allow(''),
+  NOTION_CLIENT_SECRET: Joi.string().optional().allow(''),
+  NOTION_REDIRECT_URI: Joi.alternatives()
+    .try(
+      Joi.string().uri({ scheme: ['https'] }),
+      Joi.string().pattern(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/),
+    )
+    .optional()
+    .allow(''),
+  // Dedicated HMAC signing key for OAuth state tokens (all integrations share this).
+  // Optional: falls back to JWT_SECRET if not set so existing dev envs keep working.
+  // .allow('') because .env.example ships it blank -- without it, copying the
+  // example verbatim fails validation and the whole API refuses to boot, which
+  // is exactly what the "accepts .env.example as shipped" guard test caught.
+  INTEGRATION_STATE_SECRET: Joi.string().optional().allow(''),
 });

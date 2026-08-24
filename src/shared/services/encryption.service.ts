@@ -34,6 +34,7 @@ export class EncryptionService {
     ciphertext: Buffer;
     iv: Buffer;
     authTag: Buffer;
+    keyVersion: number;
   } {
     const iv = crypto.randomBytes(this.ivLength);
     const cipher = crypto.createCipheriv(this.algorithm, this.key, iv);
@@ -41,7 +42,7 @@ export class EncryptionService {
       cipher.update(plaintext, 'utf8'),
       cipher.final(),
     ]);
-    return { ciphertext, iv, authTag: cipher.getAuthTag() };
+    return { ciphertext, iv, authTag: cipher.getAuthTag(), keyVersion: 1 };
   }
 
   decrypt(p: EncryptedPayload): string {
