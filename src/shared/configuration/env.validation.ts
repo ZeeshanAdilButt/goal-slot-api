@@ -24,6 +24,19 @@ export const envValidationSchema = Joi.object({
   SUPABASE_URL: Joi.string().uri().required(),
   SUPABASE_SERVICE_ROLE_KEY: Joi.string().required(),
 
+  // Google sign-in (optional). All three are allowed to be absent: AuthModule
+  // only builds the Google strategy when the id and secret are both present,
+  // and the /auth/google routes 404 until then. Making these required would
+  // reintroduce exactly the boot failure that got the first attempt reverted,
+  // just one layer earlier.
+  GOOGLE_CLIENT_ID: Joi.string().optional().allow(''),
+  GOOGLE_CLIENT_SECRET: Joi.string().optional().allow(''),
+  GOOGLE_CALLBACK_URL: Joi.string().uri().optional().allow(''),
+
+  // Where the OAuth callback sends the browser once tokens are minted.
+  // Falls back to APP_URL when unset (see resolveFrontendUrl).
+  FRONTEND_URL: Joi.string().uri().optional().allow(''),
+
   // Email (Resend)
   RESEND_API_KEY: Joi.string().required(),
   APP_URL: Joi.string().uri().required(),
