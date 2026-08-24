@@ -9,6 +9,10 @@ import {
   IsArray,
   ArrayMinSize,
   IsIn,
+  IsInt,
+  Min,
+  Max,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, PlanType } from '@prisma/client';
@@ -21,6 +25,17 @@ import { UserRole, PlanType } from '@prisma/client';
  * Promotion to SUPER_ADMIN has no self-service path by design.
  */
 export const ASSIGNABLE_USER_ROLES = [UserRole.USER, UserRole.ADMIN] as const;
+
+/**
+ * Bounds for the per-user daily focus goal (minutes).
+ *
+ * The schema default is 240 (4h), but that is a *default*, not a floor --
+ * a hard 4h minimum would lock out anyone who tracks less than that. The
+ * range below is just a sanity check: below 15 minutes a streak stops
+ * measuring anything, and above 1440 the goal exceeds a day.
+ */
+export const DAILY_FOCUS_GOAL_MIN_MINUTES = 15;
+export const DAILY_FOCUS_GOAL_MAX_MINUTES = 1440;
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'John Doe' })
@@ -36,6 +51,29 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   avatar?: string;
+
+  @ApiPropertyOptional({
+    example: 240,
+    minimum: DAILY_FOCUS_GOAL_MIN_MINUTES,
+    maximum: DAILY_FOCUS_GOAL_MAX_MINUTES,
+    description:
+      'Daily focus target in minutes (defaults to 240 = 4h). Bounded to a ' +
+      'sane range rather than floored at the default, so a casual user can ' +
+      'still pick a shorter target.',
+  })
+  // @ValidateIf rather than @IsOptional: @IsOptional() waves through an
+  // explicit `null` as well as an omitted field, and `null` would reach
+  // Prisma as a write to a NOT NULL column -- a 500 for what is really a
+  // bad request. Omitting the key still skips validation entirely.
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt({ message: 'Daily focus goal must be a whole number of minutes' })
+  @Min(DAILY_FOCUS_GOAL_MIN_MINUTES, {
+    message: `Daily focus goal must be at least ${DAILY_FOCUS_GOAL_MIN_MINUTES} minutes`,
+  })
+  @Max(DAILY_FOCUS_GOAL_MAX_MINUTES, {
+    message: `Daily focus goal cannot exceed ${DAILY_FOCUS_GOAL_MAX_MINUTES} minutes (24 hours)`,
+  })
+  dailyFocusGoalMinutes?: number;
 }
 
 export class CreateInternalUserDto {
