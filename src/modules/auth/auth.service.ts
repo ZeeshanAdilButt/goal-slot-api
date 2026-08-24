@@ -29,6 +29,7 @@ import {
 } from './dto/auth.dto';
 import { User, UserRole, UserType, PlanType } from '@prisma/client';
 import { resolvePlanLimits } from './plan-limits';
+import { GoogleProfilePayload } from './strategies/google.strategy';
 
 // OTP constants
 const OTP_EXPIRY = 300; // 5 minutes in seconds
@@ -469,11 +470,11 @@ export class AuthService {
 
       // Generate tokens
       const tokens = await this.generateTokens(
-      user.id,
-      user.email,
-      user.role,
-      user.tokenVersion,
-    );
+        user.id,
+        user.email,
+        user.role,
+        user.tokenVersion,
+      );
 
       return {
         user: this.sanitizeUser(user),
@@ -543,6 +544,93 @@ export class AuthService {
       LOGIN_LOCKOUT_DURATION,
       LOGIN_LOCKOUT_DURATION,
     );
+  }
+
+  /**
+   * Google sign-in. Deliberately NOT routed through ssoLogin: that path is the
+   * internal DW Platform handoff and grants every account it touches
+   * INTERNAL / PRO / unlimitedAccess. Google sign-in is public, so a Google
+   * account is an ordinary EXTERNAL user on the FREE plan.
+   */
+  async handleGoogleLogin(profile: GoogleProfilePayload) {
+    const { email, googleId } = profile;
+
+    if (!email) {
+      throw new UnauthorizedException(
+        'Google account did not provide an email',
+      );
+    }
+
+    // Match on the linked Google identity first, then on email. Both are
+    // server-verified here: the profile comes from passport's exchange with
+    // Google, never from the client.
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ ssoId: googleId, ssoProvider: 'google' }, { email }],
+      },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          name: profile.name || email.split('@')[0],
+          avatar: profile.avatar,
+          ssoProvider: 'google',
+          ssoId: googleId,
+          userType: UserType.EXTERNAL,
+          role: UserRole.USER,
+          plan: PlanType.FREE,
+          // Google is the authority on this address, so there is nothing for
+          // our own OTP flow to re-verify. Only set when Google says it is
+          // verified -- see the linking guard below for why that matters.
+          emailVerified: profile.emailVerified,
+          emailVerifiedAt: profile.emailVerified ? new Date() : null,
+        },
+      });
+
+      await this.seedDefaultCategories(user.id);
+      await this.seedDefaultLabels(user.id);
+    } else if (!user.ssoId) {
+      // Linking an existing password account to a Google identity, matched on
+      // email alone. Refuse unless Google has verified the address: Workspace
+      // and custom-domain accounts can carry an unverified email, so without
+      // this check anyone able to create such an account on a victim's
+      // address could link into -- and then sign in as -- that victim's
+      // existing account.
+      if (!profile.emailVerified) {
+        throw new UnauthorizedException(
+          'Your Google account email is not verified, so it cannot be linked to an existing account.',
+        );
+      }
+
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ssoProvider: 'google',
+          ssoId: googleId,
+          avatar: user.avatar ?? profile.avatar,
+        },
+      });
+    }
+
+    // Same terminal check ssoLogin and login both make. Without it a disabled
+    // account could still get a full token pair through this route.
+    if (user.isDisabled) {
+      throw new UnauthorizedException('This account has been disabled');
+    }
+
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tokenVersion,
+    );
+
+    return {
+      user: this.sanitizeUser(user),
+      ...tokens,
+    };
   }
 
   async ssoLogin(dto: SSOLoginDto) {

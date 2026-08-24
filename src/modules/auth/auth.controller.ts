@@ -8,6 +8,8 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,7 +19,12 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle, SkipThrottle } from '@nestjs/throttler';
+import { ConfigService } from '@nestjs/config';
+import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { resolveFrontendUrl } from './google-oauth.config';
+import type { GoogleProfilePayload } from './strategies/google.strategy';
 import {
   RegisterDto,
   LoginDto,
@@ -52,7 +59,10 @@ export const LOGIN_THROTTLE_LIMIT = 20;
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private configService: ConfigService,
+  ) {}
 
   @Get('check-email')
   @UseGuards(ThrottlerGuard)
@@ -134,7 +144,9 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @UseGuards(ThrottlerGuard)
-  @Throttle({ login: { limit: LOGIN_THROTTLE_LIMIT, ttl: LOGIN_THROTTLE_TTL_MS } })
+  @Throttle({
+    login: { limit: LOGIN_THROTTLE_LIMIT, ttl: LOGIN_THROTTLE_TTL_MS },
+  })
   // See the matching comment on check-email above: without this, login
   // traffic would silently also be capped by 'check-email's tighter
   // default limit, undermining the more generous limit set above.
@@ -153,6 +165,59 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid SSO token' })
   async ssoLogin(@Body() dto: SSOLoginDto) {
     return this.authService.ssoLogin(dto);
+  }
+
+  /**
+   * Kicks off the Google consent redirect. The guard does all the work; this
+   * body never runs. 404s when Google sign-in is not configured for the
+   * environment (see GoogleAuthGuard).
+   */
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Start Google OAuth sign-in' })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to Google consent screen',
+  })
+  @ApiResponse({ status: 404, description: 'Google sign-in is not configured' })
+  googleAuth() {
+    // Intentionally empty - GoogleAuthGuard issues the redirect.
+  }
+
+  /**
+   * Google redirects the browser back here. Because this is a browser
+   * navigation and not an XHR, tokens are handed to the web app through a
+   * redirect to its /auth/callback page rather than a JSON body.
+   */
+  @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Google OAuth callback' })
+  @ApiResponse({ status: 302, description: 'Redirect back to the web app' })
+  async googleAuthCallback(
+    @Req() req: ExpressRequest & { user?: GoogleProfilePayload },
+    @Res() res: Response,
+  ) {
+    const frontendUrl = resolveFrontendUrl(this.configService);
+
+    try {
+      if (!req.user) throw new Error('Google profile missing from request');
+
+      const result = await this.authService.handleGoogleLogin(req.user);
+
+      // Tokens ride in the query string because this is a top-level browser
+      // navigation; the web app's /auth/callback reads them, stores them, and
+      // replaces the history entry so they do not linger in the URL bar.
+      const params = new URLSearchParams({
+        token: result.accessToken,
+        refresh: result.refreshToken,
+      });
+      return res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    } catch {
+      // Never surface the underlying reason in the URL - a failure here is
+      // either a disabled account or an unverified-email link attempt, and
+      // both are more useful as a generic message than as a probe signal.
+      return res.redirect(`${frontendUrl}/login?error=oauth_failed`);
+    }
   }
 
   @Get('me')

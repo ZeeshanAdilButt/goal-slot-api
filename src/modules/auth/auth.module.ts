@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -14,10 +14,38 @@ import {
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { getGoogleOAuthConfig } from './google-oauth.config';
 import { OtpAttemptTrackerService } from './otp-attempt-tracker.service';
 import { UsersModule } from '../users/users.module';
 import { SubscriptionGuard } from './guards/subscription.guard';
 import { PrismaModule } from '../../prisma/prisma.module';
+
+/**
+ * Google sign-in is optional, so its strategy is built through a factory that
+ * can decline to build it.
+ *
+ * The previous attempt (#52) listed GoogleStrategy as a plain provider whose
+ * constructor read GOOGLE_CLIENT_ID from ConfigService and passed it to
+ * passport-google-oauth20. On any environment without that variable, the
+ * underlying OAuth2Strategy constructor threw during Nest's bootstrap and the
+ * whole API failed to start - not just Google login. That is why it was
+ * reverted (f207fea).
+ *
+ * Here the credentials are resolved first and the strategy is only constructed
+ * when they are all present. When they are not, this provider resolves to null,
+ * passport never learns about a 'google' strategy, and GoogleAuthGuard turns
+ * the two routes into clean 404s. Nothing else in auth is affected.
+ */
+const googleStrategyProvider: Provider = {
+  provide: GoogleStrategy,
+  useFactory: (configService: ConfigService) => {
+    const googleConfig = getGoogleOAuthConfig(configService);
+    return googleConfig ? new GoogleStrategy(googleConfig) : null;
+  },
+  inject: [ConfigService],
+};
 
 @Module({
   imports: [
@@ -67,6 +95,8 @@ import { PrismaModule } from '../../prisma/prisma.module';
     AuthService,
     JwtStrategy,
     JwtRefreshStrategy,
+    googleStrategyProvider,
+    GoogleAuthGuard,
     SubscriptionGuard,
     OtpAttemptTrackerService,
   ],
