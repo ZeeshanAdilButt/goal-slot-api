@@ -36,6 +36,7 @@ $AppDir = 'C:\app\goal-slot-api'
 $ServiceName = 'goal-slot-api'
 $EntryPoint = Join-Path $AppDir 'dist\src\main.js'
 $StderrLog = Join-Path $AppDir 'logs\stderr.log'
+$StdoutLog = Join-Path $AppDir 'logs\stdout.log'
 
 $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
             [System.Environment]::GetEnvironmentVariable('Path', 'User')
@@ -120,7 +121,15 @@ function Test-Listening {
 # database connection works. This is the only thing that makes a deploy
 # successful.
 function Test-Ready {
-    param([int]$Attempts = 12, [int]$DelaySeconds = 3)
+    # 12 x 3s gave roughly a 58-second budget, which was cutting it far too
+    # fine: this app takes ~30s to answer /api/ready on a warm run, and a
+    # deploy that has just reinstalled node_modules is markedly slower. The
+    # Notion integration deploy actually logged "Nest application
+    # successfully started" ONE SECOND after the final attempt gave up, so a
+    # perfectly good build was rolled back over a timing race. 40 attempts is
+    # ~3.5 minutes, comfortably clear of a cold start while still well inside
+    # the workflow's 12-minute command timeout.
+    param([int]$Attempts = 40, [int]$DelaySeconds = 3)
 
     for ($i = 1; $i -le $Attempts; $i++) {
         try {
@@ -179,6 +188,16 @@ function Restart-ApiService {
 }
 
 function Show-RecentErrors {
+    # Nest logs bootstrap progress and most failures through its own Logger,
+    # which writes to stdout - stderr is frequently empty even on a failed
+    # start, which is exactly what happened on the Notion deploy and left the
+    # rollback with nothing to show. Print both.
+    if (Test-Path $StdoutLog) {
+        Write-Host "=== last 30 lines of $StdoutLog ==="
+        Get-Content $StdoutLog -Tail 30
+    } else {
+        Write-Host "no stdout log at $StdoutLog"
+    }
     if (Test-Path $StderrLog) {
         Write-Host "=== last 30 lines of $StderrLog ==="
         Get-Content $StderrLog -Tail 30
