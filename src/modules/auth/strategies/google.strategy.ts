@@ -41,6 +41,25 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
+  /**
+   * Forces Google to show the account chooser on every sign-in attempt.
+   *
+   * Without this, Google silently reuses whichever account is already signed
+   * in to the browser and skips the chooser entirely. Reported: after signing
+   * in once, logging out of GoalSlot and pressing "Continue with Google"
+   * again immediately signed the same account back in, with no way to pick a
+   * different one -- logging out of GoalSlot does not log the browser out of
+   * Google, so from Google's side there was nothing to ask about.
+   *
+   * That is wrong for anyone with more than one Google account, and it makes
+   * the button feel broken rather than merely opinionated. `select_account`
+   * asks every time; it does not re-prompt for consent (that would be
+   * `consent`), so an already-approved account is still one click.
+   */
+  authorizationParams(): Record<string, string> {
+    return { prompt: 'select_account' };
+  }
+
   validate(
     _accessToken: string,
     _refreshToken: string,
