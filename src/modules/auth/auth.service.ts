@@ -561,14 +561,56 @@ export class AuthService {
       );
     }
 
-    // Match on the linked Google identity first, then on email. Both are
-    // server-verified here: the profile comes from passport's exchange with
-    // Google, never from the client.
+    // The account already linked to this Google identity is the only match
+    // that needs no further proof: passport verified it against Google, and
+    // the subject id is stable and unique per Google account.
+    //
+    // An email match is a separate, weaker case and is handled apart from it
+    // on purpose. Folding both into one OR query -- which is what this did
+    // first -- loses track of WHICH arm matched, so an account that already
+    // carried some other federated identity sailed past the verification
+    // guard below and got tokens issued off nothing but a matching address.
     let user = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ ssoId: googleId, ssoProvider: 'google' }, { email }],
-      },
+      where: { ssoId: googleId, ssoProvider: 'google' },
     });
+
+    if (!user) {
+      const existingByEmail = await this.prisma.user.findFirst({
+        where: { email },
+      });
+
+      if (existingByEmail) {
+        // Reaching an existing account through an email match is only as
+        // trustworthy as Google's assurance that this user owns the address.
+        // Workspace and custom-domain accounts can carry an unverified email,
+        // so without this check anyone able to create such an account on a
+        // victim's address could sign straight into that victim's account.
+        //
+        // This guards every email match, not only unfederated ones: an
+        // account already linked to DW Platform SSO is, if anything, the more
+        // valuable one to steal.
+        if (!profile.emailVerified) {
+          throw new UnauthorizedException(
+            'Your Google account email is not verified, so it cannot be used to sign in to an existing account.',
+          );
+        }
+
+        user = existingByEmail.ssoId
+          ? // Already federated to something else -- DW Platform SSO, or an
+            // older Google subject on the same address. The verified email is
+            // enough to let this person in, but overwriting ssoId/ssoProvider
+            // would sever that other sign-in path, so the existing link stays.
+            existingByEmail
+          : await this.prisma.user.update({
+              where: { id: existingByEmail.id },
+              data: {
+                ssoProvider: 'google',
+                ssoId: googleId,
+                avatar: existingByEmail.avatar ?? profile.avatar,
+              },
+            });
+      }
+    }
 
     if (!user) {
       user = await this.prisma.user.create({
@@ -583,7 +625,7 @@ export class AuthService {
           plan: PlanType.FREE,
           // Google is the authority on this address, so there is nothing for
           // our own OTP flow to re-verify. Only set when Google says it is
-          // verified -- see the linking guard below for why that matters.
+          // verified -- see the linking guard above for why that matters.
           emailVerified: profile.emailVerified,
           emailVerifiedAt: profile.emailVerified ? new Date() : null,
         },
@@ -591,27 +633,6 @@ export class AuthService {
 
       await this.seedDefaultCategories(user.id);
       await this.seedDefaultLabels(user.id);
-    } else if (!user.ssoId) {
-      // Linking an existing password account to a Google identity, matched on
-      // email alone. Refuse unless Google has verified the address: Workspace
-      // and custom-domain accounts can carry an unverified email, so without
-      // this check anyone able to create such an account on a victim's
-      // address could link into -- and then sign in as -- that victim's
-      // existing account.
-      if (!profile.emailVerified) {
-        throw new UnauthorizedException(
-          'Your Google account email is not verified, so it cannot be linked to an existing account.',
-        );
-      }
-
-      user = await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          ssoProvider: 'google',
-          ssoId: googleId,
-          avatar: user.avatar ?? profile.avatar,
-        },
-      });
     }
 
     // Same terminal check ssoLogin and login both make. Without it a disabled
