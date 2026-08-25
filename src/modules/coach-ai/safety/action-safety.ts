@@ -127,7 +127,9 @@ export function assertProposalBatchSafe(
 
   if (strict) {
     const confirmed = new Set(opts.confirmedDeleteIds ?? []);
-    const unconfirmed = destructive.filter((a) => !a.id || !confirmed.has(a.id));
+    const unconfirmed = destructive.filter(
+      (a) => !a.id || !confirmed.has(a.id),
+    );
     if (unconfirmed.length > 0) {
       const preview = unconfirmed
         .slice(0, 5)

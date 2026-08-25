@@ -263,7 +263,9 @@ describe('assertProposalBatchSafe: confirmed bulk cleanup', () => {
     );
     expect(() =>
       assertProposalBatchSafe(deletes('DELETE_GOAL', 5), {
-        confirmedDeleteIds: deletes('DELETE_GOAL', 5).map((a) => a.id as string),
+        confirmedDeleteIds: deletes('DELETE_GOAL', 5).map(
+          (a) => a.id as string,
+        ),
       }),
     ).not.toThrow();
   });
