@@ -65,9 +65,24 @@ class FakeUserStore {
   };
 }
 
+class FakeCliTokenStore {
+  rows: any[] = [];
+
+  updateMany = async (args: any) => {
+    const { userId, revokedAt } = args.where;
+    const hits = this.rows.filter(
+      (row) =>
+        row.userId === userId && (revokedAt !== null || row.revokedAt === null),
+    );
+    hits.forEach((row) => Object.assign(row, args.data));
+    return { count: hits.length };
+  };
+}
+
 class FakePrisma {
   private store = new FakeUserStore();
   user = this.store;
+  cliToken = new FakeCliTokenStore();
   category = {
     count: async () => 0,
     createMany: async () => ({ count: 0 }),
@@ -752,6 +767,86 @@ describe('AuthService password changes bump tokenVersion', () => {
 
     const updatedUser = prisma.users.find((u) => u.id === 'user_1');
     expect(updatedUser.tokenVersion).toBe(2);
+  });
+
+  it('changePassword revokes every CLI token on the account', async () => {
+    // tokenVersion alone does not cover these. It kills the CLI *access*
+    // token, but the CLI refresh token is an opaque DB row with no version on
+    // it, so without an explicit revoke the CLI would quietly mint itself a
+    // fresh access token minutes after the password change.
+    const { authService, prisma, cacheManager } = buildAuthService();
+    const hashed = await bcrypt.hash('current-password', 10);
+    prisma.users.push({
+      id: 'user_1',
+      email: 'cli@example.com',
+      password: hashed,
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+      tokenVersion: 1,
+    });
+    prisma.cliToken.rows.push(
+      { id: 'cli_1', userId: 'user_1', revokedAt: null, revokedReason: null },
+      // Another account's token must be left alone.
+      { id: 'cli_2', userId: 'user_2', revokedAt: null, revokedReason: null },
+    );
+
+    await authService.sendChangePasswordOTP('user_1', 'current-password');
+    const otp = await cacheManager.get<string>(
+      'otp:cli@example.com:CHANGE_PASSWORD',
+    );
+
+    await authService.changePassword(
+      'user_1',
+      'current-password',
+      otp!,
+      'NewPassword123!',
+    );
+
+    const [mine, theirs] = prisma.cliToken.rows;
+    expect(mine.revokedAt).toBeInstanceOf(Date);
+    expect(mine.revokedReason).toBe('PASSWORD_CHANGE');
+    expect(theirs.revokedAt).toBeNull();
+  });
+
+  it('resetPassword revokes every CLI token on the account too', async () => {
+    // Same reasoning as change-password, and more urgent: reset runs from the
+    // logged-out forgot-password flow, which is exactly the path someone takes
+    // after suspecting their account is compromised.
+    const { authService, prisma, cacheManager } = buildAuthService();
+    prisma.users.push({
+      id: 'user_1',
+      email: 'clireset@example.com',
+      password: 'old-hash',
+      role: 'USER',
+      isDisabled: false,
+      userType: 'EXTERNAL',
+      plan: 'FREE',
+      tokenVersion: 0,
+    });
+    prisma.cliToken.rows.push({
+      id: 'cli_1',
+      userId: 'user_1',
+      revokedAt: null,
+      revokedReason: null,
+    });
+
+    await authService.sendOTP({
+      email: 'clireset@example.com',
+      purpose: OTPPurpose.FORGOT_PASSWORD,
+    });
+    const otp = await cacheManager.get<string>(
+      'otp:clireset@example.com:FORGOT_PASSWORD',
+    );
+
+    await authService.resetPassword({
+      email: 'clireset@example.com',
+      otp: otp!,
+      newPassword: 'NewPassword123!',
+    });
+
+    expect(prisma.cliToken.rows[0].revokedReason).toBe('PASSWORD_CHANGE');
   });
 
   it('login mints a token payload carrying the user\'s current tokenVersion', async () => {

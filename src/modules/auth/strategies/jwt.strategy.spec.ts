@@ -9,7 +9,20 @@ interface FakeUserRecord {
   tokenVersion?: number;
 }
 
-function buildStrategy(users: FakeUserRecord[]) {
+interface FakeCliTokenRecord {
+  id: string;
+  userId: string;
+  revokedAt?: Date | null;
+  expiresAt?: Date;
+  absoluteExpiresAt?: Date;
+}
+
+const HOUR_MS = 3_600_000;
+
+function buildStrategy(
+  users: FakeUserRecord[],
+  cliTokens: FakeCliTokenRecord[] = [],
+) {
   const findUnique = jest.fn(
     async (args: { where: { id: string }; select?: any }) => {
       const user = users.find((u) => u.id === args.where.id);
@@ -19,11 +32,36 @@ function buildStrategy(users: FakeUserRecord[]) {
       return user ? { tokenVersion: 0, ...user } : null;
     },
   );
-  const prisma = { user: { findUnique } };
+  const cliTokenFindUnique = jest.fn(
+    async (args: { where: { id: string }; select?: any }) => {
+      const token = cliTokens.find((t) => t.id === args.where.id);
+      if (!token) return null;
+      return {
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        absoluteExpiresAt: new Date(Date.now() + HOUR_MS),
+        ...token,
+      };
+    },
+  );
+  const prisma = {
+    user: { findUnique },
+    cliToken: { findUnique: cliTokenFindUnique },
+  };
   const configService = { get: () => 'test-jwt-secret' } as any;
 
-  const strategy = new JwtStrategy(configService, prisma as any);
-  return { strategy, prisma, findUnique };
+  // Real Map-backed cache rather than a no-op, so the "second request skips
+  // the DB read" assertion is testing the actual caching behaviour.
+  const store = new Map<string, unknown>();
+  const cacheManager = {
+    get: jest.fn(async (key: string) => store.get(key)),
+    set: jest.fn(async (key: string, value: unknown) => {
+      store.set(key, value);
+    }),
+  } as any;
+
+  const strategy = new JwtStrategy(configService, prisma as any, cacheManager);
+  return { strategy, prisma, findUnique, cliTokenFindUnique, cacheManager };
 }
 
 describe('JwtStrategy.validate', () => {
@@ -260,5 +298,116 @@ describe('JwtStrategy.validate token-type separation', () => {
       role: 'USER',
       isDisabled: false,
     });
+  });
+});
+
+describe('JwtStrategy.validate with a CLI token', () => {
+  const activeUser: FakeUserRecord = {
+    id: 'user_1',
+    email: 'dev@example.com',
+    role: 'USER',
+    isDisabled: false,
+  };
+
+  const cliPayload = {
+    sub: 'user_1',
+    email: 'dev@example.com',
+    role: 'USER',
+    typ: 'cli',
+    cid: 'cli_token_1',
+    scopes: ['full'],
+  };
+
+  it('accepts a live CLI token and reports typ, cid and scopes', async () => {
+    const { strategy } = buildStrategy(
+      [activeUser],
+      [{ id: 'cli_token_1', userId: 'user_1' }],
+    );
+
+    const result = await strategy.validate(cliPayload);
+
+    expect(result.sub).toBe('user_1');
+    expect(result.typ).toBe('cli');
+    expect(result.cid).toBe('cli_token_1');
+    expect(result.scopes).toEqual(['full']);
+  });
+
+  it('rejects a CLI token whose row has been revoked', async () => {
+    // The entire reason CliToken exists as a table: revoking one credential in
+    // Settings has to stop working now, not when the 1h JWT happens to expire.
+    const { strategy } = buildStrategy(
+      [activeUser],
+      [{ id: 'cli_token_1', userId: 'user_1', revokedAt: new Date() }],
+    );
+
+    await expect(strategy.validate(cliPayload)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a CLI token whose row has expired', async () => {
+    const { strategy } = buildStrategy(
+      [activeUser],
+      [
+        {
+          id: 'cli_token_1',
+          userId: 'user_1',
+          expiresAt: new Date(Date.now() - 1000),
+        },
+      ],
+    );
+
+    await expect(strategy.validate(cliPayload)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a CLI token whose row belongs to another account', async () => {
+    const { strategy } = buildStrategy(
+      [activeUser],
+      [{ id: 'cli_token_1', userId: 'someone_else' }],
+    );
+
+    await expect(strategy.validate(cliPayload)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a CLI token with no cid claim', async () => {
+    // Without a cid there is nothing to check the revocation list against, so
+    // letting it through would create a CLI token that can never be revoked.
+    const { strategy } = buildStrategy([activeUser], []);
+
+    await expect(
+      strategy.validate({ ...cliPayload, cid: undefined }),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('caches the CLI token lookup so it is not read on every request', async () => {
+    const { strategy, cliTokenFindUnique } = buildStrategy(
+      [activeUser],
+      [{ id: 'cli_token_1', userId: 'user_1' }],
+    );
+
+    await strategy.validate(cliPayload);
+    await strategy.validate(cliPayload);
+
+    expect(cliTokenFindUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read the CLI token table for an ordinary web token', async () => {
+    const { strategy, cliTokenFindUnique } = buildStrategy([activeUser], []);
+
+    const result = await strategy.validate({
+      sub: 'user_1',
+      email: 'dev@example.com',
+      role: 'USER',
+      typ: 'access',
+    });
+
+    expect(cliTokenFindUnique).not.toHaveBeenCalled();
+    // A web token's req.user keeps exactly its old shape - the CLI claims are
+    // absent rather than present-and-undefined.
+    expect(Object.keys(result)).toEqual(['sub', 'email', 'role', 'isDisabled']);
   });
 });

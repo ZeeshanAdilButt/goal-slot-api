@@ -24,9 +24,9 @@ model User {
   // (anything minted before this field existed) is treated as version 0,
   // matching this column's default, so existing sessions are not forced
   // to log out on deploy.
-  tokenVersion Int @default(0)
-  name     String
-  avatar   String?
+  tokenVersion Int     @default(0)
+  name         String
+  avatar       String?
 
   // Daily focus target in minutes, used by the dashboard Focus Streak card
   // for the streak threshold, the progress bar, and the "goal met" toast.
@@ -82,20 +82,20 @@ model User {
   categories               Category[]
   labels                   Label[]
   notes                    Note[]
-  noteSharesByMe           NoteShare[]         @relation("NoteShareOwner")
-  noteSharesWithMe         NoteShare[]         @relation("NoteShareRecipient")
-  sharedWithMe             SharedAccess[]      @relation("SharedWith")
-  sharedByMe               SharedAccess[]      @relation("SharedBy")
+  noteSharesByMe           NoteShare[]             @relation("NoteShareOwner")
+  noteSharesWithMe         NoteShare[]             @relation("NoteShareRecipient")
+  sharedWithMe             SharedAccess[]          @relation("SharedWith")
+  sharedByMe               SharedAccess[]          @relation("SharedBy")
   feedbacks                Feedback[]
   feedbackResponses        FeedbackResponse[]
   notifications            Notification[]
   releaseNotesSeen         ReleaseNoteSeen[]
-  instructionsAssigned     Instruction[]       @relation("InstructionsAssigned")
-  instructionsReceived     Instruction[]       @relation("InstructionsReceived")
+  instructionsAssigned     Instruction[]           @relation("InstructionsAssigned")
+  instructionsReceived     Instruction[]           @relation("InstructionsReceived")
   pushSubscriptions        PushSubscription[]
   whiteboards              Whiteboard[]
-  whiteboardShares         WhiteboardShare[]   @relation("WhiteboardShareOwner")
-  whiteboardSharesReceived WhiteboardShare[]   @relation("WhiteboardShareRecipient")
+  whiteboardShares         WhiteboardShare[]       @relation("WhiteboardShareOwner")
+  whiteboardSharesReceived WhiteboardShare[]       @relation("WhiteboardShareRecipient")
   // Coach feature relations
   encryptedByokKey         EncryptedByokKey?
   habitsProfile            HabitsProfile?
@@ -109,6 +109,8 @@ model User {
   integrationConnections   IntegrationConnection[]
   notionPageIndex          NotionPageIndex[]
   calendarConnections      CalendarConnection[]
+  cliTokens                CliToken[]
+  cliAuthSessions          CliAuthSession[]        @relation("CliAuthSessionUser")
 
   @@index([email])
   @@index([ssoProvider, ssoId])
@@ -1066,7 +1068,7 @@ model IntegrationConnection {
   id                    String         @id @default(cuid())
   userId                String
   user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider              String         // "notion"
+  provider              String // "notion"
   workspaceId           String
   workspaceName         String
   workspaceIcon         String?
@@ -1084,15 +1086,15 @@ model IntegrationConnection {
 }
 
 model NotionTarget {
-  id            String   @id @default(cuid())
-  connectionId  String
-  connection    IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  notionPageId  String
-  pageType      String   // "database" | "page"
-  role          String   // "notes_destination" | "reference"
-  title         String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String                @id @default(cuid())
+  connectionId String
+  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  notionPageId String
+  pageType     String // "database" | "page"
+  role         String // "notes_destination" | "reference"
+  title        String
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
 
   @@index([connectionId])
 }
@@ -1170,7 +1172,7 @@ model NotionPageIndex {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   notionPageId String
   title        String
-  pageType     String   // "page" | "database"
+  pageType     String // "page" | "database"
   indexedAt    DateTime @default(now()) @updatedAt
 
   @@unique([userId, notionPageId])
@@ -1178,3 +1180,139 @@ model NotionPageIndex {
   @@index([userId, indexedAt])
 }
 
+// ---------------------------------------------------------------------------
+// CLI authentication
+// ---------------------------------------------------------------------------
+
+enum CliAuthMode {
+  LOOPBACK
+  DEVICE
+}
+
+enum CliAuthStatus {
+  PENDING
+  APPROVED
+  CONSUMED
+  DENIED
+  EXPIRED
+}
+
+/// A pending `goalslot login`. Short-lived (10 minutes) and disposable: rows
+/// are deleted opportunistically once expired, so this table should never
+/// grow beyond the handful of logins currently in flight.
+///
+/// Nothing secret is stored in the clear. `sessionSecretHash` and
+/// `authorizationCodeHash` are sha256 hex of 32-byte random values held only
+/// in the CLI process's memory. They are 256-bit random tokens rather than
+/// passwords, so a plain digest is the right primitive here; bcrypt would only
+/// add latency to the token-exchange hot path without adding entropy.
+model CliAuthSession {
+  id     String        @id @default(uuid())
+  mode   CliAuthMode
+  status CliAuthStatus @default(PENDING)
+
+  // sha256 hex of the secret held only by the CLI process. This is what makes
+  // a leaked sessionId harmless: the approval URL travels through the browser
+  // (and therefore through history, and possibly a shoulder), the secret never
+  // does.
+  sessionSecretHash String
+
+  // PKCE. S256 is the only accepted method - a downgrade to "plain" would make
+  // the authorization code sufficient on its own.
+  codeChallenge       String
+  codeChallengeMethod String @default("S256")
+
+  // Loopback mode only. Validated against a strict allowlist at creation time
+  // (see CliAuthService#validateRedirectUri) and never re-derived from request
+  // input afterwards, so there is no point at which a crafted approval link can
+  // steer the redirect somewhere else.
+  redirectUri                String?
+  authorizationCodeHash      String?
+  authorizationCodeExpiresAt DateTime?
+
+  // Opaque anti-mixup value the CLI generates and echoes back to itself on the
+  // loopback callback. Not a secret and not load-bearing on the server side
+  // (the authorization code plus PKCE already carry the security); it exists so
+  // the CLI's local listener can reject a callback fired by an unrelated page.
+  state                      String?
+
+  // Device mode only. 8 characters from an ambiguity-free alphabet.
+  userCode String? @unique
+
+  // Shown verbatim on the web approval page so the user can tell their own
+  // `goalslot login` apart from someone else's lure link.
+  clientName    String
+  clientVersion String
+  deviceLabel   String
+  platform      String
+  scopes        String @default("full") // comma separated; "full" is the only v1 scope
+
+  requestIp        String?
+  requestUserAgent String?
+
+  // Set at approval, not at creation - a pending session has no owner yet.
+  userId String?
+  user   User?   @relation("CliAuthSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  approvedAt   DateTime?
+  deniedAt     DateTime?
+  consumedAt   DateTime?
+  expiresAt    DateTime
+  lastPolledAt DateTime?
+  pollCount    Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  cliTokenId String?   @unique
+  cliToken   CliToken? @relation(fields: [cliTokenId], references: [id], onDelete: SetNull)
+
+  @@index([status, expiresAt])
+  @@index([userId])
+}
+
+/// A long-lived, independently revocable CLI credential.
+///
+/// This table exists for revocation. Web sessions are stateless JWTs whose only
+/// kill switch is User.tokenVersion, which logs out every device at once. A CLI
+/// token sits on a developer machine for months, so it needs to be revocable on
+/// its own, visible to the user in Settings, and killable without disturbing the
+/// browser session. The access token is still a JWT (fast path, no DB read per
+/// request beyond the existing user lookup); this row is what the `cid` claim
+/// points at.
+model CliToken {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // sha256 hex. previousRefreshTokenHash is kept for one rotation so that
+  // presenting an already-rotated token is detectable as replay rather than
+  // simply failing - see CliAuthService#refresh.
+  refreshTokenHash         String    @unique
+  previousRefreshTokenHash String?   @unique
+  rotatedAt                DateTime?
+
+  name          String // user editable, defaults to deviceLabel
+  clientName    String
+  clientVersion String
+  deviceLabel   String
+  platform      String
+  scopes        String @default("full")
+
+  createdIp  String?
+  lastUsedAt DateTime?
+  lastUsedIp String?
+
+  // expiresAt slides forward on each refresh; absoluteExpiresAt never moves, so
+  // a token that is refreshed forever still dies at the one-year mark.
+  expiresAt         DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  revokedReason     String? // 'USER' | 'REUSE_DETECTED' | 'PASSWORD_CHANGE' | 'ADMIN'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  authSession CliAuthSession?
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}

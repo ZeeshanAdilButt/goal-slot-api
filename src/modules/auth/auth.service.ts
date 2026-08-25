@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -53,6 +54,8 @@ const LOGIN_LOCKOUT_DURATION = 900000; // 15 minutes in milliseconds
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -292,6 +295,8 @@ export class AuthService {
       data: { password: hashedPassword, tokenVersion: { increment: 1 } },
     });
 
+    await this.revokeCliTokensForUser(user.id, 'PASSWORD_CHANGE');
+
     const otpKey = this.getOTPKey(email, OTPPurpose.FORGOT_PASSWORD);
     await this.cacheManager.del(otpKey);
 
@@ -402,6 +407,8 @@ export class AuthService {
         where: { id: user.id },
         data: { password: hashedPassword, tokenVersion: { increment: 1 } },
       });
+
+      await this.revokeCliTokensForUser(user.id, 'PASSWORD_CHANGE');
 
       // Delete OTP after successful password change
       const otpKey = this.getOTPKey(user.email, OTPPurpose.CHANGE_PASSWORD);
@@ -766,6 +773,35 @@ export class AuthService {
       user.role,
       user.tokenVersion,
     );
+  }
+
+  /**
+   * Revokes every live CLI token on an account after a password change.
+   *
+   * tokenVersion alone does not cover these. It kills the CLI *access* token
+   * (which carries the claim like any other), but the CLI refresh token is an
+   * opaque DB row with no version on it, so without this the CLI would simply
+   * mint itself a fresh access token minutes later and the password change
+   * would not have revoked anything. Best effort: a failure here must not turn
+   * a successful password change into an error the user reads as "it did not
+   * work", when in fact the password is already changed.
+   */
+  private async revokeCliTokensForUser(
+    userId: string,
+    reason: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.cliToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date(), revokedReason: reason },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to revoke CLI tokens for user ${userId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
   }
 
   private async generateTokens(

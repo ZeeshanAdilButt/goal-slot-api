@@ -212,4 +212,16 @@ export const envValidationSchema = Joi.object({
   // example verbatim fails validation and the whole API refuses to boot, which
   // is exactly what the "accepts .env.example as shipped" guard test caught.
   INTEGRATION_STATE_SECRET: Joi.string().optional().allow(''),
+
+  // --- CLI authentication (all optional) ---
+  // Typed as strings rather than numbers on purpose. getCliAuthConfig() parses
+  // and sanitises them (non-numeric, zero and negative all fall back to the
+  // documented default), so a typo in a deploy environment degrades to the
+  // default instead of refusing to boot the API. Given this repo's history with
+  // required config -- a passport strategy reading env in its constructor took
+  // the whole service down twice -- that trade is deliberate.
+  CLI_ACCESS_TOKEN_TTL: Joi.string().optional().allow(''),
+  CLI_REFRESH_TOKEN_DAYS: Joi.string().optional().allow(''),
+  CLI_REFRESH_TOKEN_ABSOLUTE_DAYS: Joi.string().optional().allow(''),
+  CLI_SESSION_TTL_SECONDS: Joi.string().optional().allow(''),
 });

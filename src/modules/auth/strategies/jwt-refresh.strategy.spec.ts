@@ -117,4 +117,22 @@ describe('JwtRefreshStrategy.validate', () => {
       isDisabled: false,
     });
   });
+
+  it('refuses a CLI access token at the refresh endpoint', async () => {
+    // This is what stops the CLI credential from being laundered into a
+    // 30-day web session. A CLI token is deliberately short-lived and
+    // individually revocable; trading it here for an ordinary refresh token
+    // would hand back a credential with neither property, and the whole
+    // CliToken revocation design would be decorative.
+    const { strategy } = buildStrategy([activeUser]);
+
+    await expect(
+      strategy.validate({
+        sub: 'user_1',
+        tokenVersion: 0,
+        typ: 'cli',
+        cid: 'cli_token_1',
+      }),
+    ).rejects.toThrow('A refresh token is required for this endpoint');
+  });
 });

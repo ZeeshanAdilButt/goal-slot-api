@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule as NestScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './modules/auth/auth.module';
+import { CliAuthModule } from './modules/auth/cli/cli-auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { GoalsModule } from './modules/goals/goals.module';
 import { TimeEntriesModule } from './modules/time-entries/time-entries.module';
@@ -62,6 +63,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     HealthModule,
     EmailModule,
     AuthModule,
+    CliAuthModule,
     UsersModule,
     GoalsModule,
     TimeEntriesModule,
