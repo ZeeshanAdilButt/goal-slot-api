@@ -729,3 +729,52 @@ describe('CoachProposalsService still applies legitimate proposals', () => {
     expect(schedule.calls[0].dto.goalId).toBe(CREATED_ID);
   });
 });
+
+/**
+ * End-to-end cover for the bulk-delete regression. On a real account the
+ * Coach answered "remove goals which are not connected to current schedule and
+ * progress is 0" with 15 DELETE_GOAL actions, all correct, and apply() threw a
+ * 400 before touching a single one.
+ */
+describe('CoachProposalsService bulk deletes', () => {
+  const bulkGoalIds = Array.from(
+    { length: 15 },
+    (_, i) => `${OWN_GOAL.slice(0, -2)}${String(i).padStart(2, '0')}`,
+  );
+  const bulkDeletes = bulkGoalIds.map(
+    (id) => ({ type: 'DELETE_GOAL', id }) as CoachProposedAction,
+  );
+
+  it('refuses 15 unconfirmed goal deletes without dispatching any of them', async () => {
+    const { service, goals } = buildService();
+
+    await expect(service.apply(ATTACKER, bulkDeletes)).rejects.toThrow(
+      /15 delete actions/,
+    );
+    expect(goals.calls).toHaveLength(0);
+  });
+
+  it('applies all 15 when the client confirms every id', async () => {
+    const { service, goals } = buildService();
+
+    const results = await service.apply(ATTACKER, bulkDeletes, {
+      confirmedDeleteIds: bulkGoalIds,
+    });
+
+    expect(results).toHaveLength(15);
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(goals.calls.map((c) => c.id)).toEqual(bulkGoalIds);
+    expect(goals.calls.every((c) => c.userId === ATTACKER)).toBe(true);
+  });
+
+  it('refuses the whole batch when one delete is missing from the confirmations', async () => {
+    const { service, goals } = buildService();
+
+    await expect(
+      service.apply(ATTACKER, bulkDeletes, {
+        confirmedDeleteIds: bulkGoalIds.slice(0, 14),
+      }),
+    ).rejects.toThrow(/not individually confirmed/);
+    expect(goals.calls).toHaveLength(0);
+  });
+});

@@ -205,6 +205,72 @@ describe('assertProposalBatchSafe: per-item delete confirmation', () => {
   });
 });
 
+/**
+ * Regression: "remove the goals that aren't linked to any schedule block" is a
+ * normal thing to ask the Coach, and on a real account it produced a proposal
+ * of 15 DELETE_GOAL actions. The card listed the right 15 goals, and Apply
+ * came back 400 because the count caps refused the whole batch. Same shape
+ * refused a 35-block and a 13-time-entry cleanup on other accounts.
+ */
+describe('assertProposalBatchSafe: confirmed bulk cleanup', () => {
+  const bulkGoalCleanup = deletes('DELETE_GOAL', 15);
+  const confirmedIds = bulkGoalCleanup.map((a) => a.id as string);
+
+  it('still refuses the 15-goal cleanup when nothing was confirmed', () => {
+    expect(() => assertProposalBatchSafe(bulkGoalCleanup)).toThrow(
+      /15 delete actions/,
+    );
+  });
+
+  it('applies the 15-goal cleanup once every id is confirmed', () => {
+    expect(() =>
+      assertProposalBatchSafe(bulkGoalCleanup, {
+        confirmedDeleteIds: confirmedIds,
+      }),
+    ).not.toThrow();
+  });
+
+  it('applies a 35-block cleanup once every id is confirmed', () => {
+    const blocks = deletes('DELETE_SCHEDULE_BLOCK', 35);
+    expect(() => assertProposalBatchSafe(blocks)).toThrow(BadRequestException);
+    expect(() =>
+      assertProposalBatchSafe(blocks, {
+        confirmedDeleteIds: blocks.map((a) => a.id as string),
+      }),
+    ).not.toThrow();
+  });
+
+  it('does not let confirmations wave through a delete the user never saw', () => {
+    const smuggled = [...bulkGoalCleanup, action('DELETE_TASK', 't_hidden')];
+    expect(() =>
+      assertProposalBatchSafe(smuggled, { confirmedDeleteIds: confirmedIds }),
+    ).toThrow(/not individually confirmed/);
+  });
+
+  it('still walks payload shape on a confirmed batch', () => {
+    const wide: Record<string, any> = {};
+    for (let i = 0; i < 5000; i++) wide[`k${i}`] = i;
+    expect(() =>
+      assertProposalBatchSafe([action('DELETE_GOAL', 'g_1', wide)], {
+        confirmedDeleteIds: ['g_1'],
+      }),
+    ).toThrow(/more than 2000 fields/);
+  });
+
+  it('keeps the goal cap on an unconfirmed batch that is under the total cap', () => {
+    expect(() => assertProposalBatchSafe(deletes('DELETE_GOAL', 5))).toThrow(
+      /deletes 5 goals/,
+    );
+    expect(() =>
+      assertProposalBatchSafe(deletes('DELETE_GOAL', 5), {
+        confirmedDeleteIds: deletes('DELETE_GOAL', 5).map(
+          (a) => a.id as string,
+        ),
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe('assertProposalBatchSafe: adversarial payload shapes', () => {
   it('rejects a payload nested deeper than the walker will follow', () => {
     let deep: any = { end: true };
