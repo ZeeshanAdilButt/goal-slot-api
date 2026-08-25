@@ -77,6 +77,7 @@ export class SharingService {
 
     // Send email invitation (don't fail the share if email fails)
     let emailSent = false;
+    let emailError: string | null = null;
     try {
       await this.emailService.sendShareInvitation({
         toEmail: dto.email,
@@ -86,15 +87,21 @@ export class SharingService {
         isExistingUser: !!invitedUser,
       });
       emailSent = true;
-    } catch {
-      // Swallow send failures: the share itself still succeeds even if the
-      // invite email doesn't go out, so there's nothing to handle here.
+    } catch (error) {
+      emailError =
+        error instanceof Error
+          ? error.message
+          : 'Unknown error occurred while sending email';
+      // Address deliberately omitted: EmailService.maskEmail is private, and
+      // logging it raw here would undo the masking applied everywhere else.
+      this.logger.error(`Failed to send share invitation email: ${emailError}`);
     }
 
     return {
       ...sharedAccess,
-      inviteLink: `/share/accept?token=${inviteToken}`, // Always return invite link for both existing and non-existing users
+      inviteLink: `/share/accept?token=${inviteToken}`, // Matches src/app/share/accept in the web app
       emailSent,
+      emailError,
     };
   }
 
@@ -129,7 +136,9 @@ export class SharingService {
         invitation.inviteEmail.toLowerCase() === user.email.toLowerCase());
 
     if (!isForThisUser) {
-      throw new ForbiddenException('This invitation is not for you');
+      throw new ForbiddenException(
+        `Wrong Account: This invitation was sent to ${invitation.inviteEmail || 'another email'}, but you're logged in as ${user.email}. Please log in with the correct account to accept this invitation.`
+      );
     }
 
     return this.prisma.sharedAccess.update({
@@ -145,6 +154,38 @@ export class SharingService {
         owner: { select: { id: true, email: true, name: true } },
       },
     });
+  }
+
+  async acceptEmailInvitationPublic(token: string) {
+    const invitation = await this.prisma.sharedAccess.findUnique({
+      where: { inviteToken: token },
+      include: {
+        owner: { select: { id: true, email: true, name: true, avatar: true } },
+      },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException('Invitation not found or has expired');
+    }
+
+    if (invitation.inviteExpires && invitation.inviteExpires < new Date()) {
+      throw new ForbiddenException('Invitation has expired');
+    }
+
+    if (invitation.isAccepted) {
+      throw new ConflictException('This invitation has already been accepted');
+    }
+
+    return {
+      success: true,
+      inviteEmail: invitation.inviteEmail,
+      ownerId: invitation.ownerId,
+      ownerName: invitation.owner.name,
+      ownerEmail: invitation.owner.email,
+      ownerAvatar: invitation.owner.avatar,
+      accessLevel: invitation.accessLevel,
+      message: 'Please log in with the email this invitation was sent to, or create an account with that email to accept this invitation.',
+    };
   }
 
   async getMySharedAccess(userId: string) {
