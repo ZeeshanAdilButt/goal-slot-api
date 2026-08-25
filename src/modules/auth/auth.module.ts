@@ -100,6 +100,14 @@ const googleStrategyProvider: Provider = {
     SubscriptionGuard,
     OtpAttemptTrackerService,
   ],
-  exports: [AuthService, JwtModule, SubscriptionGuard],
+  // OtpAttemptTrackerService is exported for CliAuthModule, which reuses the
+  // same lockout store for device-code lookups rather than standing up a
+  // second one with subtly different semantics.
+  exports: [
+    AuthService,
+    JwtModule,
+    SubscriptionGuard,
+    OtpAttemptTrackerService,
+  ],
 })
 export class AuthModule {}

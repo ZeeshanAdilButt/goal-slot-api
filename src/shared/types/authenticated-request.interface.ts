@@ -13,6 +13,21 @@ export interface AuthenticatedUser {
   email: string;
   role: UserRole;
   isDisabled: boolean;
+
+  /**
+   * Which credential authenticated this request: 'access' for a web/mobile
+   * session, 'cli' for a token minted by `goalslot login`. Absent on tokens
+   * issued before the claim existed, which are treated as 'access'.
+   *
+   * Route handlers that must not be reachable from a CLI token check this.
+   */
+  typ?: 'access' | 'cli';
+
+  /** CliToken row id, present only when typ === 'cli'. */
+  cid?: string;
+
+  /** Granted CLI scopes, present only when typ === 'cli'. 'full' in v1. */
+  scopes?: string[];
 }
 
 export interface AuthenticatedRequest extends Request {
