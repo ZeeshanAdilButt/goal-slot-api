@@ -27,9 +27,14 @@ import {
  * take out every goal in the account, because ApplyProposalsDto allows 200
  * actions and nothing counted how many of them were deletes.
  *
- * The caps below are deliberately set well above what a real coach proposal
- * does and well below "your whole account". They are a blast-radius ceiling,
- * not a correctness check.
+ * The caps below are a blast-radius ceiling, not a correctness check, and they
+ * only apply to a batch that arrives WITHOUT per-item confirmations. A client
+ * that lists every delete id in `confirmDeletions` has already put the exact
+ * rows in front of the user, which is the review the counts were approximating,
+ * so it is trusted instead of the counts. Production showed why that matters:
+ * "delete the goals that aren't linked to any schedule block" is a normal ask
+ * and routinely runs to 15 goals or 35 blocks, so a flat count cap refused the
+ * feature rather than an attack.
  */
 
 export const DESTRUCTIVE_COACH_ACTION_TYPES: readonly CoachActionType[] = [
@@ -41,13 +46,12 @@ export const DESTRUCTIVE_COACH_ACTION_TYPES: readonly CoachActionType[] = [
 
 const DESTRUCTIVE_SET = new Set<string>(DESTRUCTIVE_COACH_ACTION_TYPES);
 
-/** Total DELETE_* actions allowed in one batch. */
+/** Total DELETE_* actions allowed in one UNCONFIRMED batch. */
 const DEFAULT_MAX_DESTRUCTIVE = 10;
 
 /**
- * DELETE_GOAL allowance, stricter than the overall one because it is the only
- * delete that takes related rows and links with it. Tidying up two or three
- * stale goals in one proposal is a real thing users do; fifteen is not.
+ * DELETE_GOAL allowance in an UNCONFIRMED batch, stricter than the overall one
+ * because it is the only delete that takes related rows and links with it.
  */
 const DEFAULT_MAX_GOAL_DELETIONS = 3;
 
@@ -115,6 +119,38 @@ export function assertProposalBatchSafe(
   const destructive = actions.filter((a) => isDestructiveActionType(a.type));
   if (destructive.length === 0) return;
 
+  // Per-item confirmation. Supplying the field at all opts into strict mode:
+  // a client that knows about confirmations must account for every delete in
+  // the batch, otherwise a partial list would be worse than none.
+  const strict =
+    opts.confirmedDeleteIds !== undefined || deleteConfirmationRequired();
+
+  if (strict) {
+    const confirmed = new Set(opts.confirmedDeleteIds ?? []);
+    const unconfirmed = destructive.filter((a) => !a.id || !confirmed.has(a.id));
+    if (unconfirmed.length > 0) {
+      const preview = unconfirmed
+        .slice(0, 5)
+        .map((a) => `${a.type}(${a.id ?? 'no id'})`)
+        .join(', ');
+      throw new BadRequestException(
+        `${unconfirmed.length} delete action(s) were not individually confirmed: ${preview}. ` +
+          'Each delete must have its target id listed in confirmDeletions before it will be applied.',
+      );
+    }
+    // Every delete in the batch was named, one id at a time, by a client that
+    // put the list in front of the user first. The count caps below are a
+    // stand-in for exactly that review, so applying them on top of a confirmed
+    // batch refuses the very case they were meant to make safe: "delete the 15
+    // goals that aren't linked to anything" is a real, user-initiated cleanup,
+    // and it was being rejected outright. The DTO's 200-action ceiling still
+    // bounds the batch.
+    return;
+  }
+
+  // Unconfirmed batch: no client-side review to lean on, so fall back to
+  // blast-radius ceilings. These bound what a single click on a hallucinated
+  // or injected approval card can destroy.
   const destructiveCap = maxDestructiveActionsPerBatch();
   if (destructive.length > destructiveCap) {
     throw new BadRequestException(
@@ -129,26 +165,6 @@ export function assertProposalBatchSafe(
     throw new BadRequestException(
       `This proposal deletes ${goalDeletes.length} goals, above the ${goalCap} allowed in one batch. ` +
         'Deleting a goal also removes its weekly reflections and unlinks its time entries, so goal deletions are capped harder than other deletes.',
-    );
-  }
-
-  // Per-item confirmation. Supplying the field at all opts into strict mode:
-  // a client that knows about confirmations must account for every delete in
-  // the batch, otherwise a partial list would be worse than none.
-  const strict =
-    opts.confirmedDeleteIds !== undefined || deleteConfirmationRequired();
-  if (!strict) return;
-
-  const confirmed = new Set(opts.confirmedDeleteIds ?? []);
-  const unconfirmed = destructive.filter((a) => !a.id || !confirmed.has(a.id));
-  if (unconfirmed.length > 0) {
-    const preview = unconfirmed
-      .slice(0, 5)
-      .map((a) => `${a.type}(${a.id ?? 'no id'})`)
-      .join(', ');
-    throw new BadRequestException(
-      `${unconfirmed.length} delete action(s) were not individually confirmed: ${preview}. ` +
-        'Each delete must have its target id listed in confirmDeletions before it will be applied.',
     );
   }
 }
