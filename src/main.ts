@@ -50,7 +50,7 @@ async function bootstrap() {
   console.log(`
   ⚡ Time Master API
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🚀 Server running on: http://localhost:${port}
+  🚀 Server is running on: http://localhost:${port}
   📚 API Docs: http://localhost:${port}/api/docs
   🔑 Environment: ${process.env.NODE_ENV || 'development'}
   `);
