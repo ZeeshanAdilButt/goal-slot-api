@@ -312,6 +312,20 @@ try {
         throw "/api/ready never returned 200 on port $($script:Port)"
     }
 
+    # Reinstate the watchdog and the service recovery settings on every deploy,
+    # so they survive a rebuilt box or someone deleting the task by hand.
+    # Deliberately NOT fatal: the API is already deployed and answering by this
+    # point, and failing the deploy here would roll back a good release over a
+    # monitoring concern. It is loud instead, so a broken install still gets
+    # noticed in the run log.
+    Write-Host '=== watchdog ==='
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install-watchdog.ps1')
+        if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: watchdog install exited $LASTEXITCODE" }
+    } catch {
+        Write-Host "WARNING: watchdog install failed: $($_.Exception.Message)"
+    }
+
     Write-Host 'DEPLOY_OK'
     exit 0
 } catch {
