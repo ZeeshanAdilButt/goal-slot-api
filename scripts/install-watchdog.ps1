@@ -40,11 +40,20 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
     -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $scriptPath)
 
 $triggerBoot = New-ScheduledTaskTrigger -AtStartup
-# A repeating trigger needs a start time; 'now' plus the repetition covers the
-# steady state, and RepetitionDuration of [TimeSpan]::MaxValue means forever.
+# A repeating trigger needs a start time, so 'now plus two minutes' seeds it and
+# the repetition carries it from there.
+#
+# Duration is cleared rather than set to [TimeSpan]::MaxValue. MaxValue is the
+# advice you find everywhere and it does not work: it serialises to
+# P99999999DT23H59M59S and Task Scheduler rejects the XML outright with
+# "contains a value which is incorrectly formatted or out of range". An empty
+# duration is the actual encoding for "repeat indefinitely".
 $triggerCycle = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
-    -RepetitionInterval (New-TimeSpan -Minutes 5) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionInterval (New-TimeSpan -Minutes 5)
+if ($triggerCycle.Repetition) {
+    $triggerCycle.Repetition.Duration          = $null
+    $triggerCycle.Repetition.StopAtDurationEnd = $false
+}
 
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
