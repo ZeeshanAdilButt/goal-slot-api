@@ -97,4 +97,22 @@ foreach ($svc in $services) {
     Write-Host "service hardened: $svc (Automatic + restart on failure)"
 }
 
+# --- Memory: keep Server Manager off the RDP logon path ---------------------
+# This box has 2 GB. Server Manager takes about 130 MB the moment anyone logs
+# in over RDP, which is precisely when the box is already in trouble and a
+# human is trying to rescue it. It is a dashboard, not a service; nothing on
+# the box depends on it running. Disabling the logon task is reversible with
+# Enable-ScheduledTask and does not touch Server Manager itself.
+try {
+    $sm = Get-ScheduledTask -TaskPath '\Microsoft\Windows\Server Manager\' -TaskName 'ServerManager' -ErrorAction Stop
+    if ($sm.State -ne 'Disabled') {
+        $sm | Disable-ScheduledTask | Out-Null
+        Write-Host 'disabled Server Manager auto-launch at logon'
+    } else {
+        Write-Host 'Server Manager auto-launch already disabled'
+    }
+} catch {
+    Write-Host "Server Manager logon task not found, skipping: $($_.Exception.Message)"
+}
+
 Write-Host 'WATCHDOG_INSTALL_OK'
