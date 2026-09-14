@@ -1,0 +1,94 @@
+# Off-box uptime check and self-heal for the production API.
+#
+# Why this exists, when there is already a watchdog ON the box:
+#
+# The on-box watchdog (scripts/watchdog.ps1) spawns a fresh powershell.exe
+# every 5 minutes. That costs roughly 70 MB on a box with 2 GB total that sits
+# at 90 percent used. On 2026-09-14 it stopped running entirely for two hours
+# and did not fire during the 17 minutes the API was dead after a reboot,
+# because under the exact memory pressure it exists to relieve, it is one of
+# the first things that cannot start. A recovery mechanism that lives inside
+# the failure domain it is recovering from is not a recovery mechanism.
+#
+# This check runs on GitHub's runners instead, so no amount of pressure on the
+# VPS can stop it. It probes the public URL, which is the same path a user
+# takes, so it also catches Caddy problems the on-box watchdog is blind to.
+#
+# It restarts a service. It never reboots the box: an automatic reboot loop on
+# a machine nobody can reach is worse than an outage someone gets paged for.
+# If the restart does not fix it, the job FAILS on purpose, which is what
+# turns this into an alert through normal GitHub notifications.
+
+name: VPS uptime
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub delays scheduled runs under load and disables
+    # them after 60 days without repo activity, so this is a safety net rather
+    # than a real SLA monitor. Worth replacing with a hosted checker if uptime
+    # ever needs to be contractual.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  # Never let two heal attempts overlap on the same box.
+  group: vps-uptime
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe public endpoints
+        id: probe
+        run: |
+          set +e
+          api=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/api/health)
+          msg=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/messaging/health)
+          echo "api=$api msg=$msg"
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "msg=$msg" >> "$GITHUB_OUTPUT"
+          # A single probe can lose to a cold start or a deploy that is mid
+          # restart. Re-probe once after a pause before calling anything down,
+          # so a routine deploy does not trigger a heal.
+          if [ "$api" != "200" ] || [ "$msg" != "200" ]; then
+            sleep 45
+            api2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/api/health)
+            msg2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/messaging/health)
+            echo "recheck api=$api2 msg=$msg2"
+            echo "api=$api2" >> "$GITHUB_OUTPUT"
+            echo "msg=$msg2" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restart whatever is down
+        if: steps.probe.outputs.api != '200' || steps.probe.outputs.msg != '200'
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          command_timeout: 6m
+          # Restarts the service only. Deliberately not a deploy: a deploy runs
+          # npm install and a build, takes about 9 minutes on this box, and is
+          # the wrong tool when the code is already correct and the process
+          # merely died.
+          script: |
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; $log='C:\app\uptime-heal.log'; function L($m){ $line=([DateTime]::UtcNow.ToString('s')+'Z  '+$m); Add-Content -LiteralPath $log -Value $line -Encoding utf8; Write-Host $line }; $targets=@(@{S='goal-slot-api';U='http://127.0.0.1:4000/api/health'},@{S='jiffy-messaging';U='http://127.0.0.1:8080/health'}); $o=Get-CimInstance Win32_OperatingSystem; L ('heal invoked, mem_used_pct=' + [int]((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100) + ' free_MB=' + [int]($o.FreePhysicalMemory/1KB)); foreach ($t in $targets) { $ok=$false; try { $ok=(Invoke-WebRequest -Uri $t.U -TimeoutSec 10 -UseBasicParsing).StatusCode -eq 200 } catch { $ok=$false }; if ($ok) { L ($t.S + ' healthy locally, leaving alone'); continue }; L ($t.S + ' unhealthy locally, restarting'); try { Restart-Service -Name $t.S -Force -ErrorAction Stop; Start-Sleep -Seconds 25; $back=$false; try { $back=(Invoke-WebRequest -Uri $t.U -TimeoutSec 10 -UseBasicParsing).StatusCode -eq 200 } catch { $back=$false }; L ($t.S + ' after restart healthy=' + $back) } catch { L ($t.S + ' restart FAILED: ' + $_.Exception.Message) } }; L 'heal done'"
+
+      - name: Confirm recovery
+        if: steps.probe.outputs.api != '200' || steps.probe.outputs.msg != '200'
+        run: |
+          sleep 20
+          api=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/api/health)
+          msg=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://api.goalslot.io/messaging/health)
+          echo "after heal: api=$api msg=$msg"
+          if [ "$api" != "200" ] || [ "$msg" != "200" ]; then
+            echo "::error::Restart did not restore the API. api=$api msg=$msg. Run the VPS status workflow, then the deploy workflow."
+            exit 1
+          fi
+          echo "::warning::API was down and was restarted automatically. api=$api msg=$msg. Worth checking why."
