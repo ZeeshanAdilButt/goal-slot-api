@@ -86,7 +86,13 @@ foreach ($svc in $services) {
         continue
     }
 
+    # Delayed auto-start, not plain Automatic. On 2026-09-14 the box rebooted
+    # and SCM started this service inside the boot storm, when memory is at its
+    # tightest; the nssm wrapper came up but its Node child never bound its
+    # port, and the service sat there looking Running with nothing listening.
+    # Delayed start waits about two minutes after boot, past the worst of it.
     Set-Service -Name $svc -StartupType Automatic
+    & sc.exe config $svc start= delayed-auto | Out-Null
     # Restart after 5s, then 10s, then every 30s. reset=86400 means the failure
     # count goes back to zero after a day without incident, so a service that
     # crashes once a week still gets the fast first retry every time.
