@@ -3,6 +3,16 @@ name: Deploy API to VPS
 on:
   push:
     branches: [main, master]
+    # A change to an ops workflow or to docs does not change what runs on the
+    # box, so it should not rebuild the app and bounce the API. Before this,
+    # every edit to the status or uptime workflows restarted production.
+    # Anything else, including scripts/, still deploys. Dispatch by hand when a
+    # workflow-only change genuinely needs to reach the box.
+    paths-ignore:
+      - '.github/workflows/vps-status.yml'
+      - '.github/workflows/vps-uptime.yml'
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
