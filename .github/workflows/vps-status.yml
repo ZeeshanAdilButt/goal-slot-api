@@ -7,10 +7,15 @@
 # the box actually think is going on", and both times answering it meant a
 # remote desktop session.
 #
+# The report itself lives in scripts/vps-diagnostics.ps1 so it can be read,
+# reviewed and run by hand on the box. This workflow only invokes it. Keeping
+# the logic out of an inline one-liner also keeps it clear of cmd.exe's 8191
+# character command-line limit, which the old inline version was approaching.
+#
 # Deliberately takes NO inputs and runs a FIXED script. A workflow that accepts
 # an arbitrary command would be remote code execution on production for anyone
 # with write access to this repo, which is a far worse trade than the
-# convenience is worth. Add a new named step here instead.
+# convenience is worth. Add a new section to the diagnostics script instead.
 #
 # Nothing here mutates the box. To actually restart something, run the deploy
 # workflow, which is the reviewed path.
@@ -37,5 +42,8 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
           command_timeout: 5m
+          # Falls back to a minimal inline check when the script is not on the
+          # box yet, e.g. right after this change merges and before a deploy
+          # has landed it, so the workflow never goes completely blind.
           script: |
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; Write-Host '=== UPTIME ==='; $o=Get-CimInstance Win32_OperatingSystem; Write-Host ('booted: ' + $o.LastBootUpTime + '  up_hours: ' + [math]::Round(((Get-Date)-$o.LastBootUpTime).TotalHours,1)); Write-Host ('mem_used_pct: ' + [int]((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100) + '  free_MB: ' + [int]($o.FreePhysicalMemory/1KB)); Write-Host '=== DISK ==='; Get-PSDrive C | ForEach-Object { Write-Host ('C: free_GB=' + [int]($_.Free/1GB) + ' used_GB=' + [int]($_.Used/1GB)) }; Write-Host '=== SERVICES ==='; Get-Service caddy,goal-slot-api,jiffy-messaging -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ($_.Name + ' ' + $_.Status + ' ' + $_.StartType) }; Write-Host '=== LISTENERS ==='; Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 80,443,4000,8080 } | Sort-Object LocalPort | ForEach-Object { Write-Host ('port ' + $_.LocalPort + ' pid ' + $_.OwningProcess) }; Write-Host '=== NODE ==='; Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ('pid ' + $_.Id + ' ' + [int]($_.WS/1MB) + 'MB started ' + $_.StartTime) }; Write-Host '=== LOCAL HEALTH ==='; foreach ($u in 'http://127.0.0.1:4000/api/health','http://127.0.0.1:8080/health') { try { $r=Invoke-WebRequest -Uri $u -TimeoutSec 10 -UseBasicParsing; Write-Host ($u + ' -> ' + $r.StatusCode) } catch { Write-Host ($u + ' -> ' + $_.Exception.Message) } }; Write-Host '=== WATCHDOG TASK ==='; $t=Get-ScheduledTask -TaskName GoalSlot-Watchdog -ErrorAction SilentlyContinue; if ($t) { Write-Host ('state: ' + $t.State); $i=Get-ScheduledTaskInfo -TaskName GoalSlot-Watchdog; Write-Host ('last_run: ' + $i.LastRunTime + '  last_result: ' + $i.LastTaskResult + '  next_run: ' + $i.NextRunTime); foreach ($tr in $t.Triggers) { Write-Host ('trigger: ' + $tr.CimClass.CimClassName + ' enabled=' + $tr.Enabled + ' rep_interval=' + $tr.Repetition.Interval + ' rep_duration=[' + $tr.Repetition.Duration + ']') } } else { Write-Host 'GoalSlot-Watchdog NOT REGISTERED' }; Write-Host '=== WATCHDOG LOG (tail 40) ==='; if (Test-Path C:\app\watchdog.log) { Get-Content C:\app\watchdog.log -Tail 40 } else { Write-Host 'no watchdog.log' }; Write-Host '=== SERVICE RECOVERY ==='; foreach ($s in 'goal-slot-api','jiffy-messaging') { Write-Host ('-- ' + $s); (sc.exe qfailure $s) | Select-String -Pattern 'RESET_PERIOD|RESTART|COMMAND_LINE' | ForEach-Object { Write-Host $_.Line.Trim() } }; Write-Host '=== RECENT SERVICE EVENTS ==='; Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddDays(-3)} -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'goal-slot-api|jiffy-messaging|caddy' } | Select-Object -First 25 | ForEach-Object { Write-Host ($_.TimeCreated.ToString('s') + '  ' + ($_.Message -replace '\s+',' ')) }; Write-Host '=== API STDERR (tail 40) ==='; $logs=@('C:\app\goal-slot-api\logs\stderr.log','C:\app\goal-slot-api\stderr.log','C:\app\logs\goal-slot-api-stderr.log'); $found=$false; foreach ($l in $logs) { if (Test-Path $l) { $found=$true; Write-Host ('-- ' + $l); Get-Content $l -Tail 40 } }; if (-not $found) { Write-Host 'no nssm stderr log at the usual paths; checking nssm config'; foreach ($s in 'goal-slot-api') { (sc.exe qc $s) | ForEach-Object { Write-Host $_ } } }; Write-Host 'STATUS_OK'"
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$f='C:\app\goal-slot-api\scripts\vps-diagnostics.ps1'; if (Test-Path $f) { & $f } else { Write-Host 'vps-diagnostics.ps1 not on the box yet; run the deploy workflow. Minimal fallback follows.'; $o=Get-CimInstance Win32_OperatingSystem; Write-Host ('booted ' + $o.LastBootUpTime + ' mem_used_pct ' + [int]((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100)); Get-Service caddy,goal-slot-api,jiffy-messaging | ForEach-Object { Write-Host ($_.Name + ' ' + $_.Status) } }"
