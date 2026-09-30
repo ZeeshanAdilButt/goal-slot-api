@@ -105,14 +105,27 @@ try {
         Write-Host "pagefile already fixed at $targetMB MB"
     } else {
         if ($cs.AutomaticManagedPagefile) {
-            Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false } | Out-Null
+            Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false } -ErrorAction Stop | Out-Null
         }
+        # Turning automatic management off makes Windows create the setting
+        # instance on its own, so re-query before trying to create one. On the
+        # first run this collided with "Object or property already exists".
+        $current = Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'C:\pagefile.sys' }
         if (-not $current) {
-            New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys' } | Out-Null
+            New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys' } -ErrorAction Stop | Out-Null
             $current = Get-CimInstance Win32_PageFileSetting | Where-Object { $_.Name -like 'C:\pagefile.sys' }
         }
-        Set-CimInstance -InputObject $current -Property @{ InitialSize = [uint32]$targetMB; MaximumSize = [uint32]$targetMB } | Out-Null
-        Log "pagefile set to fixed $targetMB MB (was automatic). Active after next reboot."
+        Set-CimInstance -InputObject $current -Property @{ InitialSize = [uint32]$targetMB; MaximumSize = [uint32]$targetMB } -ErrorAction Stop | Out-Null
+
+        # Read it back before claiming success. The script runs with
+        # ErrorActionPreference Continue, so without this a failed set would
+        # still have logged "set to fixed", which is worse than no log at all.
+        $check = Get-CimInstance Win32_PageFileSetting | Where-Object { $_.Name -like 'C:\pagefile.sys' }
+        if ($check -and $check.InitialSize -eq $targetMB -and $check.MaximumSize -eq $targetMB) {
+            Log "pagefile set to fixed $targetMB MB (was automatic), verified. Active after next reboot."
+        } else {
+            Log "pagefile set did NOT take: initial=$($check.InitialSize) max=$($check.MaximumSize), wanted $targetMB"
+        }
     }
 } catch {
     Log "pagefile change failed: $($_.Exception.Message)"
