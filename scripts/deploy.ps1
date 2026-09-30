@@ -326,6 +326,17 @@ try {
         Write-Host "WARNING: watchdog install failed: $($_.Exception.Message)"
     }
 
+    # Windows trim for the 2 GB box: idle services off, fixed pagefile, and
+    # Defender exclusions for our own deployed code (opted in on 2026-09-30).
+    # Same non-fatal contract as the watchdog: the API is already live here.
+    Write-Host '=== optimizations ==='
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install-optimizations.ps1') -DefenderExclusions
+        if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: optimizations exited $LASTEXITCODE" }
+    } catch {
+        Write-Host "WARNING: optimizations failed: $($_.Exception.Message)"
+    }
+
     Write-Host 'DEPLOY_OK'
     exit 0
 } catch {
