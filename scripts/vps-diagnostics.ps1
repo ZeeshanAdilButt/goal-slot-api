@@ -140,6 +140,45 @@ Section 'LOW-MEMORY EVENTS (Resource-Exhaustion-Detector 2004, last 30 days)' {
     }
 }
 
+Section 'UNIDENTIFIED SERVICE: cowork-svc' {
+    # Found resident at 22 MB on 2026-09-30 and not recognised by the owner.
+    # Facts only: what binary, signed by whom, installed when, talking to what.
+    # Nothing is stopped or changed here.
+    $svc = Get-CimInstance Win32_Service | Where-Object { $_.Name -match 'cowork' -or $_.DisplayName -match 'cowork' -or $_.PathName -match 'cowork' }
+    $procs = Get-Process | Where-Object { $_.ProcessName -match 'cowork' }
+    if (-not $svc -and -not $procs) { Write-Host 'not present'; return }
+    foreach ($s in $svc) {
+        Write-Host ("service: name={0} display='{1}' state={2} start={3} account={4}" -f $s.Name, $s.DisplayName, $s.State, $s.StartMode, $s.StartName)
+        Write-Host ("  path: {0}" -f $s.PathName)
+        Write-Host ("  description: {0}" -f $s.Description)
+    }
+    foreach ($p in $procs) {
+        Write-Host ("process: {0} pid={1} started={2}" -f $p.ProcessName, $p.Id, $p.StartTime)
+        $exe = $p.Path
+        if (-not $exe) { $exe = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").ExecutablePath }
+        Write-Host ("  exe: {0}" -f $exe)
+        if ($exe -and (Test-Path $exe)) {
+            $f = Get-Item $exe
+            Write-Host ("  file created={0} modified={1} size_KB={2}" -f $f.CreationTime, $f.LastWriteTime, [int]($f.Length / 1KB))
+            $vi = $f.VersionInfo
+            Write-Host ("  version: company='{0}' product='{1}' desc='{2}' ver={3}" -f $vi.CompanyName, $vi.ProductName, $vi.FileDescription, $vi.FileVersion)
+            $sig = Get-AuthenticodeSignature -FilePath $exe
+            Write-Host ("  signature: status={0} signer='{1}'" -f $sig.Status, $sig.SignerCertificate.Subject)
+        }
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)"
+        Write-Host ("  commandline: {0}" -f $cim.CommandLine)
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($cim.ParentProcessId)" -ErrorAction SilentlyContinue
+        Write-Host ("  parent: {0} pid={1}" -f $parent.Name, $cim.ParentProcessId)
+        Get-NetTCPConnection -OwningProcess $p.Id -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host ("  tcp {0}:{1} -> {2}:{3} {4}" -f $_.LocalAddress, $_.LocalPort, $_.RemoteAddress, $_.RemotePort, $_.State)
+        }
+    }
+}
+
+Section 'OPTIMIZATIONS LOG (tail 25)' {
+    if (Test-Path C:\app\optimizations.log) { Get-Content C:\app\optimizations.log -Tail 25 } else { Write-Host 'no optimizations.log yet' }
+}
+
 Section 'OUR SERVICES' {
     Get-Service caddy, goal-slot-api, jiffy-messaging -ErrorAction SilentlyContinue | ForEach-Object {
         $cfg = Get-CimInstance Win32_Service -Filter "Name='$($_.Name)'"
