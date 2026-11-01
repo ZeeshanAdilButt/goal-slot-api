@@ -210,7 +210,7 @@ export class NoteSummaryService {
     // would reject it anyway) — so this must be the strict lookup, and the
     // client must hide the control on a read-only page rather than let the
     // user discover the difference as a 403.
-    const source = await this.notes.findOne(noteId, userId);
+    const source = await this.notes.findOwned(noteId, userId);
 
     const text = noteHtmlToStructuredText(source.content);
     if (text.length < MIN_SUMMARY_INPUT_CHARS) {

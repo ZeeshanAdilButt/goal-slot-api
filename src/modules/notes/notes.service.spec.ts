@@ -21,19 +21,31 @@ class FakePrisma {
   updateManyCalls: any[] = [];
   creates: any[] = [];
   findUniqueArgs: any[] = [];
+  // Full argument objects, so tests can assert on `select` as well as
+  // `where`. The egress fix depends on the guards never asking for `content`.
+  findUniqueCalls: any[] = [];
+  findManyCalls: any[] = [];
 
   private notesById: Record<string, any> = {
-    [OWNER_NOTE]: { id: OWNER_NOTE, userId: OWNER, parentId: null },
+    [OWNER_NOTE]: {
+      id: OWNER_NOTE,
+      userId: OWNER,
+      parentId: null,
+      content: '<p>owner body</p>',
+    },
     [STRANGER_NOTE]: { id: STRANGER_NOTE, userId: STRANGER, parentId: null },
     [MOVED_NOTE]: { id: MOVED_NOTE, userId: STRANGER, parentId: null },
   };
 
   note = {
-    findUnique: async ({ where }: any) => {
-      this.findUniqueArgs.push(where);
-      return this.notesById[where.id] ?? null;
+    findUnique: async (args: any) => {
+      this.findUniqueCalls.push(args);
+      this.findUniqueArgs.push(args.where);
+      return this.notesById[args.where.id] ?? null;
     },
-    findMany: async ({ where }: any = {}) => {
+    findMany: async (args: any = {}) => {
+      this.findManyCalls.push(args);
+      const where = args.where;
       const ids: string[] | undefined = where?.id?.in;
       if (!ids) return [];
       return ids
@@ -131,6 +143,91 @@ describe('NotesService parent-ownership scope', () => {
 
     expect(prisma.updates).toHaveLength(1);
     expect(prisma.updates[0].data.content).toHaveLength(65536);
+  });
+});
+
+// Egress regression cover. The ownership guard runs before every autosave,
+// delete, reparent and share change. It used to be a full findUnique, so each
+// of those pulled the whole note body (up to 2.66 MB with embedded images)
+// out of Postgres just to compare one column, and that was the largest share
+// of the database's network egress. These pin the guard to the columns it
+// actually reads, so a future refactor cannot quietly widen it again.
+describe('NotesService ownership checks do not load note bodies', () => {
+  const ownershipSelect = { id: true, userId: true };
+
+  it('autosave (update) checks ownership with id and userId only', async () => {
+    const { prisma, service } = buildService();
+
+    await service.update(OWNER_NOTE, OWNER, { content: '<p>edit</p>' } as any);
+
+    expect(prisma.findUniqueCalls[0]).toEqual({
+      where: { id: OWNER_NOTE },
+      select: ownershipSelect,
+    });
+  });
+
+  it('a reparent checks BOTH the note and the new parent without bodies', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.update(OWNER_NOTE, OWNER, { parentId: STRANGER_NOTE } as any),
+    ).rejects.toThrow(ForbiddenException);
+
+    // Two guard lookups ran (the note, then the target parent) and neither
+    // asked for the body.
+    expect(prisma.findUniqueCalls).toHaveLength(2);
+    for (const call of prisma.findUniqueCalls) {
+      expect(call.select).toEqual(ownershipSelect);
+    }
+  });
+
+  it('delete checks ownership without loading the body', async () => {
+    const { prisma, service } = buildService();
+    (prisma.note as any).delete = async (args: any) => args;
+
+    await service.delete(OWNER_NOTE, OWNER);
+
+    expect(prisma.findUniqueCalls[0].select).toEqual(ownershipSelect);
+  });
+
+  it('still refuses a stranger, so narrowing the select did not weaken the check', async () => {
+    const { prisma, service } = buildService();
+
+    await expect(
+      service.update(OWNER_NOTE, STRANGER, { content: 'hijack' } as any),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.updates).toHaveLength(0);
+  });
+
+  it('reorder looks up parents with id and userId only', async () => {
+    const { prisma, service } = buildService();
+
+    await service.reorder(OWNER, [
+      { noteId: OWNER_NOTE, parentId: OWNER_NOTE, order: 0 },
+    ]);
+
+    const parentLookup = prisma.findManyCalls.find((c: any) => c.where?.id?.in);
+    expect(parentLookup?.select).toEqual(ownershipSelect);
+  });
+
+  it('findOwned still returns the body for the one caller that needs it', async () => {
+    // NoteSummaryService reads source.content. If findOwned ever regressed to
+    // the narrow select, every summary would silently get no content.
+    const { prisma, service } = buildService();
+
+    const note = await service.findOwned(OWNER_NOTE, OWNER);
+
+    expect(note.content).toBe('<p>owner body</p>');
+    expect(prisma.findUniqueCalls[0].select).toBeUndefined();
+  });
+
+  it('findOwned refuses a stranger, keeping summarize owner-only', async () => {
+    const { service } = buildService();
+
+    await expect(service.findOwned(OWNER_NOTE, STRANGER)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });
 
