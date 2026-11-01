@@ -28,9 +28,15 @@ export class WhiteboardsService {
     });
   }
 
-  async findOne(id: string, userId: string) {
+  // Owner-only guard. Reading a whiteboard goes through findOneAccessible.
+  // Selects only what it compares: this ran before every update and every
+  // sharing call, and a full findUnique pulled the scene content (often
+  // megabytes) out of the database just to read userId. Returns void so no
+  // caller can come to rely on a row without its content.
+  private async assertOwner(id: string, userId: string): Promise<void> {
     const whiteboard = await this.prisma.whiteboard.findUnique({
       where: { id },
+      select: { id: true, userId: true, deletedAt: true },
     });
 
     if (!whiteboard || whiteboard.deletedAt) {
@@ -40,8 +46,6 @@ export class WhiteboardsService {
     if (whiteboard.userId !== userId) {
       throw new ForbiddenException('You do not have access to this whiteboard');
     }
-
-    return whiteboard;
   }
 
   async findOneAccessible(id: string, userId: string) {
@@ -97,7 +101,7 @@ export class WhiteboardsService {
         'Whiteboard content exceeds the 2 MB limit. Try removing large images.',
       );
     }
-    await this.findOne(id, userId);
+    await this.assertOwner(id, userId);
 
     return this.prisma.whiteboard.update({
       where: { id },
@@ -114,7 +118,7 @@ export class WhiteboardsService {
   }
 
   async delete(id: string, userId: string) {
-    await this.findOne(id, userId);
+    await this.assertOwner(id, userId);
 
     return this.prisma.$transaction([
       // soft delete the whiteboard + clear public token
@@ -138,7 +142,7 @@ export class WhiteboardsService {
   // Sharing
 
   async enablePublicLink(whiteboardId: string, userId: string) {
-    await this.findOne(whiteboardId, userId);
+    await this.assertOwner(whiteboardId, userId);
     const existing = await this.prisma.whiteboard.findUnique({
       where: { id: whiteboardId },
       select: { publicShareToken: true },
@@ -154,7 +158,7 @@ export class WhiteboardsService {
   }
 
   async revokePublicLink(whiteboardId: string, userId: string) {
-    await this.findOne(whiteboardId, userId);
+    await this.assertOwner(whiteboardId, userId);
     await this.prisma.whiteboard.update({
       where: { id: whiteboardId },
       data: { publicShareToken: null },
@@ -163,7 +167,7 @@ export class WhiteboardsService {
   }
 
   async getShareState(whiteboardId: string, userId: string) {
-    await this.findOne(whiteboardId, userId);
+    await this.assertOwner(whiteboardId, userId);
     const [whiteboard, shares] = await Promise.all([
       this.prisma.whiteboard.findUnique({
         where: { id: whiteboardId },
@@ -193,7 +197,7 @@ export class WhiteboardsService {
     if (!email) {
       throw new BadRequestException('Email is required');
     }
-    await this.findOne(whiteboardId, ownerId);
+    await this.assertOwner(whiteboardId, ownerId);
 
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
@@ -257,7 +261,7 @@ export class WhiteboardsService {
   }
 
   async revokeInvite(whiteboardId: string, ownerId: string, shareId: string) {
-    await this.findOne(whiteboardId, ownerId);
+    await this.assertOwner(whiteboardId, ownerId);
     const share = await this.prisma.whiteboardShare.findUnique({
       where: { id: shareId },
     });
