@@ -33,7 +33,7 @@ function buildService(
     extractStructured?: jest.Mock;
     beginMeteredCall?: jest.Mock;
     create?: jest.Mock;
-    findOne?: jest.Mock;
+    findOwned?: jest.Mock;
   } = {},
 ) {
   const note = {
@@ -69,7 +69,7 @@ function buildService(
   const chargeMeteredUsage = jest.fn().mockResolvedValue(undefined);
   const coachAi = { beginMeteredCall, chargeMeteredUsage };
 
-  const findOne = opts.findOne ?? jest.fn().mockResolvedValue(note);
+  const findOwned = opts.findOwned ?? jest.fn().mockResolvedValue(note);
   const create =
     opts.create ??
     jest.fn().mockImplementation((userId: string, dto: any) =>
@@ -83,7 +83,7 @@ function buildService(
         updatedAt: new Date(),
       }),
     );
-  const notes = { findOne, create };
+  const notes = { findOwned, create };
 
   const encryption = { decrypt: jest.fn().mockReturnValue('decrypted-key') };
 
@@ -115,7 +115,7 @@ function buildService(
     beginMeteredCall,
     chargeMeteredUsage,
     release,
-    findOne,
+    findOwned,
     create,
     note,
   };
@@ -141,11 +141,11 @@ describe('NoteSummaryService.summarize', () => {
   });
 
   it('reads the source owner-only, so a share recipient cannot reach it', async () => {
-    const { service, findOne } = buildService();
+    const { service, findOwned } = buildService();
     await service.summarize('user-1', SOURCE_ID);
-    // NotesService.findOne is the owner-only lookup; findOneAccessible (which
+    // NotesService.findOwned is the owner-only lookup; findOneAccessible (which
     // resolves share recipients too) must not be what this uses.
-    expect(findOne).toHaveBeenCalledWith(SOURCE_ID, 'user-1');
+    expect(findOwned).toHaveBeenCalledWith(SOURCE_ID, 'user-1');
   });
 
   it('opens the generated page with a provenance line naming its source', async () => {

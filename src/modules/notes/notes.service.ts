@@ -46,12 +46,44 @@ export class NotesService {
     });
   }
 
-  // Owner-only fetch; throws if anyone else asks. Use findOneAccessible
-  // when the caller might legitimately be a share recipient.
-  async findOne(id: string, userId: string) {
+  // Owner-only guard; throws if the note is missing or belongs to someone
+  // else. Use findOneAccessible to actually read a note, including as a share
+  // recipient.
+  //
+  // Selects only the two columns it compares. This was a full findUnique,
+  // and it runs before every autosave, delete, reparent, share change and
+  // sub-note create, so each of those pulled the whole note body out of the
+  // database just to read userId. Bodies reach 2.66 MB (embedded base64
+  // images), so that was the single largest source of database egress.
+  // Returns void on purpose so no caller can start relying on a row that no
+  // longer carries the body.
+  private async assertOwner(id: string, userId: string): Promise<void> {
     const note = await this.prisma.note.findUnique({
       where: { id },
+      select: { id: true, userId: true },
     });
+
+    if (!note) {
+      throw new NotFoundException('Note not found');
+    }
+
+    if (note.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this note');
+    }
+  }
+
+  // Owner-only READ, body included. Same strict check as assertOwner, but for
+  // the one caller that genuinely needs the content: NoteSummaryService, which
+  // must refuse share recipients (a recipient's summary would land in the
+  // owner's tree) and then reads source.content.
+  //
+  // Kept separate from assertOwner rather than having the guard return the
+  // row, because the guard runs on every autosave and must stay cheap. When
+  // the guard was narrowed, note-summary was the caller that would have
+  // silently received a row with no content and failed every summary; it was
+  // caught at compile time only because assertOwner returns void.
+  async findOwned(id: string, userId: string) {
+    const note = await this.prisma.note.findUnique({ where: { id } });
 
     if (!note) {
       throw new NotFoundException('Note not found');
@@ -99,7 +131,7 @@ export class NotesService {
       // The parent note must also belong to the caller, otherwise a
       // client could attach a new note under a stranger's tree (or use
       // the 404-vs-403 split to probe whether a given note id exists).
-      await this.findOne(dto.parentId, userId);
+      await this.assertOwner(dto.parentId, userId);
     }
 
     const maxOrder = await this.prisma.note.aggregate({
@@ -125,13 +157,13 @@ export class NotesService {
   }
 
   async update(id: string, userId: string, dto: UpdateNoteDto) {
-    await this.findOne(id, userId);
+    await this.assertOwner(id, userId);
 
     if (dto.parentId) {
       // The new parent must also belong to the caller — otherwise a
       // client could reparent its own note under (or probe the
       // existence of) another user's note by id.
-      await this.findOne(dto.parentId, userId);
+      await this.assertOwner(dto.parentId, userId);
 
       const descendants = await this.getDescendantIds(id);
       if (descendants.includes(dto.parentId)) {
@@ -168,7 +200,7 @@ export class NotesService {
   }
 
   async delete(id: string, userId: string) {
-    await this.findOne(id, userId);
+    await this.assertOwner(id, userId);
 
     return this.prisma.note.delete({
       where: { id },
@@ -296,6 +328,9 @@ export class NotesService {
     if (parentIds.length > 0) {
       const parents = await this.prisma.note.findMany({
         where: { id: { in: parentIds } },
+        // Only the ownership check below reads these rows, so do not drag
+        // every parent's full body along with them.
+        select: { id: true, userId: true },
       });
       const parentsById = new Map(parents.map((p) => [p.id, p]));
       for (const parentId of parentIds) {
@@ -357,7 +392,7 @@ export class NotesService {
   // Presence of publicShareToken means link sharing is on. The token is
   // opaque and rotated by toggling off then back on.
   async enablePublicLink(noteId: string, userId: string) {
-    await this.findOne(noteId, userId);
+    await this.assertOwner(noteId, userId);
     const existing = await this.prisma.note.findUnique({
       where: { id: noteId },
       select: { publicShareToken: true },
@@ -373,7 +408,7 @@ export class NotesService {
   }
 
   async revokePublicLink(noteId: string, userId: string) {
-    await this.findOne(noteId, userId);
+    await this.assertOwner(noteId, userId);
     await this.prisma.note.update({
       where: { id: noteId },
       data: { publicShareToken: null },
@@ -382,7 +417,7 @@ export class NotesService {
   }
 
   async getShareState(noteId: string, userId: string) {
-    await this.findOne(noteId, userId);
+    await this.assertOwner(noteId, userId);
     const [note, shares] = await Promise.all([
       this.prisma.note.findUnique({
         where: { id: noteId },
@@ -415,7 +450,7 @@ export class NotesService {
     if (!email) {
       throw new BadRequestException('Email is required');
     }
-    await this.findOne(noteId, ownerId);
+    await this.assertOwner(noteId, ownerId);
 
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
@@ -472,7 +507,7 @@ export class NotesService {
   }
 
   async revokeInvite(noteId: string, ownerId: string, shareId: string) {
-    await this.findOne(noteId, ownerId);
+    await this.assertOwner(noteId, ownerId);
     const share = await this.prisma.noteShare.findUnique({
       where: { id: shareId },
     });
