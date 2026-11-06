@@ -53,14 +53,36 @@ function fenceProposal(json: string): string {
 }
 
 /**
+ * Text from a repair reply that is safe to show as is: prose only. Any fenced
+ * block is removed (a second coach-proposal fence here would reach the client
+ * unchecked), anything after an unclosed fence is dropped, and the result is
+ * capped at a word boundary so the cut can never leave half a fence.
+ */
+export function proseOnly(text: string, cap = 600): string {
+  let out = text.replace(/```[\s\S]*?```/g, ' ');
+  const dangling = out.indexOf('```');
+  if (dangling !== -1) out = out.slice(0, dangling);
+  out = out
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (out.length > cap) {
+    const cut = out.slice(0, cap);
+    out = cut.slice(0, Math.max(cut.lastIndexOf(' '), cap / 2)).trimEnd() + '…';
+  }
+  return out;
+}
+
+/**
  * Shown instead of a card when the proposal still fails after the repair
  * rounds. Plain words, the concrete reasons, one question: a dead card that
- * fails on Apply is worse than this.
+ * fails on Apply is worse than this. Takes the USER-facing reasons (titles,
+ * days, times), never the repair text, which names ids and action types.
  */
-function withheldMessage(issues: string[]): string {
-  const reasons = issues
+function withheldMessage(userIssues: string[]): string {
+  const reasons = userIssues
     .slice(0, 3)
-    .map((x) => `- ${x.replace(/^Action \d+( \([A-Z_]+\))?: /, '')}`)
+    .map((x) => `- ${x}`)
     .join('\n');
   return (
     "\n\nI couldn't turn that into a change that fits your schedule without guessing, so I haven't proposed one yet. What got in the way:\n" +
@@ -661,14 +683,17 @@ export class CoachAiService {
         const m = /```coach-proposal\s*([\s\S]*?)```/.exec(text);
         if (!m) {
           // The model chose to ask instead of proposing. That is a valid
-          // outcome: say it, with no card.
+          // outcome: say it, with no card. proseOnly drops anything after an
+          // unclosed fence, so a truncated block cannot slip through here.
+          const question = proseOnly(text);
+          if (!question) break;
           this.logger.log(
             `coach proposal withdrawn after check user=${args.userId}: ${firstIssues.length} issue(s)`,
           );
-          return { text: `\n\n${text.trim()}`, usage };
+          return { text: `\n\n${question}`, usage };
         }
         draft = m[1].trim();
-        afterBlock = text.slice(m.index + m[0].length).trim();
+        afterBlock = proseOnly(text.slice(m.index + m[0].length));
         result = checkProposal(draft, args.blocks);
       }
     } catch (err) {
@@ -680,7 +705,7 @@ export class CoachAiService {
       this.logger.log(
         `coach proposal repaired user=${args.userId}: fixed ${firstIssues.length} issue(s)`,
       );
-      const tail = afterBlock ? `\n\n${afterBlock.slice(0, 600)}` : '';
+      const tail = afterBlock ? `\n\n${afterBlock}` : '';
       return {
         text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it, so the card may differ from my notes above.${tail}`,
         usage,
@@ -689,7 +714,7 @@ export class CoachAiService {
     this.logger.warn(
       `coach proposal withheld user=${args.userId}: ${result.issues.join(' | ')}`,
     );
-    return { text: withheldMessage(result.issues), usage };
+    return { text: withheldMessage(result.userIssues), usage };
   }
 
   // ----- Shared internals -----
