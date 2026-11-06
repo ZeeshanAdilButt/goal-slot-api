@@ -88,7 +88,7 @@ export class ProjectsService {
       include: { project: { include: PROJECT_COUNTS } },
     });
 
-    return memberships.map((m: any) => ({
+    return memberships.map((m) => ({
       id: m.project.id,
       name: m.project.name,
       color: m.project.color,
@@ -155,7 +155,7 @@ export class ProjectsService {
     // Email addresses are only shown to admins (they manage invites);
     // everyone else sees name and avatar.
     const showEmail = role === ProjectRole.ADMIN;
-    return members.map((m: any) => ({
+    return members.map((m) => ({
       userId: m.userId,
       name: m.user?.name ?? '',
       email: showEmail ? (m.user?.email ?? null) : null,

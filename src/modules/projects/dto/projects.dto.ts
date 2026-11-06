@@ -63,7 +63,8 @@ export class UpdateProjectDto {
   description?: string | null;
 
   @ApiPropertyOptional({
-    description: 'true archives the project (sets archivedAt), false restores it',
+    description:
+      'true archives the project (sets archivedAt), false restores it',
   })
   @IsOptional()
   @IsBoolean()

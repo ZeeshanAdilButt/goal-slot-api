@@ -73,7 +73,9 @@ export class ProjectInvitesController {
   }
 
   @Post('invites/:inviteId/resend')
-  @ApiOperation({ summary: 'Resend an email invite with a fresh token (ADMIN)' })
+  @ApiOperation({
+    summary: 'Resend an email invite with a fresh token (ADMIN)',
+  })
   async resend(
     @Request() req: AuthenticatedRequest,
     @Param('id') id: string,
@@ -93,7 +95,9 @@ export class ProjectInvitesController {
   }
 
   @Post('invite-link')
-  @ApiOperation({ summary: 'Create or return the shareable invite link (ADMIN)' })
+  @ApiOperation({
+    summary: 'Create or return the shareable invite link (ADMIN)',
+  })
   async getOrCreateLink(
     @Request() req: AuthenticatedRequest,
     @Param('id') id: string,

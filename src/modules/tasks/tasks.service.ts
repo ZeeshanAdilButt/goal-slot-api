@@ -7,7 +7,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
-import { Prisma, TaskStatus, TimeEntrySource } from '@prisma/client';
+import {
+  Prisma,
+  ProjectRole,
+  TaskStatus,
+  TimeEntrySource,
+} from '@prisma/client';
 import {
   assertProjectAccess,
   assertTaskAccess,
@@ -27,6 +32,19 @@ export interface TaskListFilters {
   scope?: TaskListScope;
   projectId?: string;
   assignee?: string;
+}
+
+/** The fields present() reads; every task include in this service has them. */
+interface PresentableTask {
+  userId: string;
+  projectId?: string | null;
+  project?: {
+    id: string;
+    name: string;
+    color: string;
+    members?: Array<{ role: ProjectRole }>;
+  } | null;
+  assignee?: { id: string; name: string; avatar: string | null } | null;
 }
 
 @Injectable()
@@ -62,31 +80,29 @@ export class TasksService {
    * For a personal task the requester is always the creator, so the response
    * is the old shape plus `project: null`, `assignee: null`, `canEdit: true`.
    */
-  private present<T extends Record<string, any>>(userId: string, task: T) {
-    const { project, ...rest } = task as any;
+  private present<T extends PresentableTask>(userId: string, task: T) {
+    const { project, ...rest } = task;
     const isCreator = task.userId === userId;
     const role = project?.members?.[0]?.role ?? null;
 
-    const out: Record<string, any> = {
+    const out = {
       ...rest,
       project: project
         ? { id: project.id, name: project.name, color: project.color }
         : null,
-      assignee: rest.assignee ?? null,
+      assignee: task.assignee ?? null,
       canEdit: task.projectId == null ? isCreator : roleCanWrite(role),
     };
 
     if (!isCreator) {
-      out.goalId = null;
-      out.goal = null;
-      out.scheduleBlockId = null;
-      out.scheduleBlock = null;
+      Object.assign(out, {
+        goalId: null,
+        goal: null,
+        scheduleBlockId: null,
+        scheduleBlock: null,
+      });
     }
-    return out as T & {
-      project: { id: string; name: string; color: string } | null;
-      assignee: { id: string; name: string; avatar: string | null } | null;
-      canEdit: boolean;
-    };
+    return out;
   }
 
   /** An assignee must be a member (any role) of the task's project. */
@@ -356,7 +372,10 @@ export class TasksService {
     const currentProjectId = task.projectId ?? null;
     let nextProjectId = currentProjectId;
 
-    if (dtoProjectId !== undefined && (dtoProjectId ?? null) !== currentProjectId) {
+    if (
+      dtoProjectId !== undefined &&
+      (dtoProjectId ?? null) !== currentProjectId
+    ) {
       if (!isCreator) {
         throw new ForbiddenException(
           'Only the task creator can move it to another project',
@@ -381,7 +400,8 @@ export class TasksService {
     }
 
     if (dtoAssigneeId !== undefined) {
-      if (dtoAssigneeId) await this.assertAssignable(nextProjectId, dtoAssigneeId);
+      if (dtoAssigneeId)
+        await this.assertAssignable(nextProjectId, dtoAssigneeId);
       out.assigneeId = dtoAssigneeId;
     } else if (moved && task.assigneeId) {
       const stillMember = await getProjectRole(
@@ -395,10 +415,12 @@ export class TasksService {
   }
 
   /**
-   * Personal reorder (no projectId) is the old per-user reorder, limited to
-   * personal tasks so it can never write to a project the user may have
-   * left. A project board reorder needs write access and only touches tasks
-   * in that project.
+   * Without projectId (what the web and mobile send), each id is reordered
+   * only if the caller can write it: a personal task they own (exactly the
+   * old per-user rule) or a task in a project where they are ADMIN or
+   * MEMBER. Ids they cannot write are skipped, as foreign ids always were.
+   * With projectId, write access to that project is required up front and
+   * only tasks in that project are touched.
    */
   async reorder(userId: string, ids: string[], projectId?: string) {
     if (projectId) {
@@ -419,7 +441,24 @@ export class TasksService {
     return this.prisma.$transaction(
       ids.map((id, index) =>
         this.prisma.task.updateMany({
-          where: { id, userId, projectId: null },
+          where: {
+            id,
+            OR: [
+              { userId, projectId: null },
+              {
+                project: {
+                  is: {
+                    members: {
+                      some: {
+                        userId,
+                        role: { in: [ProjectRole.ADMIN, ProjectRole.MEMBER] },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
           data: { order: index },
         }),
       ),

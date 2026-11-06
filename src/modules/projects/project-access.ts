@@ -1,5 +1,12 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { ProjectRole } from '@prisma/client';
+import {
+  Goal,
+  Prisma,
+  PrismaClient,
+  ProjectRole,
+  ScheduleBlock,
+  Task,
+} from '@prisma/client';
 
 /**
  * The one place the Projects permission table lives (see
@@ -24,12 +31,26 @@ import { ProjectRole } from '@prisma/client';
 export type TaskAccessLevel = 'read' | 'write' | 'delete';
 export type ProjectAccessLevel = 'read' | 'write' | 'admin';
 
-// Minimal structural view of the client these helpers need. PrismaService
-// and a transaction client both satisfy it, and so do the hand-written fakes
-// in the specs.
-type PrismaLike = {
-  task: { findFirst: (args: any) => Promise<any> };
-  projectMember: { findUnique: (args: any) => Promise<any> };
+// The slice of the client these helpers need. PrismaService and a
+// transaction client both satisfy it.
+type PrismaLike = Pick<PrismaClient, 'task' | 'projectMember'>;
+
+/** The requester's view of a task's project, from requesterMembershipSelect. */
+export interface TaskProjectView {
+  id: string;
+  name: string;
+  color: string;
+  archivedAt: Date | null;
+  members: Array<{ role: ProjectRole }>;
+}
+
+/** A task as loaded by assertTaskAccess, with whichever relations were asked for. */
+export type AccessibleTask = Task & {
+  project: TaskProjectView | null;
+  // Full row when included as `goal: true`, the id/title/color select otherwise.
+  goal?: (Pick<Goal, 'id' | 'title' | 'color'> & Partial<Goal>) | null;
+  scheduleBlock?: ScheduleBlock | null;
+  assignee?: { id: string; name: string; avatar: string | null } | null;
 };
 
 export function roleCanWrite(role: ProjectRole | null | undefined): boolean {
@@ -53,7 +74,7 @@ export function requesterMembershipSelect(userId: string) {
   } as const;
 }
 
-export interface TaskAccess<T = any> {
+export interface TaskAccess<T = AccessibleTask> {
   task: T;
   /** The requester's role in the task's project, null for a personal task. */
   role: ProjectRole | null;
@@ -65,7 +86,13 @@ export interface TaskAccess<T = any> {
  * must be treated as if the task did not exist (the 404 cases); throws 403
  * only for members who can see the task but not do this to it.
  */
-export function decideTaskAccess<T extends { userId: string; projectId?: string | null; project?: any }>(
+export function decideTaskAccess<
+  T extends {
+    userId: string;
+    projectId?: string | null;
+    project?: { members?: Array<{ role: ProjectRole }> } | null;
+  },
+>(
   userId: string,
   task: T | null,
   level: TaskAccessLevel,
@@ -107,12 +134,12 @@ export async function assertTaskAccess(
   userId: string,
   taskId: string,
   level: TaskAccessLevel,
-  include: Record<string, unknown> = {},
+  include: Prisma.TaskInclude = {},
 ): Promise<TaskAccess> {
-  const task = await prisma.task.findFirst({
+  const task = (await prisma.task.findFirst({
     where: { id: taskId },
     include: { ...include, project: requesterMembershipSelect(userId) },
-  });
+  })) as AccessibleTask | null;
   const access = decideTaskAccess(userId, task, level);
   if (!access) throw new NotFoundException('Task not found');
   return access;

@@ -30,6 +30,13 @@ function inviteExpiry(now = new Date()): Date {
   return new Date(now.getTime() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
 
+/** Same masking as EmailService.maskEmail: "hi***@example.com". */
+export function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return '***';
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 /** Matches the web accept page (/projects/invite?token=...). */
 function inviteLinkPath(token: string): string {
   return `/projects/invite?token=${encodeURIComponent(token)}`;
@@ -69,10 +76,12 @@ export class ProjectInvitesService {
   // -------------------------------------------------------------------
 
   /**
-   * One invite per email. Existing members are skipped and reported; an
-   * email that already has a pending invite gets a fresh token and expiry
-   * (and the newly chosen role) instead of a duplicate row. Email delivery
-   * failures do not fail the invite: the row exists and can be resent.
+   * One invite per email. Existing members are skipped and reported
+   * (`already_member`); an email that already has a pending invite gets a
+   * fresh token, expiry and the newly chosen role instead of a duplicate row,
+   * is emailed again, and is reported in `skipped` as `pending_refreshed`.
+   * Email delivery failures do not fail the invite: the row exists and can
+   * be resent.
    */
   async createEmailInvites(
     userId: string,
@@ -107,19 +116,22 @@ export class ProjectInvitesService {
       ? await this.prisma.projectMember.findMany({
           where: {
             projectId,
-            userId: { in: existingUsers.map((u: any) => u.id) },
+            userId: { in: existingUsers.map((u) => u.id) },
           },
           select: { userId: true },
         })
       : [];
-    const memberIds = new Set(memberRows.map((m: any) => m.userId));
+    const memberIds = new Set(memberRows.map((m) => m.userId));
     const memberEmails = new Set(
       existingUsers
-        .filter((u: any) => memberIds.has(u.id))
-        .map((u: any) => String(u.email).toLowerCase()),
+        .filter((u) => memberIds.has(u.id))
+        .map((u) => String(u.email).toLowerCase()),
     );
 
-    const skipped = emails
+    const skipped: Array<{
+      email: string;
+      reason: 'already_member' | 'pending_refreshed';
+    }> = emails
       .filter((e) => memberEmails.has(e))
       .map((email) => ({ email, reason: 'already_member' as const }));
     const toInvite = emails.filter((e) => !memberEmails.has(e));
@@ -199,13 +211,17 @@ export class ProjectInvitesService {
         token,
       });
 
-      invited.push({
-        id: row.id,
-        email,
-        role: row.role,
-        expiresAt: row.expiresAt,
-        emailSent,
-      });
+      if (existing) {
+        skipped.push({ email, reason: 'pending_refreshed' });
+      } else {
+        invited.push({
+          id: row.id,
+          email,
+          role: row.role,
+          expiresAt: row.expiresAt,
+          emailSent,
+        });
+      }
     }
 
     return { invited, skipped };
@@ -225,7 +241,7 @@ export class ProjectInvitesService {
       orderBy: { createdAt: 'desc' },
       include: { invitedBy: { select: { id: true, name: true } } },
     });
-    return rows.map((r: any) => ({
+    return rows.map((r) => ({
       id: r.id,
       email: r.email,
       role: r.role,
@@ -382,6 +398,8 @@ export class ProjectInvitesService {
   /**
    * What the accept page shows. `expired` means "cannot be accepted any
    * more": past its expiry, revoked, or an email invite already used.
+   * `emailMatches` is always true for a link invite; `email` is the masked
+   * invited address for an email invite, null for a link invite.
    */
   async preview(userId: string, token: string) {
     const invite = await this.findByToken(token);
@@ -393,7 +411,7 @@ export class ProjectInvitesService {
     const revoked = !!invite.revokedAt;
     const used = !!invite.email && !!invite.acceptedAt;
 
-    let emailMatches: boolean | null = null;
+    let emailMatches = true;
     if (invite.email) {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -413,6 +431,7 @@ export class ProjectInvitesService {
       revoked,
       alreadyMember,
       emailMatches,
+      email: invite.email ? maskEmail(invite.email) : null,
     };
   }
 
