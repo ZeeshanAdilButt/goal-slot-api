@@ -471,7 +471,19 @@ function fixHint(
         : u.expectedTitle
           ? blocks.filter((b) => looseTitleMatch(b.title, u.expectedTitle!))
           : [];
-    const owner = targets.find((t) => days.includes(t.dayOfWeek));
+    // Only when this create plausibly belongs to that block: it overlaps the
+    // block's slot, or its title is related ("Soft Skills Lab" in "Reading &
+    // Labs"). Production placed the labs right AFTER the renamed block (on
+    // Book), so overlap alone would miss the case this hint exists for, and
+    // day alone would wrongly hint at splitting a renamed block for an
+    // unrelated evening create on the same day.
+    const owner = targets.find(
+      (t) =>
+        days.includes(t.dayOfWeek) &&
+        ((toMinutes(t.startTime) < toMinutes(p.endTime as string) &&
+          toMinutes(p.startTime as string) < toMinutes(t.endTime)) ||
+          (typeof p.title === 'string' && relatedTitles(p.title, t.title))),
+    );
     if (!owner) continue;
     const window = toMinutes(owner.endTime) - toMinutes(owner.startTime);
     const pieces = actions

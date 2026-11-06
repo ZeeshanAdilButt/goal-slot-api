@@ -207,6 +207,65 @@ describe('repair on a stronger sibling model (B)', () => {
     expect(models).toEqual(['gpt-4.1']);
     expect(r.usage).toEqual({ promptTokens: 10, completionTokens: 5 });
   });
+
+  it("falls back to the user's model when the key cannot use the escalated one", async () => {
+    const models: string[] = [];
+    const service = new CoachAiService({} as any, {} as any, {} as any);
+    const provider = {
+      streamCompletion: async function* (_m: unknown, model: string) {
+        models.push(model);
+        if (model === 'gpt-4.1') throw new Error('model_not_found');
+        yield { delta: 'Which time works for Study?', done: false };
+        yield {
+          delta: '',
+          done: true,
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      },
+    };
+    const r = await (service as any).finalizeProposal({
+      body: draft,
+      prose: '',
+      blocks: REAL_WEEK,
+      provider,
+      model: 'gpt-4o-mini',
+      messages: [],
+      userId: 'u',
+      repairModel: 'gpt-4.1',
+    });
+    expect(models).toEqual(['gpt-4.1', 'gpt-4o-mini']);
+    expect(r.card).toBe(false);
+    expect(r.text).toContain('Which time works for Study?');
+  });
+});
+
+describe('split hint only for creates that belong to the renamed block', () => {
+  it('does not suggest splitting a renamed block for an unrelated evening create', () => {
+    const book = idsOf(REAL_WEEK, 'Book', [2])[0];
+    const proposal = JSON.stringify({
+      summary: 'Rename Book, add Gym',
+      actions: [
+        {
+          type: 'UPDATE_SCHEDULE_BLOCK',
+          id: book,
+          expectedTitle: 'Book',
+          payload: { title: 'Study' },
+        },
+        {
+          type: 'CREATE_SCHEDULE_BLOCK',
+          payload: {
+            title: 'Gym',
+            startTime: '20:30',
+            endTime: '21:00',
+            dayOfWeek: 2,
+            category: 'HEALTH',
+          },
+        },
+      ],
+    });
+    const text = checkProposal(proposal, REAL_WEEK).issues.join('\n');
+    expect(text).not.toContain('SPLIT_SCHEDULE_BLOCK');
+  });
 });
 
 describe('prescriptive repair text (C, D)', () => {

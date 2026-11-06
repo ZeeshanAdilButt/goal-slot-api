@@ -688,6 +688,7 @@ export class CoachAiService {
       return { text: fenceProposal(result.json!), card: true };
     }
     const repairModel = args.repairModel ?? args.model;
+    let activeRepairModel = repairModel;
     if (repairModel !== args.model) {
       this.logger.log(
         `coach repair escalated from ${args.model} to ${repairModel} user=${args.userId}`,
@@ -706,16 +707,33 @@ export class CoachAiService {
           },
           { role: 'user', content: repairInstruction(result.issues) },
         ];
-        let text = '';
-        for await (const chunk of args.provider.streamCompletion(
-          repairMessages,
-          repairModel,
-        )) {
-          text += chunk.delta;
-          if (chunk.done && chunk.usage) {
-            usage.promptTokens += chunk.usage.promptTokens;
-            usage.completionTokens += chunk.usage.completionTokens;
+        const runRepair = async (model: string): Promise<string> => {
+          let out = '';
+          for await (const chunk of args.provider.streamCompletion(
+            repairMessages,
+            model,
+          )) {
+            out += chunk.delta;
+            if (chunk.done && chunk.usage) {
+              usage.promptTokens += chunk.usage.promptTokens;
+              usage.completionTokens += chunk.usage.completionTokens;
+            }
           }
+          return out;
+        };
+        let text: string;
+        try {
+          text = await runRepair(activeRepairModel);
+        } catch (err) {
+          // The escalated model may be one this key cannot use (a
+          // project-restricted OpenAI key without gpt-4.1, say). Fall back
+          // to the model the user chose, for this and later rounds.
+          if (activeRepairModel === args.model) throw err;
+          this.logger.warn(
+            `coach repair model ${activeRepairModel} failed, falling back to ${args.model} user=${args.userId}: ${(err as Error)?.message ?? err}`,
+          );
+          activeRepairModel = args.model;
+          text = await runRepair(activeRepairModel);
         }
         const m = /```coach-proposal\s*([\s\S]*?)```/.exec(text);
         if (!m) {
