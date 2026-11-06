@@ -17,6 +17,15 @@ const LEAD_IN_MAX = 300;
 const LEAD_IN =
   /(:\s*$)|\b(proposal|card|below|the actions|the changes?|apply|approve)\b/i;
 
+/**
+ * A sentence that says the card covers everything ("This proposal handles all
+ * your requests", "I have covered each change"). Never shown next to a card
+ * that was repaired: it was written about the discarded draft, and the card
+ * that replaced it may cover far less (production: about 9 of 20 asks).
+ */
+const COVERAGE_CLAIM =
+  /\b(handles?|covers?|covered|captures?|captured|addresses|addressed|takes? care of|encompass(es)?|accomplish(es)?)\b[^.\n]{0,60}\b(all|every|everything|each|entire|whole|both)\b|\b(all|every|everything|each|entire|whole)\b[^.\n]{0,40}\b(requests?|changes?|asks?|items?|updates?|points?|parts?)\b[^.\n]{0,30}\b(handled|covered|done|included|captured|addressed|in (this|the) (proposal|card))\b/i;
+
 const LIST_ITEM = /^\s*(\d+[.)]|[-*•])\s+/;
 
 /**
@@ -44,7 +53,8 @@ export function planRegionStart(text: string, atFence: boolean): number {
     const hold =
       t === '' ||
       LIST_ITEM.test(line) ||
-      (t.length <= LEAD_IN_MAX && LEAD_IN.test(t)) ||
+      (t.length <= LEAD_IN_MAX &&
+        (LEAD_IN.test(t) || COVERAGE_CLAIM.test(t))) ||
       (unfinished && t.length <= LEAD_IN_MAX);
     if (!hold) break;
     start = lineStart;
@@ -52,6 +62,42 @@ export function planRegionStart(text: string, atFence: boolean): number {
   }
   // Blank lines alone are not worth holding.
   return text.slice(start).trim() === '' ? text.length : start;
+}
+
+/** Drop the sentences of `text` that claim the card covers everything. */
+export function stripCoverageClaims(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((para) =>
+      para
+        .split(/(?<=[.!?])\s+/)
+        .filter((sentence) => !COVERAGE_CLAIM.test(sentence))
+        .join(' '),
+    )
+    .filter((para) => para.trim() !== '')
+    .join('\n\n');
+}
+
+const FIRST_SENTENCE_MAX = 160;
+
+/**
+ * The one short sentence kept from the original lead-in of a repaired card:
+ * the first sentence of its first prose line, if it is short, finishes with a
+ * full stop (not "Here is the plan:"), points at no card, and claims no
+ * coverage. Empty otherwise.
+ */
+export function shortFirstSentence(leadIn: string): string {
+  const line = leadIn
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l !== '' && !LIST_ITEM.test(l));
+  if (!line) return '';
+  const m = /^(.+?[.!?])(\s|$)/.exec(line);
+  const sentence = m?.[1]?.trim() ?? '';
+  if (!sentence || sentence.length > FIRST_SENTENCE_MAX) return '';
+  if (/\b(proposal|card|below|above|apply|approve|review)\b/i.test(sentence))
+    return '';
+  return stripCoverageClaims(sentence);
 }
 
 export interface FinalizeResult {
@@ -65,6 +111,14 @@ export interface FinalizeResult {
    * proposal and let me know if everything looks correct").
    */
   card?: boolean;
+  /**
+   * True when the card was REPAIRED: it is not the one the model first wrote.
+   * The original reply's plan ("1. Rename Book ...") and whatever it said
+   * after the block describe the discarded draft, so only a short first
+   * sentence of the lead-in is kept and the rest of the original prose is
+   * dropped. `text` is the replacement and speaks only for the final card.
+   */
+  repaired?: boolean;
 }
 
 /**
@@ -88,6 +142,8 @@ export async function* guardProposalStream(
   let emitted = '';
   let inBlock = false;
   let suppressRest = false;
+  // After a repaired card the original reply's remaining prose is dropped.
+  let dropProse = false;
   // The lead-in line held while its block streams in. Per call, never
   // module-level: concurrent streams must not share it.
   let heldLeadIn = '';
@@ -107,6 +163,12 @@ export async function* guardProposalStream(
     yield { delta: text, done: false };
   };
 
+  /** Original-reply prose: dropped once a repaired card has been shown. */
+  const emitProse = function* (text: string): Generator<LlmStreamChunk> {
+    if (dropProse) return;
+    yield* emit(text);
+  };
+
   /**
    * Outside a block, emit what is safe: everything except (a) a tail that
    * could be the start of an opening fence still arriving, and (b) a short
@@ -117,7 +179,7 @@ export async function* guardProposalStream(
     if (final) {
       const out = pending;
       pending = '';
-      yield* emit(out);
+      yield* emitProse(out);
       return;
     }
     let keep = 0;
@@ -130,7 +192,7 @@ export async function* guardProposalStream(
     keep = Math.max(keep, pending.length - planRegionStart(pending, false));
     const out = pending.slice(0, pending.length - keep);
     pending = pending.slice(pending.length - keep);
-    yield* emit(out);
+    yield* emitProse(out);
   };
 
   /** Split text before a fence into what streams now and the held plan/lead-in. */
@@ -158,6 +220,15 @@ export async function* guardProposalStream(
       suppressRest = true;
       return;
     }
+    if (result.repaired) {
+      // The plan and the claims in the original reply were written for a card
+      // that was discarded. Keep one short harmless sentence, drop the rest.
+      const first = shortFirstSentence(leadIn);
+      if (first) yield* emit(first + '\n\n');
+      yield* emit(result.text.replace(/^\n+/, ''));
+      dropProse = true;
+      return;
+    }
     yield* emit(leadIn);
     yield* emit(result.text);
   };
@@ -174,7 +245,7 @@ export async function* guardProposalStream(
         const at = pending.indexOf(OPEN);
         if (at === -1) break;
         const [now, held] = splitLeadIn(pending.slice(0, at));
-        yield* emit(now);
+        yield* emitProse(now);
         heldLeadIn = held;
         pending = pending.slice(at + OPEN.length);
         inBlock = true;
