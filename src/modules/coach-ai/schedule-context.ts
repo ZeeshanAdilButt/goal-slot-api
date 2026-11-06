@@ -189,6 +189,31 @@ export interface ApplyNoteResult {
  * a fresh guess. Every label and error is user-derived text (block titles),
  * so it goes through sanitizeSingleLine like every other stored value.
  */
+/** Start of every apply note; also how a later turn recognises one. */
+const APPLY_NOTE_START =
+  '[App note, not written by you: the user clicked Apply on the proposal above. Outcome: ';
+const OUTCOME_REFUSED =
+  'REFUSED before anything was written. Nothing in this proposal was applied; the schedule is unchanged.';
+const OUTCOME_APPLIED = 'every action succeeded.';
+const OUTCOME_PARTIAL = 'PARTIAL. Some actions succeeded and some failed.';
+
+/**
+ * Whether this conversation already holds a card the user applied (fully or in
+ * part). The no-card reply must not say "I haven't changed anything" after
+ * that: production, the owner applied a card, asked "did you really do it?",
+ * and was told nothing had been changed.
+ */
+export function hasAppliedChange(
+  messages: Array<{ role: string; content: string }>,
+): boolean {
+  return messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      (m.content.includes(APPLY_NOTE_START + OUTCOME_APPLIED) ||
+        m.content.includes(APPLY_NOTE_START + OUTCOME_PARTIAL)),
+  );
+}
+
 export function renderApplyNote(meta: {
   outcome?: string;
   results?: ApplyNoteResult[];
@@ -197,11 +222,11 @@ export function renderApplyNote(meta: {
   if (results.length === 0) return '';
   const outcome =
     meta.outcome === 'refused'
-      ? 'REFUSED before anything was written. Nothing in this proposal was applied; the schedule is unchanged.'
+      ? OUTCOME_REFUSED
       : meta.outcome === 'applied'
-        ? 'every action succeeded.'
+        ? OUTCOME_APPLIED
         : meta.outcome === 'partial'
-          ? 'PARTIAL. Some actions succeeded and some failed.'
+          ? OUTCOME_PARTIAL
           : 'every action FAILED.';
   const rows = results.slice(0, 40).map((r) => {
     const what = sanitizeSingleLine(r.label ?? r.type, 160);
@@ -217,8 +242,7 @@ export function renderApplyNote(meta: {
   return [
     '',
     '',
-    '[App note, not written by you: the user clicked Apply on the proposal above. Outcome: ' +
-      outcome,
+    APPLY_NOTE_START + outcome,
     ...rows,
     'The schedule in your context is the state AFTER this. If the user asks you to fix or retry, work from these results and the current schedule. Never re-send an action that failed for the same reason.]',
   ].join('\n');
