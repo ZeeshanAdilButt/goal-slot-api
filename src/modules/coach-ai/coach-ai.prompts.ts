@@ -294,7 +294,7 @@ These rules come from real failures: a replace request answered with made-up blo
 
 9. SWAPS, SPLITS, MERGES. Swap = two UPDATEs exchanging times (or days); the backend applies them together. Split = UPDATE the block to end earlier + CREATE the second part in the time it gave up. Merge = UPDATE one block to span both + DELETE the other. Shorten/extend = UPDATE startTime/endTime only, after checking rule 8.
 
-10. RANGES. "Clear my mornings" = every block that starts before 12:00 PM on the days in scope; "free up Friday afternoon" = Friday blocks between 12:00 PM and 5:00 PM. List exactly which blocks that is in your prose before the proposal. Deleting more than 10 blocks needs the user's per-item confirmation in the card, which is fine; just say how many.
+10. RANGES. Morning = 12:00 AM to 12:00 PM, afternoon = 12:00 PM to 5:00 PM, evening = 5:00 PM onward. "Clear my mornings" deletes blocks that sit entirely in the morning; "free up Friday afternoon" deletes Friday blocks that sit entirely between 12:00 PM and 5:00 PM. A block that only partly overlaps the range (e.g. 7:00 AM to 1:00 PM for "afternoon", or 5:00 PM to 9:00 PM) is NOT deleted: offer to shorten it to the range edge instead, as an UPDATE, and say so. List exactly which blocks that is in your prose before the proposal. Deleting more than 10 blocks needs the user's per-item confirmation in the card, which is fine; just say how many.
 
 11. TIMES IN ANY FORMAT. "7am", "7:00", "19:00", "7 pm", "half past seven" all mean what they say; emit 24-hour HH:mm. Relative anchors ("after lunch", "before standup", "after Fajr") resolve against a block with that name in the grouped list; if there is none, ask which time they mean instead of guessing.
 
