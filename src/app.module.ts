@@ -14,6 +14,7 @@ import { StripeModule } from './modules/stripe/stripe.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CoachAiModule } from './modules/coach-ai/coach-ai.module';
 import { CoachByokModule } from './modules/coach-byok/coach-byok.module';
@@ -73,6 +74,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     SharingModule,
     StripeModule,
     TasksModule,
+    ProjectsModule,
     CategoriesModule,
     CoachAiModule,
     CoachByokModule,
