@@ -8,6 +8,13 @@ import {
   repairMistypedIds,
   toMinutes,
 } from '../coach-proposals/schedule-batch-plan';
+import {
+  enforceSiblingCompleteness,
+  flagUnrelatedRenames,
+  GoalRef,
+  sanitizeGoalLinks,
+} from './proposal-completeness';
+import { looseTitleMatch, relatedTitles } from './title-match';
 
 /**
  * Checks a coach-proposal block against the user's real schedule BEFORE the
@@ -47,6 +54,25 @@ export interface GuardResult {
    */
   userIssues: string[];
   actions: CoachProposedAction[];
+  /**
+   * Plain sentences about what the guard widened or left out on its own
+   * (a series edit covering all its days, a goal link dropped). Shown with
+   * the card so the approval is informed.
+   */
+  notes?: string[];
+  /**
+   * Series edits the guard widened to every day of the series, as sentences.
+   * Already folded into the card's summary, which is where both apps show it.
+   */
+  widened?: string[];
+}
+
+/** What the guard knows about the turn beyond the schedule. */
+export interface CheckContext {
+  /** The user's last message, which decides what a card must cover. */
+  userMessage?: string;
+  /** The user's active goals, for sanity-checking goal links on new blocks. */
+  goals?: GoalRef[];
 }
 
 /** Collects each problem twice: once for the repair prompt, once for the user. */
@@ -60,24 +86,6 @@ export class IssueSink {
 }
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function loose(title: string): string {
-  return normalizeTitle(title)
-    .replace(/\s*\([^)]*\)\s*$/, '')
-    .replace(/\band\b/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function looseTitleMatch(a: string, b: string): boolean {
-  const x = loose(a);
-  const y = loose(b);
-  return (
-    x === y ||
-    (y.length >= 4 && x.includes(y)) ||
-    (x.length >= 4 && y.includes(x))
-  );
-}
 
 export function parseProposalJson(
   text: string,
@@ -301,7 +309,11 @@ export function expandSplits(
  * silently (a missing expectedTitle, a one-character id typo, a split) and
  * reports the rest in words the model can act on.
  */
-export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
+export function checkProposal(
+  text: string,
+  blocks: GuardBlock[],
+  ctx: CheckContext = {},
+): GuardResult {
   const parsed = parseProposalJson(text);
   if (!parsed) {
     return {
@@ -314,9 +326,28 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
     };
   }
   const sink = new IssueSink();
-  const raw = parsed.actions.filter(
+  const userMessage = ctx.userMessage ?? '';
+  const notes: string[] = [];
+  let raw = parsed.actions.filter(
     (a): a is CoachProposedAction => !!a && typeof a === 'object',
   );
+  // On the model's own actions, before SPLIT expansion: a split inherits its
+  // block's goal on purpose, and its first piece is the sanctioned way to
+  // retitle a block.
+  raw = repairMistypedIds(raw, blocks).actions;
+  if (ctx.goals) {
+    const linked = sanitizeGoalLinks(raw, ctx.goals, userMessage);
+    raw = linked.actions;
+    if (linked.unlinked.length > 0) {
+      notes.push(
+        `Not linked to a goal, because no goal fits: ${linked.unlinked.map((t) => `"${t}"`).join(', ')}. Tell me which goal they belong to and I will link them.`,
+      );
+    }
+  }
+  // Without the user's words there is no way to tell a rename they asked for.
+  if (ctx.userMessage !== undefined) {
+    flagUnrelatedRenames(raw, blocks, userMessage, (m, u) => sink.add(m, u));
+  }
   let actions = expandSplits(raw, blocks, sink);
   actions = repairMistypedIds(actions, blocks).actions;
 
@@ -354,6 +385,14 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
     return a.expectedTitle ? a : { ...a, expectedTitle: target.title };
   });
 
+  const complete = enforceSiblingCompleteness(
+    actions,
+    blocks,
+    userMessage,
+    (m, u) => sink.add(m, u),
+  );
+  actions = complete.actions;
+
   const plan = planScheduleBatch({ blocks, tombstones: new Set(), actions });
   const hinted = new Set<string>();
   for (const [i, issue] of [...plan.issues].sort((x, y) => x[0] - y[0])) {
@@ -373,8 +412,13 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
     );
   }
 
+  // The card shows its summary; widened series edits are said there, since a
+  // client row only shows the one block it was written for.
+  const summary = [...complete.notes, parsed.summary]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
+    .join(' ');
   const json = JSON.stringify(
-    { ...(parsed.summary ? { summary: parsed.summary } : {}), actions },
+    { ...(summary ? { summary } : {}), actions },
     null,
     2,
   );
@@ -384,6 +428,8 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
     issues: sink.model,
     userIssues: sink.user,
     actions,
+    ...(notes.length > 0 ? { notes } : {}),
+    ...(complete.notes.length > 0 ? { widened: complete.notes } : {}),
   };
 }
 
@@ -556,35 +602,6 @@ function fixHint(
   return (
     `"${blocker.title}" (${DAY_SHORT[blocker.dayOfWeek]} ${fmt12h(blocker.startTime)} to ${fmt12h(blocker.endTime)}) stays where it is. ` +
     `Put "${String(p.title)}" in a gap from "## Free time per day" that the user's words allow, or leave this part out and ask about it.`
-  );
-}
-
-/** Words that carry meaning in a block title (no "and", "the", "time"). */
-function titleWords(title: string): Set<string> {
-  const stop = new Set([
-    'and',
-    'the',
-    'of',
-    'for',
-    'time',
-    'block',
-    'with',
-    'a',
-    'to',
-  ]);
-  return new Set(
-    normalizeTitle(title)
-      .replace(/[^a-z0-9 ]/g, ' ')
-      .split(' ')
-      .filter((w) => w.length > 2 && !stop.has(w)),
-  );
-}
-
-function relatedTitles(a: string, b: string): boolean {
-  if (looseTitleMatch(a, b)) return true;
-  const wa = titleWords(a);
-  return [...titleWords(b)].some(
-    (w) => wa.has(w) || wa.has(w.replace(/s$/, '')),
   );
 }
 
