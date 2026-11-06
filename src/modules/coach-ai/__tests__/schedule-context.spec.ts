@@ -197,3 +197,46 @@ describe('buildCoachChatMessages', () => {
     expect(msgs[1].content).toContain('## Free time per day');
   });
 });
+
+describe('renderScheduleByTitle series notes', () => {
+  it('says when occurrences are one series, so the model can edit them in one action', () => {
+    const out = renderScheduleByTitle([
+      {
+        id: 'b2',
+        title: 'Book',
+        dayOfWeek: 2,
+        startTime: '09:00',
+        endTime: '11:00',
+        seriesId: 's1',
+      },
+      {
+        id: 'b3',
+        title: 'Book',
+        dayOfWeek: 3,
+        startTime: '09:00',
+        endTime: '11:00',
+        seriesId: 's1',
+      },
+      {
+        id: 'r2',
+        title: 'Reading',
+        dayOfWeek: 2,
+        startTime: '07:00',
+        endTime: '09:00',
+        seriesId: 'x',
+      },
+      {
+        id: 'r4',
+        title: 'Reading',
+        dayOfWeek: 4,
+        startTime: '07:00',
+        endTime: '09:00',
+        seriesId: 'y',
+      },
+    ]);
+    expect(out).toContain(
+      'Tue, Wed are ONE series: one UPDATE with payload.updateScope "series" on id=b2 changes all 2',
+    );
+    expect(out).toContain('each day is its own block: one action per id');
+  });
+});

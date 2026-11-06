@@ -21,6 +21,7 @@ export interface ContextBlock {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
+  seriesId?: string | null;
 }
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -90,10 +91,35 @@ export function renderScheduleByTitle(blocks: ContextBlock[]): string {
       ? `not on: ${missing.map((d) => DAY_SHORT[d]).join(', ')}`
       : 'every day';
     lines.push(
-      `  - "${sanitizeSingleLine(g[0].title)}" | ${g.length} occurrence${g.length === 1 ? '' : 's'} | ${durationText} each | ${occurrences} | ${notOn}`,
+      `  - "${sanitizeSingleLine(g[0].title)}" | ${g.length} occurrence${g.length === 1 ? '' : 's'} | ${durationText} each | ${occurrences} | ${notOn}${seriesNote(g)}`,
     );
   }
   return lines.join('\n');
+}
+
+/**
+ * Which occurrences of one title are a single recurring series. A series is
+ * one thing to edit: one UPDATE with payload.updateScope "series" on any of
+ * its ids changes the title or times on every day at once, instead of one
+ * action per day with an id copied for each.
+ */
+function seriesNote(g: ContextBlock[]): string {
+  if (g.length < 2 || g.some((b) => !b.seriesId)) return '';
+  const bySeries = new Map<string, ContextBlock[]>();
+  for (const b of g) {
+    const list = bySeries.get(b.seriesId!) ?? [];
+    list.push(b);
+    bySeries.set(b.seriesId!, list);
+  }
+  const shared = [...bySeries.values()].filter((l) => l.length > 1);
+  if (shared.length === 0)
+    return ' | each day is its own block: one action per id';
+  return shared
+    .map(
+      (l) =>
+        ` | ${l.map((b) => DAY_SHORT[b.dayOfWeek]).join(', ')} are ONE series: one UPDATE with payload.updateScope "series" on id=${l[0].id} changes all ${l.length}`,
+    )
+    .join('');
 }
 
 /**
