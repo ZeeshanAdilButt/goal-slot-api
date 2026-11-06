@@ -116,11 +116,15 @@ export class ProjectsService {
   async update(userId: string, projectId: string, dto: UpdateProjectDto) {
     await assertProjectAccess(this.prisma, userId, projectId, 'admin');
 
+    // @IsOptional lets an explicit null through validation. name and color are
+    // non-nullable columns and archived is a boolean, so null on those means
+    // "no change" (never a 500, never a silent un-archive). Only description
+    // is nullable, and null clears it.
     const data: Record<string, unknown> = {};
-    if (dto.name !== undefined) data.name = dto.name;
-    if (dto.color !== undefined) data.color = dto.color;
+    if (dto.name != null) data.name = dto.name;
+    if (dto.color != null) data.color = dto.color;
     if (dto.description !== undefined) data.description = dto.description;
-    if (dto.archived !== undefined) {
+    if (dto.archived != null) {
       data.archivedAt = dto.archived ? new Date() : null;
     }
 
