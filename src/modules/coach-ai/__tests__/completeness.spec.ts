@@ -834,3 +834,62 @@ describe('D. reviewer pass for big proposals', () => {
     expect(after.filter((b) => b.title === 'Gym')).toHaveLength(2);
   });
 });
+
+describe('review findings on the stream and the reviewer call', () => {
+  it('holds a wrapped plan item together with its first line', async () => {
+    const plan =
+      'Here is the plan.\n\n1. Move Book to 9\n   on Tuesday.\n2. Move Work to 10\n   on Wednesday.\n\nHere is the card:\n';
+    const seen: string[] = [];
+    const source = (async function* () {
+      yield { delta: plan, done: false } as LlmStreamChunk;
+      yield { delta: '```coach-proposal\n{}\n```', done: false } as LlmStreamChunk;
+      yield { delta: '', done: true } as LlmStreamChunk;
+    })();
+    const out: string[] = [];
+    for await (const c of guardProposalStream(source, async () => {
+      seen.push(out.join(''));
+      return { text: '```coach-proposal\n{}\n```', card: true, repaired: true };
+    })) {
+      out.push(c.delta);
+    }
+    // Nothing of the wrapped plan was streamed before finalize ran.
+    expect(seen[0]).not.toContain('Move Book');
+    expect(seen[0]).not.toContain('on Tuesday');
+    expect(out.join('')).not.toContain('Move Work');
+  });
+
+  it('strips completion-wording coverage claims', () => {
+    const { stripCoverageClaims } = require('../proposal-stream');
+    expect(
+      stripCoverageClaims(
+        'I have made all the changes you requested. Do you want Study at 3 hours?',
+      ),
+    ).toBe('Do you want Study at 3 hours?');
+    expect(
+      stripCoverageClaims("I've completed every change. Which block is it?"),
+    ).toBe('Which block is it?');
+  });
+
+  it('shows the card without the list when the review call stalls', async () => {
+    const service = new CoachAiService({} as any, {} as any, {} as any);
+    const provider = {
+      streamCompletion: async function* () {
+        await new Promise(() => undefined); // never resolves
+        yield { delta: '', done: true };
+      },
+    };
+    const started = Date.now();
+    const res = await (service as any).reviewCard({
+      provider,
+      models: ['gpt-4.1', 'gpt-4o-mini'],
+      userMessage: 'one\ntwo',
+      blocks: REAL_WEEK,
+      actions: [],
+      usage: { promptTokens: 0, completionTokens: 0 },
+      userId: 'u',
+      timeoutMs: 40,
+    });
+    expect(res).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});

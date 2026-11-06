@@ -24,7 +24,7 @@ const LEAD_IN =
  * that replaced it may cover far less (production: about 9 of 20 asks).
  */
 const COVERAGE_CLAIM =
-  /\b(handles?|covers?|covered|captures?|captured|addresses|addressed|takes? care of|encompass(es)?|accomplish(es)?)\b[^.\n]{0,60}\b(all|every|everything|each|entire|whole|both)\b|\b(all|every|everything|each|entire|whole)\b[^.\n]{0,40}\b(requests?|changes?|asks?|items?|updates?|points?|parts?)\b[^.\n]{0,30}\b(handled|covered|done|included|captured|addressed|in (this|the) (proposal|card))\b/i;
+  /\b(handles?|covers?|covered|captures?|captured|addresses|addressed|takes? care of|encompass(es)?|accomplish(es)?|made|completed|implemented|included|finished|incorporated)\b[^.\n]{0,60}\b(all|every|everything|each|entire|whole|both)\b|\b(all|every|everything|each|entire|whole)\b[^.\n]{0,40}\b(requests?|changes?|asks?|items?|updates?|points?|parts?)\b[^.\n]{0,30}\b(handled|covered|done|included|captured|addressed|in (this|the) (proposal|card))\b/i;
 
 const LIST_ITEM = /^\s*(\d+[.)]|[-*•])\s+/;
 
@@ -43,6 +43,28 @@ const LIST_ITEM = /^\s*(\d+[.)]|[-*•])\s+/;
  */
 export function planRegionStart(text: string, atFence: boolean): number {
   const lines = text.split('\n');
+  // A list item that wraps ("1. Move Book to 9\n   on Tuesday.") is one item:
+  // its continuation lines are held with it, or the first half of the item
+  // would stream before a repaired card replaces the plan. A continuation is
+  // an indented line, or one starting in lower case, that directly follows an
+  // item or another continuation (a blank line ends the item).
+  const continuation: boolean[] = [];
+  let inItem = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (LIST_ITEM.test(line)) {
+      inItem = true;
+      continuation.push(false);
+    } else if (t === '') {
+      inItem = false;
+      continuation.push(false);
+    } else if (inItem && (/^\s+\S/.test(line) || /^[a-z(]/.test(t))) {
+      continuation.push(true);
+    } else {
+      inItem = false;
+      continuation.push(false);
+    }
+  }
   let end = text.length;
   let start = text.length;
   for (let k = lines.length - 1; k >= 0; k--) {
@@ -52,6 +74,7 @@ export function planRegionStart(text: string, atFence: boolean): number {
     const unfinished = !atFence && k === lines.length - 1 && t.length > 0;
     const hold =
       t === '' ||
+      continuation[k] ||
       LIST_ITEM.test(line) ||
       (t.length <= LEAD_IN_MAX &&
         (LEAD_IN.test(t) || COVERAGE_CLAIM.test(t))) ||

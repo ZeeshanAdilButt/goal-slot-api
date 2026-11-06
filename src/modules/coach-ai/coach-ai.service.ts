@@ -70,6 +70,9 @@ import {
 /** Extra model calls allowed to fix a proposal that fails the guard. */
 const MAX_REPAIR_ROUNDS = 2;
 
+/** The "not covered" review may delay a finished card by at most this long. */
+export const REVIEW_TIMEOUT_MS = 20_000;
+
 function fenceProposal(json: string): string {
   return '```coach-proposal\n' + json + '\n```';
 }
@@ -883,32 +886,59 @@ export class CoachAiService {
     actions: GuardResult['actions'];
     usage: LlmUsage;
     userId: string;
+    /** Give up after this long; the card is shown without the list. */
+    timeoutMs?: number;
   }): Promise<ReviewResult | null> {
     const messages = buildReviewMessages({
       userMessage: args.userMessage,
       current: args.blocks,
       after: simulateCard(args.blocks, args.actions),
     });
+    const timeoutMs = args.timeoutMs ?? REVIEW_TIMEOUT_MS;
     for (const model of args.models) {
+      let timedOut = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        let out = '';
-        for await (const chunk of args.provider.streamCompletion(
-          messages,
-          model,
-        )) {
-          out += chunk.delta;
-          if (chunk.done && chunk.usage) {
-            args.usage.promptTokens += chunk.usage.promptTokens;
-            args.usage.completionTokens += chunk.usage.completionTokens;
+        const attempt = async (): Promise<ReviewResult | null> => {
+          let out = '';
+          for await (const chunk of args.provider.streamCompletion(
+            messages,
+            model,
+          )) {
+            out += chunk.delta;
+            if (chunk.done && chunk.usage && !timedOut) {
+              args.usage.promptTokens += chunk.usage.promptTokens;
+              args.usage.completionTokens += chunk.usage.completionTokens;
+            }
+            // The JSON asked for is short; stop reading a reply that runs on.
+            if (out.length > REVIEW_MAX_CHARS || timedOut) break;
           }
-          // The JSON asked for is short; stop reading a reply that runs on.
-          if (out.length > REVIEW_MAX_CHARS) break;
+          return timedOut ? null : parseReview(out);
+        };
+        // The card waits for this call, so a stalled provider must not hold
+        // it: past the timeout the card goes out without the list.
+        const result = await Promise.race([
+          attempt(),
+          new Promise<null>((resolve) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              resolve(null);
+            }, timeoutMs);
+          }),
+        ]);
+        if (timedOut) {
+          this.logger.warn(
+            `coach card review timed out after ${timeoutMs}ms on ${model} user=${args.userId}`,
+          );
+          return null;
         }
-        return parseReview(out);
+        return result;
       } catch (err) {
         this.logger.warn(
           `coach card review failed on ${model} user=${args.userId}: ${(err as Error)?.message ?? err}`,
         );
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
     return null;
