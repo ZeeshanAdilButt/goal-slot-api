@@ -95,7 +95,77 @@ const MENTIONS_FREED =
 const SAYS_TITLE_ONLY =
   /(title only|only (holds?|stores?|keeps?|has|have|supports?) (a |the )?title|blocks? (can|do|does)n?'?t? (only )?(hold|store|have|support)[^.\n]{0,40}(title|bullet|description|notes|list|sub)|no (description|notes|bullet|sub-?item)|can(not|'t) (store|hold|save|keep|add) (bullets|a list|sub|description|notes|topics))/i;
 
+const WEEKEND_ASK = `- Keep the schedule block "Reading and Labs" but make that "Core Engineering" and add one more lab. - 30-minute lab first for soft skills and a 30-minute lab again for the technical side, which will have system design, database challenges, system design challenges, and AI engineering agents challenges. This is 2 labs, 30 minutes each. - We will spend 3 hours on code engineering study. Currently it is named "Book" and we will just call it "Study". - "Work" will continue. - For "Community Time" at 4 pm, let's replace it with "Dev Weekends" and rename it to "Dev Weekends". - At 5 pm, again, "Talking About Weekdays" stays there. - On weekends replace "Community Time" with "Dev Weekends".   Also for the weekend, can you move my career strategy and branding to 7 am ?  and at 8 am we do Founder Interviews Prep per project   Deep engineering reading moves to 9 am until 12 pm. After that we have 12 pm to 2 pm as the community time`;
+
 export const SCENARIOS: Scenario[] = [
+  {
+    id: 'weekend-restructure',
+    description:
+      'Production headline (gpt-4o-mini, 2026-11-06): the multi-part weekday request plus a weekend reshuffle where every move depends on another block shrinking first',
+    blocks: REAL_WEEK,
+    turns: [{ role: 'user', content: WEEKEND_ASK }],
+    expectProposal: true,
+    check: (r, blocks) => {
+      const final = applyInMemory(blocks, r);
+      const ids = touchedIds(r, blocks);
+      const weekend = [0, 6];
+      const deepReading = onDays(final, /deep reading/i, weekend);
+      const founders = onDays(final, /founder/i, weekend);
+      const career = final.find((b) => /career strategy/i.test(b.title));
+      const branding = final.find((b) => /branding/i.test(b.title));
+      const labs = final.filter(
+        (b) => b.id.startsWith('new-') && /lab|soft/i.test(b.title),
+      );
+      const family = idsOf(blocks, 'Family Time');
+      return [
+        ...fail(
+          !readingIds.every((id) => ids.has(id)),
+          'Reading & Labs is not handled on both Tue and Thu',
+        ),
+        ...fail(
+          labs.length < 4 || labs.some((b) => !insideSlot(b, '07:00', '09:00')),
+          'labs are not inside the 7:00 to 9:00 AM Core Engineering window on Tue and Thu',
+        ),
+        ...fail(
+          final
+            .filter((b) => b.title === 'Community Time')
+            .some((b) => [1, 2, 3, 4, 5].includes(b.dayOfWeek)),
+          'weekday Community Time is not renamed to Dev Weekends',
+        ),
+        ...fail(
+          deepReading.length !== 2 ||
+            deepReading.some(
+              (b) => b.startTime !== '09:00' || b.endTime !== '12:00',
+            ),
+          'Deep Reading is not 9:00 AM to 12:00 PM on both Saturday and Sunday',
+        ),
+        ...fail(
+          founders.length !== 2 ||
+            founders.some((b) => b.startTime !== '08:00'),
+          'Founder Interviews Prep is not at 8:00 AM on both weekend days',
+        ),
+        ...fail(
+          !career || career.startTime !== '07:00' || career.dayOfWeek !== 0,
+          'Career Strategy is not at 7:00 AM on Sunday',
+        ),
+        ...fail(
+          !branding ||
+            branding.startTime !== '07:00' ||
+            branding.dayOfWeek !== 6,
+          'Branding is not at 7:00 AM on Saturday',
+        ),
+        ...fail(
+          family.some((id) => ids.has(id)) ||
+            final.some((b) => b.id.startsWith('new-') && b.startTime < '06:00'),
+          'touches the 5 AM family block or invents a block before 6 AM',
+        ),
+        ...fail(
+          !/(3|three)[ -]hours?|\?/i.test(r.prose),
+          'does not ask about the 3 hours of Study that would run into Work',
+        ),
+      ];
+    },
+  },
   {
     id: 'replace-one-with-two',
     description:
