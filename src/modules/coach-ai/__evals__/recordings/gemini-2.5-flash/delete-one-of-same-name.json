@@ -1,0 +1,6 @@
+{
+  "scenario": "delete-one-of-same-name",
+  "model": "gemini-2.5-flash",
+  "recordedAt": "2026-11-06T07:47:54.043Z",
+  "text": "Okay, I've noted your request to remove the \"Family Time\" block on Monday morning.\n\nHere is a proposal to delete that schedule block. Please review it carefully before clicking 'Apply'.\n\n```coach-proposal\n{\n  \"summary\": \"Delete 'Family Time' block on Monday morning\",\n  \"actions\": [\n    { \"type\": \"DELETE_SCHEDULE_BLOCK\", \"id\": \"92fdbdb4-0ac1-4d11-a4f6-9e92508ff1d6\", \"expectedTitle\": \"Family Time\" }\n  ]\n}\n```\n\nI noticed many of your existing schedule blocks, including \"Morning Prayer\", \"Family Time\", and \"Work\", are not linked to any goals. This means the time you spend on them isn't tracking toward your progress.\n\nWould you like me to create a \"Morning Prayer\" goal and link your existing \"Morning Prayer\" blocks to it so you can start tracking that time?"
+}

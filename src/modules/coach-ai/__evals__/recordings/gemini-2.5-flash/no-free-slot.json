@@ -1,0 +1,6 @@
+{
+  "scenario": "no-free-slot",
+  "model": "gemini-2.5-flash",
+  "recordedAt": "2026-11-06T07:55:04.515Z",
+  "text": "I see you'd like to add a 3-hour \"Side Project\" block on Saturday morning. Looking at your schedule, your \"Deep Reading\" block runs from 7:00 AM to 1:00 PM, which takes up most of Saturday morning. There isn't a continuous 3-hour slot available in the morning without overlapping an existing activity.\n\nWould you like to:\n- (a) shorten your \"Deep Reading\" block on Saturday to make room for the \"Side Project\"?\n- (b) add the \"Side Project\" block in a shorter, split format across a couple of different times on Saturday?\n- (c) perhaps place it in the afternoon instead?\n\nBy the way, I noticed that all of your existing schedule blocks, like \"Morning Prayer\" and \"Family Time,\" are not linked to any goals. This means that any time you spend on them isn't tracking toward anything. Would you like me to help create some goals for these blocks and link them up?"
+}

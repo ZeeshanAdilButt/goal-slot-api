@@ -1,0 +1,6 @@
+{
+  "scenario": "correction-all-days",
+  "model": "gemini-2.5-flash",
+  "recordedAt": "2026-11-06T07:47:57.580Z",
+  "text": "My apologies, I misunderstood. You're right, let's update all occurrences.\n\nThe \"Reading & Labs (Core Engineering)\" block is currently scheduled for Tuesday and Thursday. I've prepared a proposal to rename both of those blocks to \"Core Engineering.\"\n\n```coach-proposal\n{\"summary\":\"Rename 'Reading & Labs (Core Engineering)' to 'Core Engineering' on all its scheduled days\",\"actions\":[{\"type\":\"UPDATE_SCHEDULE_BLOCK\",\"id\":\"1a78bae8-7aac-4d57-abe1-53f3aa8ede25\",\"expectedTitle\":\"Reading & Labs (Core Engineering)\",\"payload\":{\"title\":\"Core Engineering\"}},{\"type\":\"UPDATE_SCHEDULE_BLOCK\",\"id\":\"cb23ea40-056b-41d7-a0dc-94a9eaab4252\",\"expectedTitle\":\"Reading & Labs (Core Engineering)\",\"payload\":{\"title\":\"Core Engineering\"}}]}\n```\n\nHow does that look for you?"
+}
