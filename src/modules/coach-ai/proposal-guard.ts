@@ -38,9 +38,24 @@ export interface GuardResult {
   ok: boolean;
   /** Normalised proposal JSON (splits expanded, ids repaired); present when parseable. */
   json?: string;
-  /** Concrete, model-readable problems. Empty when ok. */
+  /** Concrete, model-readable problems (may name ids and action types). Empty when ok. */
   issues: string[];
+  /**
+   * The same problems for the USER: titles, days and times only, never an id
+   * or an action type name. Shown when a proposal is withheld.
+   */
+  userIssues: string[];
   actions: CoachProposedAction[];
+}
+
+/** Collects each problem twice: once for the repair prompt, once for the user. */
+export class IssueSink {
+  readonly model: string[] = [];
+  readonly user: string[] = [];
+  add(model: string, user: string): void {
+    this.model.push(model);
+    this.user.push(user);
+  }
 }
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -100,10 +115,92 @@ interface SplitPiece {
  * block with the same title is split the same way, and creates that land at
  * the same time on several days collapse into one daysOfWeek action.
  */
+/**
+ * Validate split pieces without dropping any silently: a piece that is
+ * dropped is a lab missing from the card. Numeric strings ("30") are
+ * coerced; anything else that is not a positive whole number of minutes, or
+ * has no title, is reported.
+ */
+function readPieces(raw: unknown): { pieces: SplitPiece[]; bad: string[] } {
+  const list = Array.isArray(raw) ? raw : [];
+  const pieces: SplitPiece[] = [];
+  const bad: string[] = [];
+  list.forEach((x, k) => {
+    const item = (x ?? {}) as Record<string, unknown>;
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const minutes =
+      typeof item.minutes === 'string' && /^\d+$/.test(item.minutes.trim())
+        ? Number(item.minutes.trim())
+        : item.minutes;
+    if (
+      !title ||
+      typeof minutes !== 'number' ||
+      !Number.isInteger(minutes) ||
+      minutes <= 0
+    ) {
+      bad.push(
+        `piece ${k + 1} (${title ? `"${title}"` : 'no title'}, minutes ${JSON.stringify(item.minutes)})`,
+      );
+      return;
+    }
+    pieces.push({ title, minutes });
+  });
+  return { pieces, bad };
+}
+
+/**
+ * Which block a SPLIT means. The id has to agree with expectedTitle: a
+ * real id with the wrong title (Work's id with expectedTitle "Reading &
+ * Labs") would otherwise split Work on every day it occurs. An unknown id is
+ * accepted only when expectedTitle names exactly one title in the schedule.
+ */
+function resolveSplitAnchor(
+  a: CoachProposedAction,
+  blocks: GuardBlock[],
+  byId: Map<string, GuardBlock>,
+  sink: IssueSink,
+): GuardBlock | undefined {
+  const expected = a.expectedTitle
+    ? normalizeTitle(a.expectedTitle)
+    : undefined;
+  const byIdHit = a.id ? byId.get(a.id) : undefined;
+  if (byIdHit) {
+    if (expected !== undefined && normalizeTitle(byIdHit.title) !== expected) {
+      sink.add(
+        `SPLIT_SCHEDULE_BLOCK id ${a.id} is "${byIdHit.title}", not "${a.expectedTitle}". Use the id of the block you mean.`,
+        `A change named "${a.expectedTitle}" pointed at "${byIdHit.title}" instead.`,
+      );
+      return undefined;
+    }
+    return byIdHit;
+  }
+  const named = expected
+    ? blocks.filter((b) => normalizeTitle(b.title) === expected)
+    : [];
+  if (named.length === 0) {
+    sink.add(
+      `SPLIT_SCHEDULE_BLOCK targets ${a.expectedTitle ? `"${a.expectedTitle}"` : `id ${a.id}`}, which is not in the schedule.`,
+      a.expectedTitle
+        ? `There is no block called "${a.expectedTitle}" in your schedule.`
+        : 'A change pointed at a block that is not in your schedule.',
+    );
+    return undefined;
+  }
+  const p = (a.payload ?? {}) as Record<string, unknown>;
+  if (p.allOccurrences === false && named.length > 1) {
+    sink.add(
+      `SPLIT_SCHEDULE_BLOCK on one occurrence of "${named[0].title}" needs that occurrence's id; it is on ${named.map((b) => `${DAY_SHORT[b.dayOfWeek]}=${b.id}`).join(', ')}.`,
+      `"${named[0].title}" is on several days, and it was not clear which one to change.`,
+    );
+    return undefined;
+  }
+  return named[0];
+}
+
 export function expandSplits(
   actions: CoachProposedAction[],
   blocks: GuardBlock[],
-  issues: string[],
+  sink: IssueSink,
 ): CoachProposedAction[] {
   const byId = new Map(blocks.map((b) => [b.id, b]));
   const out: CoachProposedAction[] = [];
@@ -113,29 +210,20 @@ export function expandSplits(
       continue;
     }
     const p = (a.payload ?? {}) as Record<string, unknown>;
-    const pieces = (Array.isArray(p.pieces) ? p.pieces : []).filter(
-      (x): x is SplitPiece =>
-        !!x &&
-        typeof (x as SplitPiece).title === 'string' &&
-        Number.isInteger((x as SplitPiece).minutes) &&
-        (x as SplitPiece).minutes > 0,
-    );
-    const anchor =
-      (a.id && byId.get(a.id)) ||
-      (a.expectedTitle
-        ? blocks.find(
-            (b) => normalizeTitle(b.title) === normalizeTitle(a.expectedTitle!),
-          )
-        : undefined);
-    if (!anchor) {
-      issues.push(
-        `SPLIT_SCHEDULE_BLOCK targets ${a.expectedTitle ? `"${a.expectedTitle}"` : `id ${a.id}`}, which is not in the schedule.`,
+    const anchor = resolveSplitAnchor(a, blocks, byId, sink);
+    if (!anchor) continue;
+    const { pieces, bad } = readPieces(p.pieces);
+    if (bad.length > 0) {
+      sink.add(
+        `SPLIT_SCHEDULE_BLOCK on "${anchor.title}" has invalid pieces: ${bad.join(', ')}. Each piece needs a title and a whole number of minutes.`,
+        `Some of the new pieces for "${anchor.title}" had no name or no valid length.`,
       );
       continue;
     }
     if (pieces.length === 0) {
-      issues.push(
+      sink.add(
         `SPLIT_SCHEDULE_BLOCK on "${anchor.title}" has no pieces; give payload.pieces as [{ "title", "minutes" }].`,
+        `The change to "${anchor.title}" did not say what to split it into.`,
       );
       continue;
     }
@@ -154,8 +242,10 @@ export function expandSplits(
       const window = toMinutes(t.endTime) - start;
       const total = pieces.reduce((s, x) => s + x.minutes, 0);
       if (total > window) {
-        issues.push(
-          `The pieces for "${t.title}" on ${DAY_SHORT[t.dayOfWeek]} add up to ${total} minutes but the block is ${window} minutes (${fmt12h(t.startTime)} to ${fmt12h(t.endTime)}). Shorten the pieces, or ask the user where the extra time comes from.`,
+        const fit = `${fmt12h(t.startTime)} to ${fmt12h(t.endTime)}`;
+        sink.add(
+          `The pieces for "${t.title}" on ${DAY_SHORT[t.dayOfWeek]} add up to ${total} minutes but the block is ${window} minutes (${fit}). Shorten the pieces, or ask the user where the extra time comes from.`,
+          `The new pieces for "${t.title}" on ${DAY_SHORT[t.dayOfWeek]} add up to ${total} minutes, but it only runs ${window} minutes (${fit}).`,
         );
         continue;
       }
@@ -218,14 +308,15 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
       issues: [
         'The proposal is not valid JSON with an "actions" array. Write strict JSON with no comments.',
       ],
+      userIssues: ['The proposed change came out garbled.'],
       actions: [],
     };
   }
-  const issues: string[] = [];
+  const sink = new IssueSink();
   const raw = parsed.actions.filter(
     (a): a is CoachProposedAction => !!a && typeof a === 'object',
   );
-  let actions = expandSplits(raw, blocks, issues);
+  let actions = expandSplits(raw, blocks, sink);
   actions = repairMistypedIds(actions, blocks).actions;
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
@@ -244,13 +335,16 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
       const named = a.expectedTitle
         ? blocks.filter((b) => looseTitleMatch(b.title, a.expectedTitle!))
         : [];
-      issues.push(
+      sink.add(
         `Action ${i + 1} (${a.type}) uses id ${a.id ?? '(none)'}, which is not one of the user's blocks.` +
           (named.length
             ? ` "${named[0].title}" has these real ids: ${named.map((b) => `${DAY_SHORT[b.dayOfWeek]}=${b.id}`).join(', ')}.`
             : a.expectedTitle
               ? ` No block is titled "${a.expectedTitle}".`
               : ''),
+        a.expectedTitle
+          ? `A change to "${a.expectedTitle}" pointed at a block that is not in your schedule.`
+          : 'A change pointed at a block that is not in your schedule.',
       );
       return a;
     }
@@ -261,8 +355,15 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
 
   const plan = planScheduleBatch({ blocks, tombstones: new Set(), actions });
   for (const [i, issue] of [...plan.issues].sort((x, y) => x[0] - y[0])) {
-    issues.push(
-      `Action ${i + 1}: ${issue.replace(/ Nothing was (changed|deleted)\.$/, '')}`,
+    // Planner messages speak in titles, days and times already; only the
+    // trailing "Nothing was changed" (true of every withheld card) and any
+    // "The Coach referenced a block id" aside are trimmed for the user.
+    const plain = issue.replace(/ Nothing was (changed|deleted)\.$/, '');
+    sink.add(
+      `Action ${i + 1}: ${plain}`,
+      plain
+        .replace(/ The Coach referenced a block id that does not exist\./, '')
+        .replace(/ with this id/, ''),
     );
   }
 
@@ -271,7 +372,13 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
     null,
     2,
   );
-  return { ok: issues.length === 0, json, issues, actions };
+  return {
+    ok: sink.model.length === 0,
+    json,
+    issues: sink.model,
+    userIssues: sink.user,
+    actions,
+  };
 }
 
 /** The message that asks the model to fix its own proposal. */
