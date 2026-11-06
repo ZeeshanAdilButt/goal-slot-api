@@ -6,8 +6,12 @@ import { UserThrottlerGuard } from '../coach-ai/user-throttler.guard';
 import {
   ApplyProposalsDto,
   CoachActionResult,
+  CoachApplyOutcome,
 } from './dto/apply-proposals.dto';
-import { CoachProposalsService } from './coach-proposals.service';
+import {
+  CoachProposalsService,
+  summarizeOutcome,
+} from './coach-proposals.service';
 import { AuthenticatedRequest } from '../../shared/types/authenticated-request.interface';
 
 // Kept in step with the ThrottlerModule.forRoot registration in
@@ -39,10 +43,11 @@ export class CoachProposalsController {
   async apply(
     @Request() req: AuthenticatedRequest,
     @Body() body: ApplyProposalsDto,
-  ): Promise<{ results: CoachActionResult[] }> {
+  ): Promise<{ results: CoachActionResult[]; outcome: CoachApplyOutcome }> {
     const results = await this.proposals.apply(req.user.sub, body.actions, {
       confirmedDeleteIds: body.confirmDeletions,
+      sourceMessageId: body.sourceMessageId,
     });
-    return { results };
+    return { results, outcome: summarizeOutcome(results) };
   }
 }

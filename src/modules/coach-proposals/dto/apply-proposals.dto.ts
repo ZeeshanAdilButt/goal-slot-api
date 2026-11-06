@@ -137,4 +137,20 @@ export interface CoachActionResult {
   ok: boolean;
   resultId?: string;
   error?: string;
+  /**
+   * Set when the action was never attempted because the batch was refused
+   * before anything was written: either this action is the one that could
+   * not be applied (its `error` says why) or another action in the batch was.
+   * Lets a client tell "nothing changed, you can fix and retry" apart from a
+   * genuine partial apply.
+   */
+  skipped?: boolean;
+  /** The change was already in place (e.g. re-applying a delete that worked). */
+  alreadyDone?: boolean;
+  /** Succeeded, but not entirely as proposed (e.g. some days were skipped). */
+  warning?: string;
+  /** Human description of the target, e.g. `Delete "Book" Tue 9:00 AM to 11:00 AM`. */
+  label?: string;
 }
+
+export type CoachApplyOutcome = 'applied' | 'partial' | 'failed' | 'refused';

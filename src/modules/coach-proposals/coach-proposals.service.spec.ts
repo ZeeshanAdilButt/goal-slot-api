@@ -69,6 +69,13 @@ class FakePrisma {
   scheduleBlock = {
     // No idempotency match, so every create goes through the real path.
     findFirst: async () => null,
+    // Empty schedule for the batch preflight: these tests exercise payload
+    // validation, not conflicts, and the domain services are spies anyway.
+    findMany: async () => [],
+  };
+  auditLog = {
+    findMany: async () => [],
+    create: async () => ({}),
   };
 }
 

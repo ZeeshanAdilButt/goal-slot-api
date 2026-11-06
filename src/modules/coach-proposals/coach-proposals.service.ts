@@ -38,7 +38,15 @@ import {
   CoachActionType,
   CoachProposedAction,
 } from './dto/apply-proposals.dto';
-import { assertProposalBatchSafe } from '../coach-ai/safety/action-safety';
+import {
+  assertProposalBatchSafe,
+  isDestructiveActionType,
+} from '../coach-ai/safety/action-safety';
+import {
+  isScheduleAction,
+  planScheduleBatch,
+  SchedulePlan,
+} from './schedule-batch-plan';
 
 // This file dispatches onto domain services whose payload shape depends on
 // runtime data the Coach LLM produced, not on anything TypeScript can prove
@@ -123,6 +131,11 @@ const FORBIDDEN_PAYLOAD_KEYS = [
  *   - Actions are dispatched sequentially (not in a $transaction) so a single
  *     bad action doesn't roll back the user-approved good ones. Each result
  *     is reported back per-action so the UI can show what succeeded/failed.
+ *   - The exception is the schedule: a batch touching schedule blocks is
+ *     simulated first (schedule-batch-plan.ts) and refused as a whole, with
+ *     nothing written, if any id is not the user's or the finished schedule
+ *     would overlap. A replacement that deletes the original and then cannot
+ *     place the new blocks is the one partial result worse than none.
  *
  * Stale ids:
  *   - A proposal card can sit unapplied in chat history for a while. If the
@@ -130,9 +143,10 @@ const FORBIDDEN_PAYLOAD_KEYS = [
  *     an id embedded in an old card can go dead before it's ever applied.
  *   - UPDATE_SCHEDULE_BLOCK recovers from this (see resolveStaleScheduleBlock
  *     below) by re-matching the target block on the CURRENT schedule instead
- *     of failing outright. DELETE_SCHEDULE_BLOCK (and the other DELETE_*
- *     actions) instead treat "already gone" as success via deleteIdempotent,
- *     since the desired end state for a delete is reached either way.
+ *     of failing outright.
+ *   - DELETE_* treats "already gone" as success ONLY when a tombstone shows
+ *     this user's own earlier Coach apply deleted it (deleteVerified). An id
+ *     with no tombstone never belonged to them, and the delete fails.
  */
 @Injectable()
 export class CoachProposalsService {
@@ -153,7 +167,7 @@ export class CoachProposalsService {
   async apply(
     userId: string,
     actions: CoachProposedAction[],
-    opts: { confirmedDeleteIds?: string[] } = {},
+    opts: { confirmedDeleteIds?: string[]; sourceMessageId?: string } = {},
   ): Promise<CoachActionResult[]> {
     // Blast-radius check for the whole batch, before anything is dispatched.
     // It has to run here rather than inside the loop: dispatch is sequential
@@ -161,41 +175,384 @@ export class CoachProposalsService {
     // would leave the earlier actions already written.
     assertProposalBatchSafe(actions, opts);
 
-    const results: CoachActionResult[] = [];
+    // Schedule preflight: simulate the batch against the user's real blocks
+    // and refuse it, before writing anything, if any id is not theirs or the
+    // finished schedule would not be valid. See schedule-batch-plan.ts for
+    // the conversation that made this necessary.
+    const plan = await this.planSchedule(userId, actions);
+    if (plan && plan.issues.size > 0) {
+      const refused: CoachActionResult[] = actions.map((a, i) => {
+        const label = plan.labels.get(i);
+        const issue = plan.issues.get(i);
+        if (issue) {
+          return {
+            index: i,
+            type: a.type,
+            ok: false,
+            skipped: true,
+            error: issue,
+            label,
+          };
+        }
+        return {
+          index: i,
+          type: a.type,
+          ok: false,
+          skipped: true,
+          label,
+          error:
+            'Not applied, because another change in this proposal could not be made. Nothing was changed.',
+        };
+      });
+      this.logger.warn(
+        `Coach batch refused at preflight userId=${userId}: ${[...plan.issues.values()].join(' | ')}`,
+      );
+      await this.recordApply(userId, opts.sourceMessageId, refused);
+      return refused;
+    }
 
-    for (let i = 0; i < actions.length; i++) {
+    const results = new Map<number, CoachActionResult>();
+    const pendingRefs = new Set<number>(actions.map((_, i) => i));
+
+    // Deletes first, then everything else in the order the Coach listed it.
+    // A replacement proposal is "delete X, add Y and Z in X's slot"; when the
+    // creates happened to be listed first they conflicted with the very block
+    // the same proposal was removing.
+    const indexes = actions.map((_, i) => i);
+    const order = [
+      ...indexes.filter((i) => isDeleteType(actions[i].type)),
+      ...indexes.filter((i) => !isDeleteType(actions[i].type)),
+    ];
+
+    // Only defer conflicts when the preflight already proved the END state
+    // is valid. Then a conflict mid-batch is an ordering artefact (a block
+    // this batch moves later still sits in the slot), not a real clash.
+    const canDefer = plan !== null;
+    const deferred = new Map<number, string>();
+
+    const runOne = async (i: number): Promise<'done' | 'deferred'> => {
       const raw = actions[i];
-      // Resolve any "$ref:N" tokens in the payload against previous results in
-      // this batch. Lets Coach bundle e.g. CREATE_GOAL + N CREATE_SCHEDULE_BLOCK
-      // actions, with the blocks linking goalId: "$ref:0" to the just-created
-      // goal, so the user can log time against the goal as soon as they click apply.
-      const action: CoachProposedAction = {
-        ...raw,
-        payload: resolveRefs(raw.payload, results) as
-          | Record<string, unknown>
-          | undefined,
-      };
+      const label = plan?.labels.get(i);
+      if (plan?.alreadyDeleted.has(i)) {
+        results.set(i, {
+          index: i,
+          type: raw.type,
+          ok: true,
+          resultId: raw.id,
+          alreadyDone: true,
+          label,
+          warning: 'Already deleted by an earlier apply of this proposal.',
+        });
+        pendingRefs.delete(i);
+        return 'done';
+      }
       try {
-        const resultId = await this.dispatch(userId, action);
-        results.push({ index: i, type: action.type, ok: true, resultId });
-      } catch (err) {
-        const message =
-          err?.response?.message ??
-          err?.message ??
-          'Unknown error applying action';
-        this.logger.warn(
-          `Coach action failed userId=${userId} type=${action.type} id=${action.id ?? '-'}: ${message}`,
-        );
-        results.push({
+        // Resolve any "$ref:N" tokens in the payload against earlier results
+        // in this batch. Lets Coach bundle e.g. CREATE_GOAL + N
+        // CREATE_SCHEDULE_BLOCK actions, with the blocks linking goalId:
+        // "$ref:0" to the just-created goal, so the user can log time against
+        // the goal as soon as they click apply.
+        const action: CoachProposedAction = {
+          ...raw,
+          payload: resolveRefs(raw.payload, results, pendingRefs) as
+            | Record<string, unknown>
+            | undefined,
+        };
+        const outcome = toOutcome(await this.dispatch(userId, action));
+        results.set(i, {
           index: i,
           type: action.type,
+          ok: true,
+          resultId: outcome.id,
+          ...(label ? { label } : {}),
+          ...(outcome.alreadyDone ? { alreadyDone: true } : {}),
+          ...(outcome.warning ? { warning: outcome.warning } : {}),
+        });
+        pendingRefs.delete(i);
+        deferred.delete(i);
+        return 'done';
+      } catch (err) {
+        if (err instanceof PendingRefError) return 'deferred';
+        const message = String(
+          err?.response?.message ??
+            err?.message ??
+            'Unknown error applying action',
+        );
+        if (
+          canDefer &&
+          (raw.type === 'CREATE_SCHEDULE_BLOCK' ||
+            raw.type === 'UPDATE_SCHEDULE_BLOCK') &&
+          message.includes('conflicts with an existing schedule block')
+        ) {
+          deferred.set(i, message);
+          return 'deferred';
+        }
+        this.logger.warn(
+          `Coach action failed userId=${userId} type=${raw.type} id=${raw.id ?? '-'}: ${message}`,
+        );
+        results.set(i, {
+          index: i,
+          type: raw.type,
           ok: false,
-          error: String(message),
+          error: message,
+          ...(label ? { label } : {}),
+        });
+        pendingRefs.delete(i);
+        return 'done';
+      }
+    };
+
+    // Run everything; go round again with whatever had to wait for as long as
+    // each round lands something (a landed action may free a slot or resolve
+    // a $ref a waiting one needs).
+    let queue = order;
+    for (;;) {
+      const waiting: number[] = [];
+      for (const i of queue) {
+        if ((await runOne(i)) === 'deferred') waiting.push(i);
+      }
+      const progressed = waiting.length < queue.length;
+      queue = waiting;
+      if (waiting.length === 0 || !progressed) break;
+    }
+
+    // Whatever still waits on a conflict is a set of moves that only work
+    // together, a swap being the plain case. Apply those as one atomic unit,
+    // then give everything else one more go.
+    if (queue.length > 0) {
+      await this.applyDeferredMoves(userId, actions, queue, deferred, results);
+      for (const i of queue) {
+        if (results.has(i)) continue;
+        if ((await runOne(i)) === 'done') continue;
+      }
+      for (const i of queue) {
+        if (results.has(i)) continue;
+        const reason = deferred.get(i);
+        if (reason) {
+          this.logger.warn(
+            `Coach action failed userId=${userId} type=${actions[i].type} id=${actions[i].id ?? '-'}: ${reason}`,
+          );
+        }
+        results.set(i, {
+          index: i,
+          type: actions[i].type,
+          ok: false,
+          ...(plan?.labels.get(i) ? { label: plan.labels.get(i) } : {}),
+          error:
+            reason ??
+            'Not applied, because a change it depends on in this proposal did not succeed.',
         });
       }
     }
 
-    return results;
+    const ordered = actions.map((_, i) => results.get(i)!);
+    await this.recordApply(userId, opts.sourceMessageId, ordered);
+    return ordered;
+  }
+
+  /**
+   * Load what the schedule preflight needs, and run it. Returns null for a
+   * batch with no schedule actions, so goal/task/journal-only proposals pay
+   * for no extra queries.
+   */
+  private async planSchedule(
+    userId: string,
+    actions: CoachProposedAction[],
+  ): Promise<SchedulePlan | null> {
+    if (!actions.some(isScheduleAction)) return null;
+    const blocks = await this.prisma.scheduleBlock.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        title: true,
+        dayOfWeek: true,
+        startTime: true,
+        endTime: true,
+        seriesId: true,
+      },
+    });
+    const known = new Set(blocks.map((b) => b.id));
+    const unknownDeleteIds = actions
+      .filter(
+        (a) => a.type === 'DELETE_SCHEDULE_BLOCK' && a.id && !known.has(a.id),
+      )
+      .map((a) => a.id!);
+    const tombstones = await this.findTombstones(userId, unknownDeleteIds);
+    return planScheduleBatch({ blocks, tombstones, actions });
+  }
+
+  /**
+   * Ids this user previously deleted THROUGH a Coach apply. This is what
+   * separates the two "not found" cases the old deleteIdempotent helper lumped
+   * together: re-applying an approved proposal (its own earlier delete
+   * already removed the row, so a tombstone exists: success) versus an id
+   * the Coach made up or lifted from someone else's data (no tombstone:
+   * failure, nothing deleted).
+   *
+   * Why tombstones and not the other options:
+   *  - Checking the id against the context the proposal was generated from
+   *    does not work: that context is rebuilt per turn and never stored, and
+   *    the id is by definition in the proposal message itself.
+   *  - Validating ownership up front alone breaks the legitimate case: on a
+   *    re-apply the row is gone precisely because the first apply worked.
+   *
+   * Kept in AuditLog rather than a new table: the model already exists, was
+   * unused, and is per-user and append-only, which is exactly the shape a
+   * tombstone needs. No migration.
+   */
+  private async findTombstones(
+    userId: string,
+    ids: string[],
+  ): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    try {
+      const rows = await this.prisma.auditLog.findMany({
+        where: { userId, action: COACH_DELETE_AUDIT, entityId: { in: ids } },
+        select: { entityId: true },
+      });
+      return new Set(
+        rows.map((r) => r.entityId).filter((x): x is string => !!x),
+      );
+    } catch (err) {
+      this.logger.warn(`Tombstone lookup failed userId=${userId}: ${err}`);
+      return new Set();
+    }
+  }
+
+  private async writeTombstone(
+    userId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.auditLog.create({
+        data: { userId, action: COACH_DELETE_AUDIT, entityType, entityId },
+      });
+    } catch (err) {
+      // Not fatal: the delete itself succeeded. The only cost is that a
+      // re-apply of this card reports the block as not found.
+      this.logger.warn(
+        `Tombstone write failed userId=${userId} ${entityType}=${entityId}: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Persist what happened when the user clicked Apply, keyed on the
+   * assistant message that carried the proposal. The Coach reads this back
+   * into its chat history on the next turn (buildCoachChatMessages), so "it
+   * failed, try again" is answered from what actually happened instead of by
+   * re-emitting the same failing proposal.
+   */
+  private async recordApply(
+    userId: string,
+    sourceMessageId: string | undefined,
+    results: CoachActionResult[],
+  ): Promise<void> {
+    if (!sourceMessageId) return;
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          userId,
+          action: COACH_APPLY_AUDIT,
+          entityType: 'CoachMessage',
+          entityId: sourceMessageId,
+          metadata: {
+            outcome: summarizeOutcome(results),
+            results: results.map((r) => ({
+              index: r.index,
+              type: r.type,
+              ok: r.ok,
+              ...(r.label ? { label: r.label } : {}),
+              ...(r.error ? { error: r.error.slice(0, 400) } : {}),
+              ...(r.warning ? { warning: r.warning.slice(0, 400) } : {}),
+              ...(r.skipped ? { skipped: true } : {}),
+              ...(r.alreadyDone ? { alreadyDone: true } : {}),
+            })),
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Apply log write failed userId=${userId}: ${err}`);
+    }
+  }
+
+  /**
+   * Last resort for schedule UPDATEs that conflicted only because of each
+   * other. Moves all of them in one transaction, with the conflict check
+   * against their finished positions, then applies any non-time fields
+   * (title, goalId, ...) the same actions carried.
+   */
+  private async applyDeferredMoves(
+    userId: string,
+    actions: CoachProposedAction[],
+    queue: number[],
+    deferred: Map<number, string>,
+    results: Map<number, CoachActionResult>,
+  ): Promise<void> {
+    const moveIdx = queue.filter(
+      (i) =>
+        actions[i].type === 'UPDATE_SCHEDULE_BLOCK' &&
+        actions[i].id &&
+        deferred.has(i) &&
+        (actions[i].payload as Record<string, unknown> | undefined)
+          ?.updateScope !== 'series',
+    );
+    if (moveIdx.length === 0) return;
+    const moves = moveIdx.map((i) => {
+      const p = (actions[i].payload ?? {}) as Record<string, unknown>;
+      return {
+        id: actions[i].id!,
+        dayOfWeek: typeof p.dayOfWeek === 'number' ? p.dayOfWeek : undefined,
+        startTime: typeof p.startTime === 'string' ? p.startTime : undefined,
+        endTime: typeof p.endTime === 'string' ? p.endTime : undefined,
+      };
+    });
+    try {
+      await this.schedule.moveBlocksAtomically(userId, moves);
+    } catch (err) {
+      const message = String(err?.response?.message ?? err?.message ?? err);
+      for (const i of moveIdx) deferred.set(i, message);
+      return;
+    }
+    for (const i of moveIdx) {
+      const rest = { ...((actions[i].payload ?? {}) as Record<string, any>) };
+      delete rest.dayOfWeek;
+      delete rest.startTime;
+      delete rest.endTime;
+      delete rest.updateScope;
+      const label = actions[i].expectedTitle
+        ? `Change "${actions[i].expectedTitle}"`
+        : undefined;
+      try {
+        if (Object.keys(rest).length > 0) {
+          const validated = await this.validatePayload(
+            'UPDATE_SCHEDULE_BLOCK',
+            rest,
+          );
+          await this.schedule.update(
+            userId,
+            actions[i].id!,
+            validated as unknown as UpdateScheduleBlockDto,
+          );
+        }
+        results.set(i, {
+          index: i,
+          type: actions[i].type,
+          ok: true,
+          resultId: actions[i].id,
+          ...(label ? { label } : {}),
+        });
+      } catch (err) {
+        results.set(i, {
+          index: i,
+          type: actions[i].type,
+          ok: false,
+          ...(label ? { label } : {}),
+          error: `Moved, but the rest of this change failed: ${String(err?.response?.message ?? err?.message ?? err)}`,
+        });
+      }
+    }
   }
 
   /**
@@ -241,7 +598,7 @@ export class CoachProposalsService {
   private async dispatch(
     userId: string,
     action: CoachProposedAction,
-  ): Promise<string | undefined> {
+  ): Promise<string | undefined | DispatchOutcome> {
     const rawPayload = action.payload ?? {};
     // CREATE_SCHEDULE_BLOCK carries `daysOfWeek`, a Coach-only fan-out field
     // that is not part of CreateScheduleBlockDto, so that case validates its
@@ -290,10 +647,9 @@ export class CoachProposalsService {
       }
       case 'DELETE_GOAL': {
         if (!action.id) throw new Error('DELETE_GOAL requires id');
-        await this.deleteIdempotent(() =>
+        return this.deleteVerified(userId, 'Goal', action.id, () =>
           this.goals.delete(userId, action.id!),
         );
-        return action.id;
       }
 
       // -------- Schedule blocks --------
@@ -328,12 +684,14 @@ export class CoachProposalsService {
           return this.createBlockIdempotent(userId, block);
         }
 
-        // One shared series across the requested days. Best-effort per day: a
-        // day that already has a genuinely conflicting (non-identical) block is
-        // skipped rather than failing the whole week. Return the first block id
-        // so a later $ref can still resolve.
+        // One shared series across the requested days. The preflight has
+        // already refused a batch where any of these days conflicts, so a
+        // failure here is a race with an edit made elsewhere. Still
+        // best-effort per day, but never silent: this used to report a clean
+        // success when some (or every) day had been skipped.
         const seriesId = randomUUID();
         let firstId: string | undefined;
+        const skipped: string[] = [];
         for (const d of days) {
           try {
             const id = await this.createBlockIdempotent(userId, {
@@ -344,11 +702,24 @@ export class CoachProposalsService {
             });
             if (!firstId) firstId = id;
           } catch (err) {
-            if (err instanceof BadRequestException) continue;
+            if (err instanceof BadRequestException) {
+              skipped.push(`${DAY_NAMES[d]}: ${err.message}`);
+              continue;
+            }
             throw err;
           }
         }
-        return firstId;
+        if (!firstId) {
+          throw new BadRequestException(
+            `Not added on any day. ${skipped.join('; ')}`,
+          );
+        }
+        return skipped.length
+          ? {
+              id: firstId,
+              warning: `Added on ${days.length - skipped.length} of ${days.length} days. Skipped ${skipped.join('; ')}`,
+            }
+          : firstId;
       }
       case 'UPDATE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('UPDATE_SCHEDULE_BLOCK requires id');
@@ -424,14 +795,13 @@ export class CoachProposalsService {
       }
       case 'DELETE_SCHEDULE_BLOCK': {
         if (!action.id) throw new Error('DELETE_SCHEDULE_BLOCK requires id');
-        // Idempotent delete: a block that's already gone is the desired end
-        // state, not a failure. The model sometimes proposes deletes for
-        // blocks that never existed (hallucinated ids on a fresh schedule);
-        // swallowing not-found keeps those from failing the whole batch.
-        await this.deleteIdempotent(() =>
+        // The preflight already refused unknown ids and reported tombstoned
+        // ones as already deleted, so reaching here means the id was a real
+        // block a moment ago. deleteVerified still covers the race where it
+        // went away in between.
+        return this.deleteVerified(userId, 'ScheduleBlock', action.id, () =>
           this.schedule.delete(userId, action.id!),
         );
-        return action.id;
       }
 
       // -------- Time entries --------
@@ -453,10 +823,9 @@ export class CoachProposalsService {
       }
       case 'DELETE_TIME_ENTRY': {
         if (!action.id) throw new Error('DELETE_TIME_ENTRY requires id');
-        await this.deleteIdempotent(() =>
+        return this.deleteVerified(userId, 'TimeEntry', action.id, () =>
           this.timeEntries.delete(userId, action.id!),
         );
-        return action.id;
       }
 
       // -------- Tasks --------
@@ -478,10 +847,9 @@ export class CoachProposalsService {
       }
       case 'DELETE_TASK': {
         if (!action.id) throw new Error('DELETE_TASK requires id');
-        await this.deleteIdempotent(() =>
+        return this.deleteVerified(userId, 'Task', action.id, () =>
           this.tasks.delete(userId, action.id!),
         );
-        return action.id;
       }
 
       // -------- Active practice (CoachInsight in ACCEPTED) --------
@@ -640,19 +1008,38 @@ export class CoachProposalsService {
   }
 
   /**
-   * Run a delete, treating "not found" as success. Deleting something that is
-   * already gone reaches the same end state the user approved, so it should not
-   * fail the action (and take the rest of a batch's reporting down with noise).
+   * Run a delete. "Not found" is success ONLY when this user's own earlier
+   * Coach apply removed that id (a tombstone exists). Otherwise the id never
+   * belonged to them, and reporting success is exactly the bug that made a
+   * card say "deleted" while the real block stayed put.
    */
-  private async deleteIdempotent(fn: () => Promise<unknown>): Promise<void> {
+  private async deleteVerified(
+    userId: string,
+    entityType: string,
+    id: string,
+    fn: () => Promise<unknown>,
+  ): Promise<DispatchOutcome> {
     try {
       await fn();
     } catch (err) {
-      if (err instanceof NotFoundException) return;
-      // Prisma "record to delete does not exist" also means already-gone.
-      if ((err as { code?: string })?.code === 'P2025') return;
-      throw err;
+      const notFound =
+        err instanceof NotFoundException ||
+        (err as { code?: string })?.code === 'P2025';
+      if (!notFound) throw err;
+      const tombstones = await this.findTombstones(userId, [id]);
+      if (tombstones.has(id)) {
+        return {
+          id,
+          alreadyDone: true,
+          warning: 'Already deleted by an earlier apply of this proposal.',
+        };
+      }
+      throw new NotFoundException(
+        `${ENTITY_LABEL[entityType] ?? 'Item'} not found, so nothing was deleted. The Coach referenced an id that is not in your data.`,
+      );
     }
+    await this.writeTombstone(userId, entityType, id);
+    return { id };
   }
 
   /**
@@ -844,6 +1231,48 @@ export class CoachProposalsService {
   }
 }
 
+/** AuditLog.action for a delete the Coach applied (a tombstone). */
+export const COACH_DELETE_AUDIT = 'coach.delete';
+/** AuditLog.action for the per-action outcome of one Apply click. */
+export const COACH_APPLY_AUDIT = 'coach.apply';
+
+const ENTITY_LABEL: Record<string, string> = {
+  Goal: 'Goal',
+  ScheduleBlock: 'Schedule block',
+  TimeEntry: 'Time entry',
+  Task: 'Task',
+};
+
+interface DispatchOutcome {
+  id?: string;
+  alreadyDone?: boolean;
+  warning?: string;
+}
+
+function toOutcome(v: string | undefined | DispatchOutcome): DispatchOutcome {
+  return typeof v === 'object' && v !== null ? v : { id: v };
+}
+
+function isDeleteType(type: string): boolean {
+  return isDestructiveActionType(type);
+}
+
+/**
+ * One word for how an Apply click went, shared by the API response, the apply
+ * log the Coach reads back, and the clients' card footer.
+ */
+export function summarizeOutcome(
+  results: CoachActionResult[],
+): 'applied' | 'partial' | 'failed' | 'refused' {
+  if (results.length > 0 && results.every((r) => r.ok)) return 'applied';
+  if (results.some((r) => r.skipped)) return 'refused';
+  if (results.some((r) => r.ok)) return 'partial';
+  return 'failed';
+}
+
+/** Thrown when a $ref points at an action that has not run yet. */
+class PendingRefError extends Error {}
+
 const DAY_NAMES = [
   'Sunday',
   'Monday',
@@ -904,13 +1333,23 @@ function flattenValidationErrors(errors: ValidationError[]): string {
  * Replace any `"$ref:N"` strings in the payload with the resultId of the
  * action at batch index N. Walks objects + arrays recursively. Used so the
  * Coach can express dependencies inside a single approval batch.
+ *
+ * Actions no longer run strictly in listed order (deletes go first, and a
+ * conflicting schedule action can wait for a later one), so a ref can point
+ * at an action that has not run yet. That throws PendingRefError, which the
+ * executor treats as "wait", not as a failure.
  */
-function resolveRefs(value: unknown, results: CoachActionResult[]): unknown {
+function resolveRefs(
+  value: unknown,
+  results: Map<number, CoachActionResult>,
+  pending: Set<number>,
+): unknown {
   if (typeof value === 'string') {
     const m = /^\$ref:(\d+)$/.exec(value);
     if (m) {
       const idx = Number(m[1]);
-      const ref = results[idx];
+      const ref = results.get(idx);
+      if (!ref && pending.has(idx)) throw new PendingRefError();
       if (!ref?.ok || !ref.resultId) {
         throw new Error(
           `Cannot resolve $ref:${idx}: prior action did not succeed or has no resultId`,
@@ -920,12 +1359,13 @@ function resolveRefs(value: unknown, results: CoachActionResult[]): unknown {
     }
     return value;
   }
-  if (Array.isArray(value)) return value.map((v) => resolveRefs(v, results));
+  if (Array.isArray(value))
+    return value.map((v) => resolveRefs(v, results, pending));
   if (value && typeof value === 'object') {
     const entries = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(entries))
-      out[k] = resolveRefs(entries[k], results);
+      out[k] = resolveRefs(entries[k], results, pending);
     return out;
   }
   return value;
