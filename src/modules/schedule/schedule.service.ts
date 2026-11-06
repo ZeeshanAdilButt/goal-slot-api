@@ -15,7 +15,7 @@ import {
 
 // A client that can run `scheduleBlock` queries: either the live
 // PrismaService or the `tx` handed to a `$transaction` callback. Lets
-// `checkTimeConflict` run either standalone or as part of one atomic
+// `findTimeConflict` run either standalone or as part of one atomic
 // check-then-insert (see `createWithConflictGuard`).
 type ScheduleBlockClient = Pick<PrismaService, 'scheduleBlock'>;
 
@@ -67,7 +67,7 @@ export class ScheduleService {
    * Rejects any block whose end is not strictly after its start.
    *
    * This is the real "schedule still double" root cause, and it is separate
-   * from the serializable-transaction race fixed above. `checkTimeConflict`
+   * from the serializable-transaction race fixed above. `findTimeConflict`
    * compares raw minute offsets (`newStart < blockEnd && newEnd > blockStart`)
    * with no midnight wrap-around, so for a block like 23:00-00:00 it computes
    * `1380 < 0` — false — even against a byte-identical existing row. The
@@ -123,7 +123,7 @@ export class ScheduleService {
 
   /**
    * The time-conflict check and the insert used to be two separate
-   * statements — `checkTimeConflict` then `prisma.scheduleBlock.create` —
+   * statements — `findTimeConflict` then `prisma.scheduleBlock.create` —
    * with nothing between them. Two concurrent creates for the same slot
    * (a double-tap before the button disables, a client retry racing its
    * own still-in-flight original attempt, or two different
@@ -156,7 +156,7 @@ export class ScheduleService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          const hasConflict = await this.checkTimeConflict(
+          const conflict = await this.findTimeConflict(
             userId,
             dto.dayOfWeek,
             dto.startTime,
@@ -164,9 +164,9 @@ export class ScheduleService {
             undefined,
             tx,
           );
-          if (hasConflict) {
+          if (conflict) {
             throw new BadRequestException(
-              'Time slot conflicts with an existing schedule block',
+              `Time slot conflicts with an existing schedule block: ${describeBlock(conflict)}`,
             );
           }
 
@@ -273,7 +273,7 @@ export class ScheduleService {
           this.assertNoSelfConflict(dto.blocks);
 
           for (const block of dto.blocks) {
-            const hasConflict = await this.checkTimeConflict(
+            const conflict = await this.findTimeConflict(
               userId,
               block.dayOfWeek,
               block.startTime,
@@ -281,9 +281,9 @@ export class ScheduleService {
               undefined,
               tx,
             );
-            if (hasConflict) {
+            if (conflict) {
               throw new BadRequestException(
-                `Time slot conflicts with an existing schedule block on ${DAY_NAMES[block.dayOfWeek]}`,
+                `Time slot conflicts with an existing schedule block on ${DAY_NAMES[block.dayOfWeek]}: ${describeBlock(conflict)}`,
               );
             }
           }
@@ -317,7 +317,7 @@ export class ScheduleService {
 
   /**
    * Pairwise overlap check across entries of the SAME batch, for the day
-   * they'd land on. Independent of `checkTimeConflict`, which only ever
+   * they'd land on. Independent of `findTimeConflict`, which only ever
    * compares a candidate against rows already committed to the table — two
    * not-yet-inserted entries in this same call are invisible to each other
    * there.
@@ -422,7 +422,7 @@ export class ScheduleService {
           // only `startTime: '23:00'` against a block ending 10:00 inverts
           // that block, and the patch alone doesn't show it.
           this.assertValidRange(nextStart, nextEnd);
-          const conflict = await this.checkTimeConflict(
+          const conflict = await this.findTimeConflict(
             userId,
             targetDay,
             nextStart,
@@ -431,7 +431,7 @@ export class ScheduleService {
           );
           if (conflict) {
             throw new BadRequestException(
-              'Time slot conflicts with an existing schedule block in this series',
+              `Time slot conflicts with an existing schedule block in this series: ${describeBlock(conflict)}`,
             );
           }
         }
@@ -451,7 +451,7 @@ export class ScheduleService {
     if (updateData.startTime || updateData.endTime) {
       // Same merge rule as the series branch above. Without this an existing
       // healthy block could be edited INTO an inverted range, after which it
-      // became invisible to `checkTimeConflict` and freely duplicable.
+      // became invisible to `findTimeConflict` and freely duplicable.
       this.assertValidRange(
         updateData.startTime ?? block.startTime,
         updateData.endTime ?? block.endTime,
@@ -463,16 +463,16 @@ export class ScheduleService {
       updateData.endTime ||
       updateData.dayOfWeek !== undefined
     ) {
-      const hasConflict = await this.checkTimeConflict(
+      const conflict = await this.findTimeConflict(
         userId,
         updateData.dayOfWeek ?? block.dayOfWeek,
         updateData.startTime ?? block.startTime,
         updateData.endTime ?? block.endTime,
         blockId,
       );
-      if (hasConflict) {
+      if (conflict) {
         throw new BadRequestException(
-          'Time slot conflicts with an existing schedule block',
+          `Time slot conflicts with an existing schedule block: ${describeBlock(conflict)}`,
         );
       }
     }
@@ -497,6 +497,88 @@ export class ScheduleService {
     return { message: 'Schedule block deleted' };
   }
 
+  /**
+   * Apply several single-block time/day changes as ONE unit, checking for
+   * conflicts against where every moved block ENDS UP rather than one move at
+   * a time.
+   *
+   * `update` checks each edit against the table as it stands, which is right
+   * for one edit and wrong for a set of edits that only make sense together.
+   * Swapping two adjacent blocks is the plain example: whichever moves first
+   * lands on the other one, which has not moved yet, so the swap fails in
+   * both orders even though the finished schedule is perfectly valid. The
+   * Coach proposal executor falls back to this when a batch of moves it has
+   * already validated as a whole still trips the per-edit check.
+   *
+   * All-or-nothing in one SERIALIZABLE transaction (same reasoning as
+   * `createWithConflictGuard`): either every move lands or none do.
+   */
+  async moveBlocksAtomically(
+    userId: string,
+    moves: Array<{
+      id: string;
+      dayOfWeek?: number;
+      startTime?: string;
+      endTime?: string;
+    }>,
+    attempt = 0,
+  ): Promise<string[]> {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const all = await tx.scheduleBlock.findMany({ where: { userId } });
+          const byId = new Map(all.map((b) => [b.id, { ...b }]));
+          for (const move of moves) {
+            const block = byId.get(move.id);
+            if (!block) {
+              throw new NotFoundException('Schedule block not found');
+            }
+            block.dayOfWeek = move.dayOfWeek ?? block.dayOfWeek;
+            block.startTime = move.startTime ?? block.startTime;
+            block.endTime = move.endTime ?? block.endTime;
+            this.assertValidRange(block.startTime, block.endTime);
+          }
+          const final = [...byId.values()];
+          for (const move of moves) {
+            const moved = byId.get(move.id)!;
+            const s = this.timeToMinutes(moved.startTime);
+            const e = this.timeToMinutes(moved.endTime);
+            const clash = final.find(
+              (b) =>
+                b.id !== moved.id &&
+                b.dayOfWeek === moved.dayOfWeek &&
+                s < this.timeToMinutes(b.endTime) &&
+                e > this.timeToMinutes(b.startTime),
+            );
+            if (clash) {
+              throw new BadRequestException(
+                `Time slot conflicts with an existing schedule block: ${describeBlock(clash)}`,
+              );
+            }
+          }
+          for (const move of moves) {
+            const moved = byId.get(move.id)!;
+            await tx.scheduleBlock.update({
+              where: { id: move.id },
+              data: {
+                dayOfWeek: moved.dayOfWeek,
+                startTime: moved.startTime,
+                endTime: moved.endTime,
+              },
+            });
+          }
+          return moves.map((m) => m.id);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializationFailure(error) && attempt < MAX_CONFLICT_RETRIES) {
+        return this.moveBlocksAtomically(userId, moves, attempt + 1);
+      }
+      throw error;
+    }
+  }
+
   // Wipe every schedule block for the user. Returns the count so the UI can
   // show "N blocks cleared". Used by the destructive "Clear all" button on
   // the schedule page.
@@ -507,14 +589,26 @@ export class ScheduleService {
     return { deleted: result.count };
   }
 
-  private async checkTimeConflict(
+  /**
+   * The first existing block on `dayOfWeek` that overlaps the given window,
+   * or null. Returning the row (not just a boolean) is what lets every
+   * conflict message name the block in the way: "conflicts with an existing
+   * schedule block" on its own sent the user, and the Coach reading the
+   * failure back, guessing which block it was.
+   */
+  private async findTimeConflict(
     userId: string,
     dayOfWeek: number,
     startTime: string,
     endTime: string,
     excludeId?: string,
     client: ScheduleBlockClient = this.prisma,
-  ): Promise<boolean> {
+  ): Promise<{
+    title: string;
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+  } | null> {
     const blocks = await client.scheduleBlock.findMany({
       where: {
         userId,
@@ -532,11 +626,11 @@ export class ScheduleService {
 
       // Check if times overlap
       if (newStart < blockEnd && newEnd > blockStart) {
-        return true;
+        return block;
       }
     }
 
-    return false;
+    return null;
   }
 
   private timeToMinutes(time: string): number {
@@ -576,6 +670,29 @@ export class ScheduleService {
 
     return weekSchedule;
   }
+}
+
+/**
+ * `"Book" (Tuesday 9:00 AM to 11:00 AM)`: how a conflict message names the
+ * block in the way. The Coach reads these messages back on its next turn
+ * (see the apply log in coach-proposals.service.ts), so it has to be able to
+ * tell from the text alone which block to move or shorten.
+ */
+export function describeBlock(block: {
+  title: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+}): string {
+  return `"${block.title}" (${DAY_NAMES[block.dayOfWeek] ?? 'day ' + block.dayOfWeek} ${formatTime12h(block.startTime)} to ${formatTime12h(block.endTime)})`;
+}
+
+export function formatTime12h(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
 /**
