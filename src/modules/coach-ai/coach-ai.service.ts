@@ -38,6 +38,36 @@ import {
   renderFreeTime,
   renderScheduleByTitle,
 } from './schedule-context';
+import { checkProposal, GuardBlock, repairInstruction } from './proposal-guard';
+import { guardProposalStream } from './proposal-stream';
+import {
+  CoachLlmProvider,
+  LlmUsage,
+} from '../../shared/services/llm/llm.interface';
+
+/** Extra model calls allowed to fix a proposal that fails the guard. */
+const MAX_REPAIR_ROUNDS = 2;
+
+function fenceProposal(json: string): string {
+  return '```coach-proposal\n' + json + '\n```';
+}
+
+/**
+ * Shown instead of a card when the proposal still fails after the repair
+ * rounds. Plain words, the concrete reasons, one question: a dead card that
+ * fails on Apply is worse than this.
+ */
+function withheldMessage(issues: string[]): string {
+  const reasons = issues
+    .slice(0, 3)
+    .map((x) => `- ${x.replace(/^Action \d+( \([A-Z_]+\))?: /, '')}`)
+    .join('\n');
+  return (
+    "\n\nI couldn't turn that into a change that fits your schedule without guessing, so I haven't proposed one yet. What got in the way:\n" +
+    reasons +
+    '\n\nHow would you like to handle that? Tell me and I will build the change.'
+  );
+}
 
 /**
  * Coach AI service — orchestrates BYOK lookup, token-budget enforcement,
@@ -93,6 +123,7 @@ export interface ContextBundle {
       | 'category'
       | 'isRecurring'
       | 'goalId'
+      | 'seriesId'
     >
   >;
   acceptedInsights: CoachInsight[];
@@ -577,8 +608,88 @@ export class CoachAiService {
       result,
       selectedModel: activeSelectedModel,
       isShared: resolved.kind === 'shared',
+      // Chat is where proposals come from, so only chat is guarded.
+      guardBlocks: context.scheduleBlocks,
     });
     // NOTE: chat does NOT trigger extraction.
+  }
+
+  /**
+   * Decide what the user sees in place of one proposal block: the block as
+   * the model wrote it (normalised), a repaired one, or a plain message.
+   * See proposal-guard.ts for why. Up to MAX_REPAIR_ROUNDS extra model calls,
+   * only when the first draft fails the check.
+   */
+  private async finalizeProposal(args: {
+    body: string;
+    prose: string;
+    blocks: GuardBlock[];
+    provider: CoachLlmProvider;
+    model: string;
+    messages: LlmChatMessage[];
+    userId: string;
+  }): Promise<{ text: string; usage?: LlmUsage }> {
+    const usage: LlmUsage = { promptTokens: 0, completionTokens: 0 };
+    let result = checkProposal(args.body, args.blocks);
+    if (result.ok) {
+      return { text: fenceProposal(result.json!) };
+    }
+    const firstIssues = result.issues;
+    let draft = args.body;
+    let afterBlock = '';
+    try {
+      for (let round = 0; !result.ok && round < MAX_REPAIR_ROUNDS; round++) {
+        const repairMessages: LlmChatMessage[] = [
+          ...args.messages,
+          {
+            role: 'assistant',
+            content: `${args.prose}${fenceProposal(draft)}`,
+          },
+          { role: 'user', content: repairInstruction(result.issues) },
+        ];
+        let text = '';
+        for await (const chunk of args.provider.streamCompletion(
+          repairMessages,
+          args.model,
+        )) {
+          text += chunk.delta;
+          if (chunk.done && chunk.usage) {
+            usage.promptTokens += chunk.usage.promptTokens;
+            usage.completionTokens += chunk.usage.completionTokens;
+          }
+        }
+        const m = /```coach-proposal\s*([\s\S]*?)```/.exec(text);
+        if (!m) {
+          // The model chose to ask instead of proposing. That is a valid
+          // outcome: say it, with no card.
+          this.logger.log(
+            `coach proposal withdrawn after check user=${args.userId}: ${firstIssues.length} issue(s)`,
+          );
+          return { text: `\n\n${text.trim()}`, usage };
+        }
+        draft = m[1].trim();
+        afterBlock = text.slice(m.index + m[0].length).trim();
+        result = checkProposal(draft, args.blocks);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `coach proposal repair call failed user=${args.userId}: ${err?.message ?? err}`,
+      );
+    }
+    if (result.ok) {
+      this.logger.log(
+        `coach proposal repaired user=${args.userId}: fixed ${firstIssues.length} issue(s)`,
+      );
+      const tail = afterBlock ? `\n\n${afterBlock.slice(0, 600)}` : '';
+      return {
+        text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it, so the card may differ from my notes above.${tail}`,
+        usage,
+      };
+    }
+    this.logger.warn(
+      `coach proposal withheld user=${args.userId}: ${result.issues.join(' | ')}`,
+    );
+    return { text: withheldMessage(result.issues), usage };
   }
 
   // ----- Shared internals -----
@@ -598,6 +709,12 @@ export class CoachAiService {
      *  to a non-existent BYOK row; daily message count is incremented
      *  on the user's SharedCoachUsage row instead. */
     isShared?: boolean;
+    /**
+     * The user's schedule as it was put in the prompt. When present, every
+     * coach-proposal block is checked against it before it reaches the
+     * client, and repaired or replaced if it would be refused on apply.
+     */
+    guardBlocks?: GuardBlock[];
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
     const model = this.llmFactory.resolveModel(
@@ -609,7 +726,21 @@ export class CoachAiService {
     let usage: { promptTokens: number; completionTokens: number } | undefined;
 
     try {
-      const stream = provider.streamCompletion(args.messages, model);
+      const raw = provider.streamCompletion(args.messages, model);
+      const guardBlocks = args.guardBlocks;
+      const stream = guardBlocks
+        ? guardProposalStream(raw, (body, prose) =>
+            this.finalizeProposal({
+              body,
+              prose,
+              blocks: guardBlocks,
+              provider,
+              model,
+              messages: args.messages,
+              userId: args.userId,
+            }),
+          )
+        : raw;
       for await (const chunk of stream as AsyncIterable<LlmStreamChunk>) {
         if (chunk.delta) fullText += chunk.delta;
         if (chunk.done) {
@@ -1127,6 +1258,7 @@ export class CoachAiService {
           category: true,
           isRecurring: true,
           goalId: true,
+          seriesId: true,
         },
       }),
 
