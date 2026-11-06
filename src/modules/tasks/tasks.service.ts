@@ -574,13 +574,15 @@ export class TasksService {
       { goal: true },
     );
 
-    // Find the completion time entry. Scoped to the actor: on a personal
-    // task that is every completion entry there is, and on a project task it
-    // stops one member's restore from deleting time another member logged.
+    // The completion entry belongs to whoever completed the task, which on a
+    // project task may be another member. Restoring un-completes the task, so
+    // that entry goes too, whoever owns it: otherwise completing it again
+    // would count the completer's time twice. Tracker and manual entries are
+    // untouched (only source COMPLETION is removed). On a personal task the
+    // only possible completer is the owner, so behaviour there is unchanged.
     const completionEntry = await this.prisma.timeEntry.findFirst({
       where: {
         taskId: taskId,
-        userId,
         source: TimeEntrySource.COMPLETION,
       },
       orderBy: { createdAt: 'desc' },
@@ -588,6 +590,15 @@ export class TasksService {
 
     const ownGoalId =
       task.goalId && task.goal?.userId === userId ? task.goalId : null;
+    // Goals whose loggedHours change: the actor's own goal on this task, and
+    // the goal the deleted completion entry counted toward (the completer's).
+    const goalIdsToRecompute = [
+      ...new Set(
+        [ownGoalId, completionEntry?.goalId ?? null].filter(
+          (id): id is string => !!id,
+        ),
+      ),
+    ];
 
     // Transaction to ensure consistency
     await this.prisma.$transaction(async (tx) => {
@@ -608,13 +619,13 @@ export class TasksService {
 
       // Recompute loggedHours from the live SUM after the deletion so the
       // goal stays in sync regardless of which entries existed before.
-      if (ownGoalId) {
+      for (const goalId of goalIdsToRecompute) {
         const agg = await tx.timeEntry.aggregate({
-          where: { goalId: ownGoalId },
+          where: { goalId },
           _sum: { duration: true },
         });
         await tx.goal.update({
-          where: { id: ownGoalId },
+          where: { id: goalId },
           data: { loggedHours: (agg._sum.duration ?? 0) / 60 },
         });
       }

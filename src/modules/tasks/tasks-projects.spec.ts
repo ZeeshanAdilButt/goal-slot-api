@@ -424,7 +424,7 @@ describe('TasksService with projects', () => {
       ]);
     });
 
-    it("restoring does not delete another member's completion entry", async () => {
+    it("a member's restore removes the completer's completion entry, so re-completing counts once", async () => {
       const w = buildWorld();
       await w.tasksService.complete(ADMIN, 't-admin-project', {
         actualMinutes: 45,
@@ -434,8 +434,39 @@ describe('TasksService with projects', () => {
       const row = w.db.tables.task.find((t) => t.id === 't-admin-project')!;
       expect(row.status).toBe('TODO');
       expect(
-        w.db.tables.timeEntry.filter((e) => e.userId === ADMIN),
-      ).toHaveLength(1);
+        w.db.tables.timeEntry.filter(
+          (e) => e.taskId === 't-admin-project' && e.source === 'COMPLETION',
+        ),
+      ).toHaveLength(0);
+
+      await w.tasksService.complete(ADMIN, 't-admin-project', {
+        actualMinutes: 45,
+      });
+      const completions = w.db.tables.timeEntry.filter(
+        (e) => e.taskId === 't-admin-project' && e.source === 'COMPLETION',
+      );
+      expect(completions).toHaveLength(1);
+      expect(completions[0]).toMatchObject({ userId: ADMIN, duration: 45 });
+    });
+
+    it('a restore never deletes tracker or manual time on the task', async () => {
+      const w = buildWorld();
+      w.db.seed('timeEntry', {
+        id: 'te-tracker',
+        userId: ADMIN,
+        taskId: 't-admin-project',
+        goalId: null,
+        source: 'TRACKER',
+        duration: 30,
+        createdAt: new Date('2026-11-01T10:00:00Z'),
+      });
+      await w.tasksService.complete(MEMBER, 't-admin-project', {
+        actualMinutes: 10,
+      });
+      await w.tasksService.restore(ADMIN, 't-admin-project');
+      expect(
+        w.db.tables.timeEntry.filter((e) => e.taskId === 't-admin-project'),
+      ).toEqual([expect.objectContaining({ id: 'te-tracker' })]);
     });
 
     it('restoring your own completion removes your entry, as before', async () => {
