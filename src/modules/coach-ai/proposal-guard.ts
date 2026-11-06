@@ -1,5 +1,6 @@
 import { CoachProposedAction } from '../coach-proposals/dto/apply-proposals.dto';
 import {
+  createDays,
   fmt12h,
   normalizeTitle,
   PlanBlock,
@@ -354,13 +355,18 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
   });
 
   const plan = planScheduleBatch({ blocks, tombstones: new Set(), actions });
+  const hinted = new Set<string>();
   for (const [i, issue] of [...plan.issues].sort((x, y) => x[0] - y[0])) {
     // Planner messages speak in titles, days and times already; only the
     // trailing "Nothing was changed" (true of every withheld card) and any
     // "The Coach referenced a block id" aside are trimmed for the user.
     const plain = issue.replace(/ Nothing was (changed|deleted)\.$/, '');
+    // Model-only: name the exact fix, once per distinct fix.
+    const hint = fixHint(actions, i, blocks);
+    const freshHint = hint && !hinted.has(hint) ? hint : undefined;
+    if (freshHint) hinted.add(freshHint);
     sink.add(
-      `Action ${i + 1}: ${plain}`,
+      `Action ${i + 1}: ${plain}${freshHint ? ` FIX: ${freshHint}` : ''}`,
       plain
         .replace(/ The Coach referenced a block id that does not exist\./, '')
         .replace(/ with this id/, ''),
@@ -381,11 +387,245 @@ export function checkProposal(text: string, blocks: GuardBlock[]): GuardResult {
   };
 }
 
+function dayList(list: GuardBlock[]): string {
+  return [...new Set(list.map((b) => b.dayOfWeek))]
+    .sort((a, b) => a - b)
+    .map((d) => DAY_SHORT[d])
+    .join(', ');
+}
+
+/** "It is one series ...: use ONE UPDATE with updateScope series on id=..." */
+function seriesHint(block: GuardBlock, blocks: GuardBlock[]): string {
+  if (!block.seriesId) return '';
+  const siblings = blocks.filter((b) => b.seriesId === block.seriesId);
+  if (siblings.length < 2) return '';
+  return ` "${block.title}" is one series on ${dayList(siblings)}: to rename or retime all of it, use ONE UPDATE_SCHEDULE_BLOCK with payload.updateScope "series" on id=${block.id}.`;
+}
+
+/**
+ * The concrete fix for the problem the planner found on action `i`, for the
+ * repair prompt. Production showed why this has to be spelled out: told only
+ * "this overlaps Study", gpt-4o-mini withdrew and asked the user to choose,
+ * when the user had already said where the labs go ("keep Reading and Labs
+ * but make it Core Engineering and add one more lab").
+ *
+ *  - New blocks on the same days as a block this proposal only RENAMES are
+ *    almost always meant to go inside it: name the SPLIT on that block's real
+ *    id with the pieces and minutes.
+ *  - Otherwise, new blocks that land inside an existing block's slot: name
+ *    the SPLIT on that block, or a free slot.
+ *  - A conflicting time change on one day of a multi-day series: name the
+ *    series id and updateScope.
+ */
+function fixHint(
+  actions: CoachProposedAction[],
+  i: number,
+  blocks: GuardBlock[],
+): string | undefined {
+  const a = actions[i];
+  const p = (a.payload ?? {}) as Record<string, unknown>;
+  const byId = new Map(blocks.map((b) => [b.id, b]));
+
+  const deleted = new Set(
+    actions
+      .filter((x) => x.type === 'DELETE_SCHEDULE_BLOCK' && x.id)
+      .map((x) => x.id!),
+  );
+
+  if (a.type === 'UPDATE_SCHEDULE_BLOCK') {
+    const target = a.id ? byId.get(a.id) : undefined;
+    if (!target) return undefined;
+    const start =
+      typeof p.startTime === 'string' ? p.startTime : target.startTime;
+    const end = typeof p.endTime === 'string' ? p.endTime : target.endTime;
+    const day =
+      typeof p.dayOfWeek === 'number' ? p.dayOfWeek : target.dayOfWeek;
+    const blocker = blocks.find(
+      (b) =>
+        b.id !== target.id &&
+        b.dayOfWeek === day &&
+        !deleted.has(b.id) &&
+        toMinutes(b.startTime) < toMinutes(end) &&
+        toMinutes(start) < toMinutes(b.endTime),
+    );
+    const sameMove = blocker
+      ? sameTitleMovedElsewhere(blocker, actions, byId)
+      : '';
+    return (sameMove || seriesHint(target, blocks)).trim() || undefined;
+  }
+  if (a.type !== 'CREATE_SCHEDULE_BLOCK') return undefined;
+  if (typeof p.startTime !== 'string' || typeof p.endTime !== 'string') {
+    return undefined;
+  }
+  const days = createDays(p);
+
+  // (1) A block this proposal renames (title only, no time change) on the
+  // same days: the new blocks belong inside it.
+  for (const u of actions) {
+    if (u.type !== 'UPDATE_SCHEDULE_BLOCK') continue;
+    const up = (u.payload ?? {}) as Record<string, unknown>;
+    if (typeof up.title !== 'string' || up.startTime || up.endTime) continue;
+    const targets =
+      u.id && byId.get(u.id)
+        ? [byId.get(u.id)!]
+        : u.expectedTitle
+          ? blocks.filter((b) => looseTitleMatch(b.title, u.expectedTitle!))
+          : [];
+    const owner = targets.find((t) => days.includes(t.dayOfWeek));
+    if (!owner) continue;
+    const window = toMinutes(owner.endTime) - toMinutes(owner.startTime);
+    const pieces = actions
+      .filter((x) => x.type === 'CREATE_SCHEDULE_BLOCK')
+      .map((x) => (x.payload ?? {}) as Record<string, unknown>)
+      .filter(
+        (xp) =>
+          createDays(xp).includes(owner.dayOfWeek) &&
+          typeof xp.title === 'string' &&
+          typeof xp.startTime === 'string' &&
+          typeof xp.endTime === 'string',
+      )
+      .map((xp) => ({
+        title: xp.title as string,
+        minutes:
+          toMinutes(xp.endTime as string) - toMinutes(xp.startTime as string),
+      }));
+    const used = pieces.reduce((n, x) => n + x.minutes, 0);
+    const keep = window - used;
+    const all = [
+      ...(keep > 0 ? [{ title: up.title, minutes: keep }] : []),
+      ...pieces,
+    ];
+    const occurrences = blocks.filter(
+      (b) => normalizeTitle(b.title) === normalizeTitle(owner.title),
+    );
+    return (
+      `The new blocks go inside "${owner.title}", which this proposal renames to "${up.title}". ` +
+      `Replace that UPDATE and these CREATEs with ONE action: ` +
+      JSON.stringify({
+        type: 'SPLIT_SCHEDULE_BLOCK',
+        id: owner.id,
+        expectedTitle: owner.title,
+        payload: { allOccurrences: true, pieces: all },
+      }) +
+      `. The server lays the pieces out inside its ${fmt12h(owner.startTime)} to ${fmt12h(owner.endTime)} slot on ${dayList(occurrences)}; do not give times.`
+    );
+  }
+
+  // (2) The new block overlaps an existing block that is staying.
+  const blocker = blocks.find(
+    (b) =>
+      days.includes(b.dayOfWeek) &&
+      !deleted.has(b.id) &&
+      toMinutes(b.startTime) < toMinutes(p.endTime as string) &&
+      toMinutes(p.startTime as string) < toMinutes(b.endTime),
+  );
+  if (!blocker) return undefined;
+  // (2a) The proposal moves that same block on another day but forgot this
+  // day ("Deep Reading moves to 9 on Sunday", Saturday left at 7 to 1).
+  const sameMove = sameTitleMovedElsewhere(blocker, actions, byId);
+  if (sameMove) return sameMove.trim();
+  // (2b) Related titles: the new block is probably a piece of that block.
+  const inside =
+    toMinutes(blocker.startTime) <= toMinutes(p.startTime as string) &&
+    toMinutes(p.endTime as string) <= toMinutes(blocker.endTime);
+  if (
+    inside &&
+    typeof p.title === 'string' &&
+    relatedTitles(p.title, blocker.title)
+  ) {
+    return (
+      `"${p.title}" lands inside "${blocker.title}" (id=${blocker.id}, ${fmt12h(blocker.startTime)} to ${fmt12h(blocker.endTime)}). ` +
+      `If it is a piece of that block, use SPLIT_SCHEDULE_BLOCK on id=${blocker.id} with expectedTitle "${blocker.title}" and pieces [{"title","minutes"}...] instead of creating a block with times.` +
+      seriesHint(blocker, blocks)
+    );
+  }
+  // (2c) Unrelated block the user did not ask to change: never suggest
+  // splitting it. Move the new block or drop that part and ask.
+  return (
+    `"${blocker.title}" (${DAY_SHORT[blocker.dayOfWeek]} ${fmt12h(blocker.startTime)} to ${fmt12h(blocker.endTime)}) stays where it is. ` +
+    `Put "${String(p.title)}" in a gap from "## Free time per day" that the user's words allow, or leave this part out and ask about it.`
+  );
+}
+
+/** Words that carry meaning in a block title (no "and", "the", "time"). */
+function titleWords(title: string): Set<string> {
+  const stop = new Set([
+    'and',
+    'the',
+    'of',
+    'for',
+    'time',
+    'block',
+    'with',
+    'a',
+    'to',
+  ]);
+  return new Set(
+    normalizeTitle(title)
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .split(' ')
+      .filter((w) => w.length > 2 && !stop.has(w)),
+  );
+}
+
+function relatedTitles(a: string, b: string): boolean {
+  if (looseTitleMatch(a, b)) return true;
+  const wa = titleWords(a);
+  return [...titleWords(b)].some(
+    (w) => wa.has(w) || wa.has(w.replace(/s$/, '')),
+  );
+}
+
+/**
+ * When the proposal retimes a block with this title on some OTHER day but
+ * leaves this one where it was, say so: the user asked for the change on
+ * every day ("for the weekend, Deep Reading moves to 9 am"), and the model
+ * forgot one of them.
+ */
+function sameTitleMovedElsewhere(
+  blocker: GuardBlock,
+  actions: CoachProposedAction[],
+  byId: Map<string, GuardBlock>,
+): string {
+  for (const u of actions) {
+    if (u.type !== 'UPDATE_SCHEDULE_BLOCK' || !u.id || u.id === blocker.id)
+      continue;
+    const t = byId.get(u.id);
+    const up = (u.payload ?? {}) as Record<string, unknown>;
+    if (!t || normalizeTitle(t.title) !== normalizeTitle(blocker.title))
+      continue;
+    if (typeof up.startTime !== 'string' && typeof up.endTime !== 'string')
+      continue;
+    const already = actions.some(
+      (x) => x.type === 'UPDATE_SCHEDULE_BLOCK' && x.id === blocker.id,
+    );
+    if (already) continue;
+    return (
+      ` This proposal moves "${t.title}" on ${DAY_SHORT[t.dayOfWeek]} but not on ${DAY_SHORT[blocker.dayOfWeek]}. ` +
+      `If it should move on ${DAY_SHORT[blocker.dayOfWeek]} too, add ` +
+      JSON.stringify({
+        type: 'UPDATE_SCHEDULE_BLOCK',
+        id: blocker.id,
+        expectedTitle: blocker.title,
+        payload: Object.fromEntries(
+          Object.entries(up).filter(
+            ([k]) => k === 'startTime' || k === 'endTime',
+          ),
+        ),
+      }) +
+      '.'
+    );
+  }
+  return '';
+}
+
 /** The message that asks the model to fix its own proposal. */
 export function repairInstruction(issues: string[]): string {
   return [
-    '[App check, not the user: the proposal above would be REFUSED when applied, so it was not shown to the user. Problems:',
+    '[App check, not the user: the proposal above would be REFUSED when applied, so it was not shown to the user. Problems, each with the fix to make where one is known:',
     ...issues.map((x) => `- ${x}`),
-    'Reply with ONE corrected ```coach-proposal block that fixes every problem, using only ids and times from the context, then at most two short sentences. Use SPLIT_SCHEDULE_BLOCK for splitting a block into pieces so you do not have to compute times. Leave out any part you cannot do without guessing, and ask about it in one short question. If nothing in the request can be done safely, reply with no block at all and one short question.]',
+    'Reply with ONE corrected ```coach-proposal block, using only ids and times from the context. Apply every FIX above exactly. Use SPLIT_SCHEDULE_BLOCK for putting pieces inside a block so you never compute times.',
+    'PROPOSE EVERY PART THAT FITS. If one part of the request cannot fit without moving or shrinking a block the user did not ask to change (for example 3 hours of Study when Work starts right after the current 2 hours), leave ONLY that part out of the block and, after the block, ask exactly one short question about that part. Never hold back the parts that fit because one part does not.',
+    'Write nothing before the block. After it, at most three short sentences: what the card does, and the one question if there is one. Only if nothing at all can be done safely, reply with no block and one short question.]',
   ].join('\n');
 }

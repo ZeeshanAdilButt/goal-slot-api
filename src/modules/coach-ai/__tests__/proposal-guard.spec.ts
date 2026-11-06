@@ -272,7 +272,11 @@ describe('CoachAiService.finalizeProposal', () => {
       model: 'm',
       messages: [],
       userId: 'u',
-    }) as Promise<{ text: string; usage?: { promptTokens: number } }>;
+    }) as Promise<{
+      text: string;
+      usage?: { promptTokens: number };
+      card?: boolean;
+    }>;
   };
 
   it('shows a valid proposal as is, with no extra model call', async () => {
@@ -313,8 +317,9 @@ describe('CoachAiService.finalizeProposal', () => {
     ]);
     expect(parseReply(r.text).proposals).toHaveLength(0);
     expect(r.text.trim()).toBe(
-      'Should Study start at 8:00 AM, or end at 12:00 PM?',
+      "I haven't changed anything yet. Should Study start at 8:00 AM, or end at 12:00 PM?",
     );
+    expect(r.card).toBe(false);
   });
 });
 
