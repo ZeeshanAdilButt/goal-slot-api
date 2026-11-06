@@ -6,7 +6,7 @@ import {
   NOTHING_CHANGED,
 } from '../coach-ai.service';
 import { checkProposal } from '../proposal-guard';
-import { guardProposalStream } from '../proposal-stream';
+import { guardProposalStream, stripCoverageClaims } from '../proposal-stream';
 import { renderApplyNote } from '../schedule-context';
 import { renderUnmatchedQuotedTitles } from '../quoted-titles';
 import {
@@ -842,7 +842,10 @@ describe('review findings on the stream and the reviewer call', () => {
     const seen: string[] = [];
     const source = (async function* () {
       yield { delta: plan, done: false } as LlmStreamChunk;
-      yield { delta: '```coach-proposal\n{}\n```', done: false } as LlmStreamChunk;
+      yield {
+        delta: '```coach-proposal\n{}\n```',
+        done: false,
+      } as LlmStreamChunk;
       yield { delta: '', done: true } as LlmStreamChunk;
     })();
     const out: string[] = [];
@@ -859,7 +862,6 @@ describe('review findings on the stream and the reviewer call', () => {
   });
 
   it('strips completion-wording coverage claims', () => {
-    const { stripCoverageClaims } = require('../proposal-stream');
     expect(
       stripCoverageClaims(
         'I have made all the changes you requested. Do you want Study at 3 hours?',
