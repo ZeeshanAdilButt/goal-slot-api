@@ -21,6 +21,7 @@ import {
   MAX_SESSION_MS,
   STALE_AFTER_MS,
 } from './active-timer.constants';
+import { findWritableTask } from '../projects/project-access';
 
 type SessionRow = {
   id: string;
@@ -311,10 +312,7 @@ export class ActiveTimerService {
 
     let taskTitle: string | null = null;
     if (taskId) {
-      const task = await this.prisma.task.findFirst({
-        where: { id: taskId, userId },
-        select: { title: true },
-      });
+      const task = await findWritableTask(this.prisma, userId, taskId);
       taskTitle = task?.title ?? null;
     }
 
@@ -424,7 +422,9 @@ export class ActiveTimerService {
   /**
    * Attribution ids must belong to the caller. Without this a client could
    * pin its time to another user's goal, which the foreign key alone would
-   * happily accept.
+   * happily accept. Goal and schedule block are strictly the caller's own; a
+   * task may also be a project task the caller can write to (ADMIN or
+   * MEMBER), so members can run the timer on each other's project tasks.
    */
   private async assertAttributionOwned(
     userId: string,
@@ -447,11 +447,9 @@ export class ActiveTimerService {
     }
     if (dto.taskId) {
       checks.push(
-        this.prisma.task
-          .count({ where: { id: dto.taskId, userId } })
-          .then((n) => {
-            if (n === 0) throw new BadRequestException('Task not found');
-          }),
+        findWritableTask(this.prisma, userId, dto.taskId).then((task) => {
+          if (!task) throw new BadRequestException('Task not found');
+        }),
       );
     }
     if (dto.scheduleBlockId) {

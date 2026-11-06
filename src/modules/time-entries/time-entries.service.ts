@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CreateTimeEntryDto, UpdateTimeEntryDto } from './dto/time-entries.dto';
+import { findWritableTask } from '../projects/project-access';
 
 @Injectable()
 export class TimeEntriesService {
@@ -25,7 +26,10 @@ export class TimeEntriesService {
    * have their own minutes folded into the victim's loggedHours.
    *
    * Mirrors TasksService.validateRelations, extended to cover taskId, which
-   * time entries also carry.
+   * time entries also carry. Goal and schedule block stay strictly the
+   * caller's own; a task may also be a project task the caller can write to
+   * (ADMIN or MEMBER), so members can log time on each other's project
+   * tasks. Guests and non-members get the same 403 as a stranger's task.
    */
   private async validateRelations(
     userId: string,
@@ -51,7 +55,7 @@ export class TimeEntriesService {
           })
         : Promise.resolve(undefined),
       taskId
-        ? this.prisma.task.findFirst({ where: { id: taskId, userId } })
+        ? findWritableTask(this.prisma, userId, taskId)
         : Promise.resolve(undefined),
     ]);
 
@@ -97,10 +101,7 @@ export class TimeEntriesService {
     // fourth serialized round-trip.
     const [taskForTitle, todayEntries, user] = await Promise.all([
       needsTaskTitle
-        ? this.prisma.task.findFirst({
-            where: { id: dto.taskId as string, userId },
-            select: { title: true },
-          })
+        ? findWritableTask(this.prisma, userId, dto.taskId as string)
         : Promise.resolve(undefined),
       this.prisma.timeEntry.count({
         where: {
@@ -211,10 +212,7 @@ export class TimeEntriesService {
 
     let taskTitle = dto.taskTitle;
     if (dto.taskId && !taskTitle) {
-      const task = await this.prisma.task.findFirst({
-        where: { id: dto.taskId, userId },
-        select: { title: true },
-      });
+      const task = await findWritableTask(this.prisma, userId, dto.taskId);
       taskTitle = task?.title;
     }
 

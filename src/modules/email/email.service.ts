@@ -242,6 +242,93 @@ GoalSlot`;
     return { success: true, id: result.data?.id };
   }
 
+  // Project invitation (Projects inside Tasks). Same layout as
+  // sendShareInvitation; the link lands on the web accept page, which signs
+  // the recipient in (or up) and then accepts with the token.
+  async sendProjectInvitation(params: {
+    toEmail: string;
+    inviterName: string;
+    inviterEmail: string;
+    projectName: string;
+    role: 'ADMIN' | 'MEMBER' | 'GUEST';
+    inviteToken: string;
+  }) {
+    const { toEmail, inviterName, inviterEmail, projectName, role } = params;
+    const safeInviterName = escapeHtml(inviterName);
+    const safeInviterEmail = escapeHtml(inviterEmail);
+    const safeProjectName = escapeHtml(projectName || 'a project');
+
+    const roleText =
+      role === 'ADMIN'
+        ? 'an admin: you can manage tasks, members and invites'
+        : role === 'GUEST'
+          ? 'a guest: you can view the project and its tasks'
+          : 'a member: you can create, edit and track time on tasks';
+
+    const acceptLink = `${this.appUrl}/projects/invite?token=${encodeURIComponent(params.inviteToken)}`;
+
+    const html = this.renderLayout({
+      preheader: `${safeInviterName} invited you to the project ${safeProjectName} on GoalSlot.`,
+      bodyHtml: `
+        <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">You have been invited to a project</h1>
+        <p style="margin:0 0 12px;color:#3f3f46;">
+          <strong>${safeInviterName}</strong> (${safeInviterEmail}) invited you to join this project on GoalSlot as ${escapeHtml(roleText)}.
+        </p>
+        ${this.renderTitleCard(safeProjectName)}
+        ${this.renderButton(acceptLink, 'View invitation')}
+        ${this.renderCallout({
+          tone: 'info',
+          title: 'About this invitation',
+          html: `<ul style="margin:6px 0 0;padding-left:18px;color:#3f3f46;">
+            <li>Sign in or sign up with this email address to accept.</li>
+            <li>Your personal tasks, goals and schedule stay private.</li>
+            <li>Expires in 7 days.</li>
+          </ul>`,
+        })}
+        <p style="margin:18px 0 6px;font-size:12px;color:#71717a;">If the button does not work, copy this link into your browser:</p>
+        <p style="margin:0;font-size:12px;color:#52525b;word-break:break-all;">${acceptLink}</p>
+      `,
+    });
+
+    const text = `You have been invited to a project on GoalSlot.
+
+${inviterName} (${inviterEmail}) invited you to join "${projectName}" as ${roleText}.
+
+View the invitation:
+${acceptLink}
+
+- Sign in or sign up with this email address to accept.
+- Your personal tasks, goals and schedule stay private.
+- Expires in 7 days.
+
+If you did not expect this invitation, you can safely ignore it.
+
+GoalSlot`;
+
+    const result = await this.resend.emails.send({
+      from: this.notificationEmail,
+      to: toEmail,
+      subject: `${safeInviterName} invited you to ${safeProjectName} on GoalSlot`,
+      html,
+      text,
+    });
+
+    if (result.error) {
+      const errorMessage = result.error.message || 'Unknown Resend API error';
+      this.logger.error(
+        `Resend API error for ${this.maskEmail(toEmail)}: ${errorMessage}`,
+      );
+      throw new InternalServerErrorException(
+        `Failed to send project invitation email: ${errorMessage}`,
+      );
+    }
+
+    this.logger.log(
+      `Project invitation email sent to ${this.maskEmail(toEmail)}, id: ${result.data?.id}`,
+    );
+    return { success: true, id: result.data?.id };
+  }
+
   // Note share invitation. Recipients land on the dashboard with the
   // shared note pre-selected; signing in (or signing up with the same
   // email) auto-resolves the share to their user account.

@@ -23,9 +23,11 @@ class FakePrisma {
   updateCalls: any[] = [];
 
   task = {
+    // Looked up by id; ownership is decided in code by the shared
+    // project-access helper, so the fake returns the row as Postgres would.
     findFirst: async ({ where }: any) =>
-      where.id === TASK && where.userId === USER
-        ? { id: TASK, userId: USER, title: 'Call the Bank' }
+      where.id === TASK
+        ? { id: TASK, userId: USER, title: 'Call the Bank', projectId: null }
         : null,
     update: async (args: any) => {
       this.updateCalls.push(args);
@@ -180,7 +182,8 @@ class FakeTrackedMinutesPrisma {
     findFirst: async (args: any) => {
       this.findFirstArgs.push(args);
       const row = this.tasksById[args?.where?.id];
-      if (!row || row.userId !== args?.where?.userId) return null;
+      if (!row) return null;
+      if (args?.where?.userId && row.userId !== args.where.userId) return null;
       const out = { ...row };
       if (args?.include?.timeEntries) {
         out.timeEntries = this.entries
