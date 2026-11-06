@@ -39,7 +39,8 @@ import {
   renderScheduleByTitle,
 } from './schedule-context';
 import { checkProposal, GuardBlock, repairInstruction } from './proposal-guard';
-import { guardProposalStream } from './proposal-stream';
+import { FinalizeResult, guardProposalStream } from './proposal-stream';
+import { repairModelFor } from './repair-model';
 import {
   CoachLlmProvider,
   LlmUsage,
@@ -85,10 +86,38 @@ function withheldMessage(userIssues: string[]): string {
     .map((x) => `- ${x}`)
     .join('\n');
   return (
-    "\n\nI couldn't turn that into a change that fits your schedule without guessing, so I haven't proposed one yet. What got in the way:\n" +
+    `\n\n${NOTHING_CHANGED} I couldn't turn that into a change that fits your schedule without guessing. What got in the way:\n` +
     reasons +
     '\n\nHow would you like to handle that? Tell me and I will build the change.'
   );
+}
+
+/** The plain first line of every reply that ends without a card. */
+export const NOTHING_CHANGED = "I haven't changed anything yet.";
+
+const NAMES_A_CARD = /\b(proposal|card)\b/i;
+const POINTS_AT_IT =
+  /\b(review|apply|approve|looks? (correct|good|right)|here'?s|here is|below|above|let me know)\b/i;
+
+/**
+ * Drop sentences that talk about a card, for text shown when there is no
+ * card ("Please review this proposal and let me know if everything looks
+ * correct for you to apply!"). Conservative on purpose: a sentence goes only
+ * when it names a proposal or card AND asks to review, apply or approve it,
+ * or points at it (here, below, above).
+ */
+export function stripCardReferences(text: string): string {
+  return text
+    .split('\n')
+    .map((line) =>
+      line
+        .split(/(?<=[.!?])\s+/)
+        .filter((s) => !(NAMES_A_CARD.test(s) && POINTS_AT_IT.test(s)))
+        .join(' '),
+    )
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**
@@ -650,11 +679,20 @@ export class CoachAiService {
     model: string;
     messages: LlmChatMessage[];
     userId: string;
-  }): Promise<{ text: string; usage?: LlmUsage }> {
+    /** Model for the repair rounds; see repair-model.ts. Defaults to `model`. */
+    repairModel?: string;
+  }): Promise<FinalizeResult> {
     const usage: LlmUsage = { promptTokens: 0, completionTokens: 0 };
     let result = checkProposal(args.body, args.blocks);
     if (result.ok) {
-      return { text: fenceProposal(result.json!) };
+      return { text: fenceProposal(result.json!), card: true };
+    }
+    const repairModel = args.repairModel ?? args.model;
+    let activeRepairModel = repairModel;
+    if (repairModel !== args.model) {
+      this.logger.log(
+        `coach repair escalated from ${args.model} to ${repairModel} user=${args.userId}`,
+      );
     }
     const firstIssues = result.issues;
     let draft = args.body;
@@ -669,28 +707,49 @@ export class CoachAiService {
           },
           { role: 'user', content: repairInstruction(result.issues) },
         ];
-        let text = '';
-        for await (const chunk of args.provider.streamCompletion(
-          repairMessages,
-          args.model,
-        )) {
-          text += chunk.delta;
-          if (chunk.done && chunk.usage) {
-            usage.promptTokens += chunk.usage.promptTokens;
-            usage.completionTokens += chunk.usage.completionTokens;
+        const runRepair = async (model: string): Promise<string> => {
+          let out = '';
+          for await (const chunk of args.provider.streamCompletion(
+            repairMessages,
+            model,
+          )) {
+            out += chunk.delta;
+            if (chunk.done && chunk.usage) {
+              usage.promptTokens += chunk.usage.promptTokens;
+              usage.completionTokens += chunk.usage.completionTokens;
+            }
           }
+          return out;
+        };
+        let text: string;
+        try {
+          text = await runRepair(activeRepairModel);
+        } catch (err) {
+          // The escalated model may be one this key cannot use (a
+          // project-restricted OpenAI key without gpt-4.1, say). Fall back
+          // to the model the user chose, for this and later rounds.
+          if (activeRepairModel === args.model) throw err;
+          this.logger.warn(
+            `coach repair model ${activeRepairModel} failed, falling back to ${args.model} user=${args.userId}: ${(err as Error)?.message ?? err}`,
+          );
+          activeRepairModel = args.model;
+          text = await runRepair(activeRepairModel);
         }
         const m = /```coach-proposal\s*([\s\S]*?)```/.exec(text);
         if (!m) {
           // The model chose to ask instead of proposing. That is a valid
           // outcome: say it, with no card. proseOnly drops anything after an
           // unclosed fence, so a truncated block cannot slip through here.
-          const question = proseOnly(text);
+          const question = stripCardReferences(proseOnly(text));
           if (!question) break;
           this.logger.log(
             `coach proposal withdrawn after check user=${args.userId}: ${firstIssues.length} issue(s)`,
           );
-          return { text: `\n\n${question}`, usage };
+          return {
+            text: `\n\n${NOTHING_CHANGED} ${question}`,
+            usage,
+            card: false,
+          };
         }
         draft = m[1].trim();
         afterBlock = proseOnly(text.slice(m.index + m[0].length));
@@ -707,14 +766,15 @@ export class CoachAiService {
       );
       const tail = afterBlock ? `\n\n${afterBlock}` : '';
       return {
-        text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it, so the card may differ from my notes above.${tail}`,
+        text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it.${tail}`,
         usage,
+        card: true,
       };
     }
     this.logger.warn(
       `coach proposal withheld user=${args.userId}: ${result.issues.join(' | ')}`,
     );
-    return { text: withheldMessage(result.userIssues), usage };
+    return { text: withheldMessage(result.userIssues), usage, card: false };
   }
 
   // ----- Shared internals -----
@@ -763,6 +823,11 @@ export class CoachAiService {
               model,
               messages: args.messages,
               userId: args.userId,
+              repairModel: repairModelFor(
+                args.provider,
+                model,
+                !!args.isShared,
+              ),
             }),
           )
         : raw;
