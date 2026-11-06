@@ -34,12 +34,33 @@ import {
 } from './coach-ai.prompts';
 import { buildRelativeDateReference, todayContextLine } from './relative-dates';
 import {
+  hasAppliedChange,
   renderApplyNote,
   renderFreeTime,
   renderScheduleByTitle,
 } from './schedule-context';
-import { checkProposal, GuardBlock, repairInstruction } from './proposal-guard';
-import { FinalizeResult, guardProposalStream } from './proposal-stream';
+import {
+  checkProposal,
+  GuardBlock,
+  GuardResult,
+  repairInstruction,
+} from './proposal-guard';
+import { GoalRef } from './proposal-completeness';
+import {
+  buildReviewMessages,
+  parseReview,
+  renderNotCovered,
+  REVIEW_MAX_CHARS,
+  ReviewResult,
+  shouldReview,
+  simulateCard,
+} from './proposal-review';
+import {
+  FinalizeResult,
+  guardProposalStream,
+  stripCoverageClaims,
+} from './proposal-stream';
+import { renderUnmatchedQuotedTitles } from './quoted-titles';
 import { repairModelFor } from './repair-model';
 import {
   CoachLlmProvider,
@@ -80,13 +101,13 @@ export function proseOnly(text: string, cap = 600): string {
  * fails on Apply is worse than this. Takes the USER-facing reasons (titles,
  * days, times), never the repair text, which names ids and action types.
  */
-function withheldMessage(userIssues: string[]): string {
+function withheldMessage(userIssues: string[], lead: string): string {
   const reasons = userIssues
     .slice(0, 3)
     .map((x) => `- ${x}`)
     .join('\n');
   return (
-    `\n\n${NOTHING_CHANGED} I couldn't turn that into a change that fits your schedule without guessing. What got in the way:\n` +
+    `\n\n${lead} I couldn't turn that into a change that fits your schedule without guessing. What got in the way:\n` +
     reasons +
     '\n\nHow would you like to handle that? Tell me and I will build the change.'
   );
@@ -94,6 +115,22 @@ function withheldMessage(userIssues: string[]): string {
 
 /** The plain first line of every reply that ends without a card. */
 export const NOTHING_CHANGED = "I haven't changed anything yet.";
+
+/**
+ * The first line of a no-card reply once the conversation already holds a card
+ * the user applied. "I haven't changed anything yet" would be false then:
+ * production, the owner applied a card, asked "did you really do it?", and was
+ * told nothing had been changed while the schedule showed the changes.
+ */
+export const NO_NEW_CHANGE = 'No new change from this reply.';
+
+/** The user's last message in a chat message list (undefined when there is none). */
+function lastUserMessage(messages: LlmChatMessage[]): string | undefined {
+  for (let k = messages.length - 1; k >= 0; k--) {
+    if (messages[k].role === 'user') return messages[k].content;
+  }
+  return undefined;
+}
 
 const NAMES_A_CARD = /\b(proposal|card)\b/i;
 const POINTS_AT_IT =
@@ -661,6 +698,12 @@ export class CoachAiService {
       isShared: resolved.kind === 'shared',
       // Chat is where proposals come from, so only chat is guarded.
       guardBlocks: context.scheduleBlocks,
+      guardGoals: (context.activeGoals ?? []).flatMap((g) => {
+        const { id, title } = (g ?? {}) as { id?: unknown; title?: unknown };
+        return typeof id === 'string' && typeof title === 'string'
+          ? [{ id, title }]
+          : [];
+      }),
     });
     // NOTE: chat does NOT trigger extraction.
   }
@@ -675,20 +718,60 @@ export class CoachAiService {
     body: string;
     prose: string;
     blocks: GuardBlock[];
+    /** The user's active goals, to sanity-check goal links on new blocks. */
+    goals?: GoalRef[];
     provider: CoachLlmProvider;
     model: string;
     messages: LlmChatMessage[];
     userId: string;
     /** Model for the repair rounds; see repair-model.ts. Defaults to `model`. */
     repairModel?: string;
+    /**
+     * Run the reviewer pass on big cards (see proposal-review.ts). Off on the
+     * operator's shared key, whose free-tier quota is the binding constraint.
+     */
+    review?: boolean;
   }): Promise<FinalizeResult> {
     const usage: LlmUsage = { promptTokens: 0, completionTokens: 0 };
-    let result = checkProposal(args.body, args.blocks);
-    if (result.ok) {
-      return { text: fenceProposal(result.json!), card: true };
-    }
+    const userMessage = lastUserMessage(args.messages);
+    const noCardLead = hasAppliedChange(args.messages)
+      ? NO_NEW_CHANGE
+      : NOTHING_CHANGED;
+    const check = (text: string) =>
+      checkProposal(text, args.blocks, { userMessage, goals: args.goals });
+    const charged = () =>
+      usage.promptTokens > 0 || usage.completionTokens > 0 ? { usage } : {};
     const repairModel = args.repairModel ?? args.model;
     let activeRepairModel = repairModel;
+
+    /** What follows a card: what the guard widened or unlinked, then the reviewer's gaps. */
+    const afterCard = async (r: GuardResult): Promise<string> => {
+      const parts: string[] = [];
+      if (r.notes && r.notes.length > 0) parts.push(r.notes.join('\n'));
+      if (args.review && shouldReview(userMessage ?? '', r.actions)) {
+        const reviewed = await this.reviewCard({
+          provider: args.provider,
+          models: [...new Set([activeRepairModel, args.model])],
+          userMessage: userMessage ?? '',
+          blocks: args.blocks,
+          actions: r.actions,
+          usage,
+          userId: args.userId,
+        });
+        const list = reviewed ? renderNotCovered(reviewed) : '';
+        if (list) parts.push(list);
+      }
+      return parts.length > 0 ? `\n\n${parts.join('\n\n')}` : '';
+    };
+
+    let result = check(args.body);
+    if (result.ok) {
+      return {
+        text: fenceProposal(result.json!) + (await afterCard(result)),
+        card: true,
+        ...charged(),
+      };
+    }
     if (repairModel !== args.model) {
       this.logger.log(
         `coach repair escalated from ${args.model} to ${repairModel} user=${args.userId}`,
@@ -746,14 +829,14 @@ export class CoachAiService {
             `coach proposal withdrawn after check user=${args.userId}: ${firstIssues.length} issue(s)`,
           );
           return {
-            text: `\n\n${NOTHING_CHANGED} ${question}`,
+            text: `\n\n${noCardLead} ${question}`,
             usage,
             card: false,
           };
         }
         draft = m[1].trim();
         afterBlock = proseOnly(text.slice(m.index + m[0].length));
-        result = checkProposal(draft, args.blocks);
+        result = check(draft);
       }
     } catch (err) {
       this.logger.warn(
@@ -764,17 +847,71 @@ export class CoachAiService {
       this.logger.log(
         `coach proposal repaired user=${args.userId}: fixed ${firstIssues.length} issue(s)`,
       );
-      const tail = afterBlock ? `\n\n${afterBlock}` : '';
+      // The repair model's closing words speak for the card it just wrote, but
+      // a line that claims everything is covered is dropped all the same: the
+      // card is checked, not complete.
+      const closing = stripCoverageClaims(afterBlock);
+      const tail = closing ? `\n\n${closing}` : '';
       return {
-        text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it.${tail}`,
+        text: `${fenceProposal(result.json!)}\n\nI checked this against your schedule and corrected it before showing it.${tail}${await afterCard(result)}`,
         usage,
         card: true,
+        repaired: true,
       };
     }
     this.logger.warn(
       `coach proposal withheld user=${args.userId}: ${result.issues.join(' | ')}`,
     );
-    return { text: withheldMessage(result.userIssues), usage, card: false };
+    return {
+      text: withheldMessage(result.userIssues, noCardLead),
+      usage,
+      card: false,
+    };
+  }
+
+  /**
+   * One extra call on the repair model: what the user asked for that the card
+   * does not do, and what it does differently. Never blocks the card, and any
+   * failure (including a model this key cannot use) just means no list. The
+   * tokens are charged like repair rounds.
+   */
+  private async reviewCard(args: {
+    provider: CoachLlmProvider;
+    models: string[];
+    userMessage: string;
+    blocks: GuardBlock[];
+    actions: GuardResult['actions'];
+    usage: LlmUsage;
+    userId: string;
+  }): Promise<ReviewResult | null> {
+    const messages = buildReviewMessages({
+      userMessage: args.userMessage,
+      current: args.blocks,
+      after: simulateCard(args.blocks, args.actions),
+    });
+    for (const model of args.models) {
+      try {
+        let out = '';
+        for await (const chunk of args.provider.streamCompletion(
+          messages,
+          model,
+        )) {
+          out += chunk.delta;
+          if (chunk.done && chunk.usage) {
+            args.usage.promptTokens += chunk.usage.promptTokens;
+            args.usage.completionTokens += chunk.usage.completionTokens;
+          }
+          // The JSON asked for is short; stop reading a reply that runs on.
+          if (out.length > REVIEW_MAX_CHARS) break;
+        }
+        return parseReview(out);
+      } catch (err) {
+        this.logger.warn(
+          `coach card review failed on ${model} user=${args.userId}: ${(err as Error)?.message ?? err}`,
+        );
+      }
+    }
+    return null;
   }
 
   // ----- Shared internals -----
@@ -800,6 +937,8 @@ export class CoachAiService {
      * client, and repaired or replaced if it would be refused on apply.
      */
     guardBlocks?: GuardBlock[];
+    /** The user's active goals, for the goal-link check on new blocks. */
+    guardGoals?: GoalRef[];
   }): AsyncGenerator<{ delta: string; done: boolean; error?: string }> {
     const provider = this.llmFactory.create(args.provider, args.decryptedKey);
     const model = this.llmFactory.resolveModel(
@@ -819,6 +958,8 @@ export class CoachAiService {
               body,
               prose,
               blocks: guardBlocks,
+              goals: args.guardGoals,
+              review: !args.isShared,
               provider,
               model,
               messages: args.messages,
@@ -1807,7 +1948,16 @@ export function buildCoachChatMessages(
       role: 'system',
       content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
     },
-    { role: 'user', content: buildUserContextMessage(ctx, 'chat', nonce) },
+    {
+      role: 'user',
+      content: buildUserContextMessage(ctx, 'chat', nonce, {
+        unmatchedTitles: renderUnmatchedQuotedTitles(
+          [...history].reverse().find((m) => m.role === CoachRole.USER)
+            ?.content ?? '',
+          ctx.scheduleBlocks ?? [],
+        ),
+      }),
+    },
     // The user-context message above plays the role of "Context" the chat
     // system prompt references; subsequent turns are the chat itself.
   ];
@@ -1835,6 +1985,10 @@ export function buildUserContextMessage(
   ctx: ContextBundle,
   mode: 'narrative' | 'chat',
   nonce: string,
+  extra: {
+    /** Quoted titles from the user's last message that match no block; see quoted-titles.ts. */
+    unmatchedTitles?: string;
+  } = {},
 ): string {
   const h = ctx.habitsProfile;
   const religiousContext =
@@ -2032,6 +2186,13 @@ export function buildUserContextMessage(
     '',
     '## The same schedule grouped by block title. Use THIS to find every occurrence of a block the user names: which days it is on, which it is NOT on, its exact time and length, and the id for each day. When the user says "on all weekdays" or "every day" about a named block, the days it actually occurs on are listed here; never add a day that is not.',
     fence(byTitleSection),
+    ...(mode === 'chat' && extra.unmatchedTitles
+      ? [
+          '',
+          '## The user named these titles in quotes, and they match no block on the schedule. If they mean an existing block, ASK which block they mean instead of guessing or skipping it (the closest titles are listed). If they are naming a new block to create, or a new name to give, carry on.',
+          fence(extra.unmatchedTitles),
+        ]
+      : []),
     '',
     '## Free time per day (gaps of 15 minutes or more inside the waking window). The ONLY place a time you pick yourself may come from, other than the slot of the block being replaced or a time the user stated.',
     fence(freeTimeSection),
