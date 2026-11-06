@@ -1283,7 +1283,9 @@ export class CoachAiService {
       });
       for (const r of rows) {
         if (!r.entityId) continue;
-        const note = renderApplyNote((r.metadata ?? {}) as any);
+        const note = renderApplyNote(
+          (r.metadata ?? {}) as Parameters<typeof renderApplyNote>[0],
+        );
         if (note) notes.set(r.entityId, note); // later rows win
       }
     } catch (err) {
