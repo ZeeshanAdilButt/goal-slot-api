@@ -28,6 +28,8 @@ export interface EvalBlock {
   category: string;
   goalId: string | null;
   isRecurring: boolean;
+  /** Blocks sharing a seriesId are one recurring series (one edit changes all days). */
+  seriesId?: string | null;
 }
 
 /** Stable fake uuid, so recordings stay valid across runs. */
@@ -42,6 +44,7 @@ export function block(
   startTime: string,
   endTime: string,
   category = 'LEARNING',
+  seriesId: string | null = null,
 ): EvalBlock[] {
   return days.map((d) => ({
     id: fakeId(`${title}|${d}|${startTime}`),
@@ -52,7 +55,13 @@ export function block(
     category,
     goalId: null,
     isRecurring: true,
+    seriesId,
   }));
+}
+
+/** Stable fake series id. */
+export function seriesOf(label: string): string {
+  return fakeId(`series|${label}`);
 }
 
 export function contextFor(blocks: EvalBlock[]): ContextBundle {
@@ -227,12 +236,21 @@ export function applyInMemory(
     const b = state.get(a.id);
     const p = (a.payload ?? {}) as Record<string, unknown>;
     if (!b) continue;
-    Object.assign(b, {
-      ...(typeof p.title === 'string' ? { title: p.title } : {}),
-      ...(typeof p.startTime === 'string' ? { startTime: p.startTime } : {}),
-      ...(typeof p.endTime === 'string' ? { endTime: p.endTime } : {}),
-      ...(typeof p.dayOfWeek === 'number' ? { dayOfWeek: p.dayOfWeek } : {}),
-    });
+    // A series-scoped update changes every day of the series, and not its day.
+    const series = p.updateScope === 'series' && b.seriesId;
+    const targets = series
+      ? [...state.values()].filter((x) => x.seriesId === b.seriesId)
+      : [b];
+    for (const t of targets) {
+      Object.assign(t, {
+        ...(typeof p.title === 'string' ? { title: p.title } : {}),
+        ...(typeof p.startTime === 'string' ? { startTime: p.startTime } : {}),
+        ...(typeof p.endTime === 'string' ? { endTime: p.endTime } : {}),
+        ...(!series && typeof p.dayOfWeek === 'number'
+          ? { dayOfWeek: p.dayOfWeek }
+          : {}),
+      });
+    }
   }
   actions.forEach((a, i) => {
     if (a.type !== 'CREATE_SCHEDULE_BLOCK') return;
