@@ -1,0 +1,6 @@
+{
+  "scenario": "remove-on-all-weekdays",
+  "model": "gemini-2.5-flash",
+  "recordedAt": "2026-11-06T07:46:19.721Z",
+  "text": "You asked to remove the \"Reading & Labs (Core Engineering)\" blocks on all weekdays. I see from your schedule that these blocks are currently set for Tuesday from 7:00 AM to 9:00 AM and Thursday from 7:00 AM to 9:00 AM. I've prepared a proposal to remove both of those.\n\n```coach-proposal\n{\n  \"summary\": \"Remove 'Reading & Labs (Core Engineering)' blocks from Tuesday and Thursday\",\n  \"actions\": [\n    { \"type\": \"DELETE_SCHEDULE_BLOCK\", \"id\": \"1a78bae8-7aac-4d57-abe1-53f3aa8ede25\", \"expectedTitle\": \"Reading & Labs (Core Engineering)\" },\n    { \"type\": \"DELETE_SCHEDULE_BLOCK\", \"id\": \"cb23ea40-056b-41d7-a0dc-94a9eaab4252\", \"expectedTitle\": \"Reading & Labs (Core Engineering)\" }\n  ]\n}\n```\n\nWhat does freeing up this time mean for your goal of growing as an engineer?\n\nI noticed many of your schedule blocks, like \"Morning Prayer\" and \"Family Time,\" are not currently linked to any goals. This means that time you spend on them won't track towards anything. Want me to help you set up some goals and link these blocks so you can see your progress?"
+}

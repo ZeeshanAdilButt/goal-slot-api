@@ -1,0 +1,6 @@
+{
+  "scenario": "times-24h-format",
+  "model": "gemini-2.5-flash",
+  "recordedAt": "2026-11-06T07:47:40.526Z",
+  "text": "Certainly. Let's add that Gym block to your schedule. I'll also create a 'Gym / Fitness' goal for you so you can track your time towards it.\n\nHere's a proposal for that:\n\n```coach-proposal\n{\n  \"summary\": \"Create 'Gym / Fitness' goal and add Monday 8:00 PM to 9:00 PM block\",\n  \"actions\": [\n    {\n      \"type\": \"CREATE_GOAL\",\n      \"payload\": {\n        \"title\": \"Gym / Fitness\",\n        \"category\": \"HEALTH\",\n        \"targetHours\": 4,\n        \"description\": \"Regular exercise for physical well-being and energy.\"\n      }\n    },\n    {\n      \"type\": \"CREATE_SCHEDULE_BLOCK\",\n      \"payload\": {\n        \"title\": \"Gym\",\n        \"startTime\": \"20:00\",\n        \"endTime\": \"21:00\",\n        \"dayOfWeek\": 1,\n        \"category\": \"HEALTH\",\n        \"goalId\": \"$ref:0\"\n      }\n    }\n  ]\n}\n```\n\nThis will first create the goal, then add your \"Gym\" block to Monday from 8:00 PM to 9:00 PM, linked to that new goal.\n\nI also noticed many of your existing schedule blocks, like \"Work\" and \"Morning Prayer\", are not linked to any goals. Would you like me to link your \"Work\" blocks to a new 'Work & Engineering' goal?"
+}
