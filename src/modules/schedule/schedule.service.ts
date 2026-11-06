@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
@@ -577,6 +578,161 @@ export class ScheduleService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Make the series that block `blockId` belongs to cover EXACTLY `days`
+   * (the Edit Block dialog's day picker). Missing days get a copy of the
+   * source block, days no longer wanted lose their block(s), and everything
+   * else is left alone, so calling it again with the same days is a no-op.
+   *
+   * Moving the block itself is not this endpoint's job: the source block's
+   * own day must stay in `days`, which also guarantees the series can only
+   * ever lose OTHER blocks, never the one the caller is editing.
+   *
+   * All-or-nothing in one SERIALIZABLE transaction with the same retry as
+   * `createWithConflictGuard` / `moveBlocksAtomically`: removals are applied
+   * first so a block this call deletes never counts as a conflict, then each
+   * added slot is checked with `findTimeConflict` before anything is created.
+   */
+  async setSeriesDays(
+    userId: string,
+    blockId: string,
+    days: number[],
+    attempt = 0,
+  ): Promise<{
+    blocks: Awaited<ReturnType<PrismaService['scheduleBlock']['findMany']>>;
+    added: number[];
+    removed: number[];
+  }> {
+    const targetDays = [...new Set(days)].sort((a, b) => a - b);
+    try {
+      return await this.prisma.$transaction(
+        (tx) => this.applySeriesDays(tx, userId, blockId, targetDays),
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializationFailure(error) && attempt < MAX_CONFLICT_RETRIES) {
+        return this.setSeriesDays(userId, blockId, days, attempt + 1);
+      }
+      throw error;
+    }
+  }
+
+  private async applySeriesDays(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    blockId: string,
+    targetDays: number[],
+  ) {
+    const source = await tx.scheduleBlock.findFirst({
+      where: { id: blockId, userId },
+    });
+    if (!source) {
+      throw new NotFoundException('Schedule block not found');
+    }
+    if (!targetDays.includes(source.dayOfWeek)) {
+      throw new BadRequestException(
+        'Use a normal update to move a block to another day.',
+      );
+    }
+
+    // A block with no seriesId is a series of one.
+    const series = source.seriesId
+      ? await tx.scheduleBlock.findMany({
+          where: { userId, seriesId: source.seriesId },
+        })
+      : [source];
+
+    const presentDays = new Set(series.map((b) => b.dayOfWeek));
+    // A day the series already has is never added again, even when it holds
+    // two blocks, so a series can't end up doubled on one day.
+    const added = targetDays.filter((d) => !presentDays.has(d));
+    const removedBlocks = series.filter(
+      (b) => !targetDays.includes(b.dayOfWeek),
+    );
+    const removed = [...new Set(removedBlocks.map((b) => b.dayOfWeek))].sort(
+      (a, b) => a - b,
+    );
+
+    if (removedBlocks.length > 0) {
+      // Linked tasks and time entries are unlinked by the relation's SetNull.
+      await tx.scheduleBlock.deleteMany({
+        where: { userId, id: { in: removedBlocks.map((b) => b.id) } },
+      });
+    }
+
+    let seriesId = source.seriesId;
+    if (added.length > 0) {
+      this.assertValidRange(source.startTime, source.endTime);
+
+      for (const dayOfWeek of added) {
+        const conflict = await this.findTimeConflict(
+          userId,
+          dayOfWeek,
+          source.startTime,
+          source.endTime,
+          undefined,
+          tx,
+        );
+        if (conflict) {
+          throw new BadRequestException(
+            `Time slot conflicts with an existing schedule block on ${DAY_NAMES[dayOfWeek]}: ${describeBlock(conflict)}`,
+          );
+        }
+      }
+
+      // Same gate as createBatch, applied to the net block count after the
+      // removals above, so swapping days at the limit still works.
+      const currentSchedules = await tx.scheduleBlock.count({
+        where: { userId },
+      });
+      for (let i = 0; i < added.length; i++) {
+        await this.authService.checkPlanLimit(
+          userId,
+          'schedules',
+          currentSchedules + i,
+        );
+      }
+
+      if (!seriesId) {
+        seriesId = randomUUID();
+        await tx.scheduleBlock.update({
+          where: { id: source.id },
+          data: { seriesId },
+        });
+      }
+
+      for (const dayOfWeek of added) {
+        await tx.scheduleBlock.create({
+          data: {
+            title: source.title,
+            startTime: source.startTime,
+            endTime: source.endTime,
+            dayOfWeek,
+            category: source.category,
+            color: source.color,
+            goalId: source.goalId,
+            isPrivate: source.isPrivate,
+            isRecurring: source.isRecurring,
+            seriesId,
+            userId,
+          },
+        });
+      }
+    }
+
+    const blocks = await tx.scheduleBlock.findMany({
+      where: seriesId ? { userId, seriesId } : { userId, id: source.id },
+      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      include: {
+        goal: true,
+        tasks: { select: { id: true, title: true, status: true } },
+      },
+    });
+    blocks.sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+
+    return { blocks, added, removed };
   }
 
   // Wipe every schedule block for the user. Returns the count so the UI can

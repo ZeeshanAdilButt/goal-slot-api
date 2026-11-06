@@ -14,6 +14,7 @@ import { ScheduleService } from './schedule.service';
 import {
   CreateScheduleBlockDto,
   CreateScheduleBlocksBatchDto,
+  SetScheduleBlockDaysDto,
   UpdateScheduleBlockDto,
 } from './dto/schedule.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -81,6 +82,20 @@ export class ScheduleController {
     @Body() dto: UpdateScheduleBlockDto,
   ) {
     return this.scheduleService.update(req.user.sub, id, dto);
+  }
+
+  // Edit Block dialog's day picker: make the block's series cover exactly the
+  // given days. Atomic; see ScheduleService.setSeriesDays.
+  @Post(':id/days')
+  @ApiOperation({
+    summary: 'Set the days a schedule block series covers (add/remove copies)',
+  })
+  async setDays(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: SetScheduleBlockDaysDto,
+  ) {
+    return this.scheduleService.setSeriesDays(req.user.sub, id, dto.days);
   }
 
   @Delete(':id')
