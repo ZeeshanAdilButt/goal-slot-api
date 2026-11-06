@@ -4,9 +4,11 @@ import { Transform } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsUUID,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
@@ -52,4 +54,30 @@ export class ListTasksQueryDto {
   @Min(0)
   @Max(6)
   dayOfWeek?: number;
+
+  @ApiPropertyOptional({
+    enum: ['mine', 'personal'],
+    description:
+      'mine (default): personal tasks plus project tasks assigned to me or created by me and unassigned. personal: only my personal tasks. Ignored when projectId is set.',
+  })
+  @IsOptional()
+  @IsIn(['mine', 'personal'])
+  scope?: 'mine' | 'personal';
+
+  @ApiPropertyOptional({
+    description: 'List every task in this project (membership required)',
+  })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @ApiPropertyOptional({
+    description: 'With projectId only: me, unassigned, or a member userId',
+  })
+  @IsOptional()
+  @Matches(
+    /^(me|unassigned|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+    { message: 'assignee must be me, unassigned, or a user id' },
+  )
+  assignee?: string;
 }

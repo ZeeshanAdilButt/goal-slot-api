@@ -68,6 +68,22 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Create the task inside this project (requires ADMIN or MEMBER role)',
+  })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Assign to a member of the project. Requires projectId; a member of that project.',
+  })
+  @IsOptional()
+  @IsUUID()
+  assigneeId?: string;
 }
 
 /**
@@ -79,8 +95,33 @@ export class CreateTaskDto {
  * on create for no benefit, and TS rejects narrowing-vs-base anyway.
  */
 export class UpdateTaskDto extends PartialType(
-  OmitType(CreateTaskDto, ['dueDate'] as const),
+  OmitType(CreateTaskDto, ['dueDate', 'projectId', 'assigneeId'] as const),
 ) {
+  /**
+   * Move the task: a project id moves it into that project (creator only,
+   * into a project they can write to); null moves it back to personal.
+   * Omitted leaves it where it is.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Move into a project (creator only); null moves the task back to personal',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  projectId?: string | null;
+
+  /** null unassigns; omitted leaves the assignee unchanged. */
+  @ApiPropertyOptional({
+    description: 'Assign to a project member; null unassigns',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  assigneeId?: string | null;
+
   /**
    * The runtime validator already tolerated null — class-validator's
    * `@IsOptional` skips every other decorator for null as well as undefined —

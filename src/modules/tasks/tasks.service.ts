@@ -1,6 +1,6 @@
 import {
+  BadRequestException,
   Injectable,
-  NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -8,6 +8,26 @@ import { AuthService } from '../auth/auth.service';
 import { GoalsService } from '../goals/goals.service';
 import { CompleteTaskDto, CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
 import { Prisma, TaskStatus, TimeEntrySource } from '@prisma/client';
+import {
+  assertProjectAccess,
+  assertTaskAccess,
+  getProjectRole,
+  requesterMembershipSelect,
+  roleCanWrite,
+} from '../projects/project-access';
+
+export type TaskListScope = 'mine' | 'personal';
+
+export interface TaskListFilters {
+  status?: TaskStatus;
+  statuses?: TaskStatus[];
+  scheduleBlockId?: string;
+  goalId?: string;
+  dayOfWeek?: number;
+  scope?: TaskListScope;
+  projectId?: string;
+  assignee?: string;
+}
 
 @Injectable()
 export class TasksService {
@@ -17,10 +37,82 @@ export class TasksService {
     private goalsService: GoalsService,
   ) {}
 
+  /**
+   * Relations every task response carries. `project` only ever pulls the
+   * requester's own membership row (for `canEdit`), never the member list.
+   */
+  private taskInclude(userId: string) {
+    return {
+      goal: { select: { id: true, title: true, color: true } },
+      scheduleBlock: true,
+      project: requesterMembershipSelect(userId),
+      assignee: { select: { id: true, name: true, avatar: true } },
+    };
+  }
+
+  /**
+   * Shapes a task for the requester.
+   *
+   * Goals and schedule blocks stay personal. A task's goal and block can only
+   * be set by its creator, to the creator's own rows (validateRelations), so
+   * "requester is the creator" is exactly "requester owns that goal/block".
+   * Everyone else on the project gets them as null, which is what keeps a
+   * project from becoming a window into a teammate's goals or schedule.
+   *
+   * For a personal task the requester is always the creator, so the response
+   * is the old shape plus `project: null`, `assignee: null`, `canEdit: true`.
+   */
+  private present<T extends Record<string, any>>(userId: string, task: T) {
+    const { project, ...rest } = task as any;
+    const isCreator = task.userId === userId;
+    const role = project?.members?.[0]?.role ?? null;
+
+    const out: Record<string, any> = {
+      ...rest,
+      project: project
+        ? { id: project.id, name: project.name, color: project.color }
+        : null,
+      assignee: rest.assignee ?? null,
+      canEdit: task.projectId == null ? isCreator : roleCanWrite(role),
+    };
+
+    if (!isCreator) {
+      out.goalId = null;
+      out.goal = null;
+      out.scheduleBlockId = null;
+      out.scheduleBlock = null;
+    }
+    return out as T & {
+      project: { id: string; name: string; color: string } | null;
+      assignee: { id: string; name: string; avatar: string | null } | null;
+      canEdit: boolean;
+    };
+  }
+
+  /** An assignee must be a member (any role) of the task's project. */
+  private async assertAssignable(projectId: string, assigneeId: string) {
+    const role = await getProjectRole(this.prisma, assigneeId, projectId);
+    if (!role) {
+      throw new BadRequestException(
+        'Assignee must be a member of this project',
+      );
+    }
+  }
+
   async create(userId: string, dto: CreateTaskDto) {
+    if (dto.assigneeId && !dto.projectId) {
+      throw new BadRequestException('assigneeId requires projectId');
+    }
+    if (dto.projectId) {
+      await assertProjectAccess(this.prisma, userId, dto.projectId, 'write');
+      if (dto.assigneeId) {
+        await this.assertAssignable(dto.projectId, dto.assigneeId);
+      }
+    }
+
     await this.validateRelations(userId, dto.goalId, dto.scheduleBlockId);
 
-    return this.prisma.task.create({
+    const task = await this.prisma.task.create({
       data: {
         id: dto.id ?? undefined,
         title: dto.title,
@@ -33,25 +125,58 @@ export class TasksService {
         scheduleBlockId: dto.scheduleBlockId,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         notes: dto.notes,
+        projectId: dto.projectId ?? undefined,
+        assigneeId: dto.assigneeId ?? undefined,
       },
-      include: {
-        goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: true,
-      },
+      include: this.taskInclude(userId),
     });
+
+    return this.present(userId, task);
   }
 
-  async findAll(
-    userId: string,
-    filters: {
-      status?: TaskStatus;
-      statuses?: TaskStatus[];
-      scheduleBlockId?: string;
-      goalId?: string;
-      dayOfWeek?: number;
-    },
-  ) {
-    const where: Prisma.TaskWhereInput = { userId };
+  /**
+   * Scope rules (spec "Tasks"):
+   *  - projectId: every task in that project; membership required (404
+   *    otherwise). Optional `assignee` = me | unassigned | <userId>.
+   *  - scope=personal: exactly the old query, `userId = me AND projectId
+   *    IS NULL`.
+   *  - scope=mine (the default, which is what the mobile app gets): my
+   *    personal tasks, plus project tasks assigned to me, plus project tasks
+   *    I created that nobody has picked up. Project tasks always require a
+   *    live membership, so a removed member stops seeing tasks they created.
+   *
+   * For a user with no projects, `mine` returns exactly the rows the old
+   * `{ userId }` query did, because every one of their tasks has
+   * projectId = NULL.
+   */
+  async findAll(userId: string, filters: TaskListFilters) {
+    let where: Prisma.TaskWhereInput;
+    let personalOnly = false;
+
+    if (filters.projectId) {
+      await assertProjectAccess(this.prisma, userId, filters.projectId, 'read');
+      where = { projectId: filters.projectId };
+      if (filters.assignee === 'me') where.assigneeId = userId;
+      else if (filters.assignee === 'unassigned') where.assigneeId = null;
+      else if (filters.assignee) where.assigneeId = filters.assignee;
+    } else if (filters.assignee) {
+      throw new BadRequestException('assignee requires projectId');
+    } else if (filters.scope === 'personal') {
+      where = { userId, projectId: null };
+      personalOnly = true;
+    } else {
+      where = {
+        OR: [
+          { userId, projectId: null },
+          {
+            project: {
+              is: { archivedAt: null, members: { some: { userId } } },
+            },
+            OR: [{ assigneeId: userId }, { assigneeId: null, userId }],
+          },
+        ],
+      };
+    }
 
     // Handle multiple statuses or single status
     if (filters.statuses && filters.statuses.length > 0) {
@@ -63,17 +188,31 @@ export class TasksService {
     if (filters.scheduleBlockId)
       where.scheduleBlockId = filters.scheduleBlockId;
     if (filters.goalId) where.goalId = filters.goalId;
-    if (filters.dayOfWeek !== undefined) {
-      where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
+
+    if (personalOnly) {
+      if (filters.dayOfWeek !== undefined) {
+        where.scheduleBlock = { is: { dayOfWeek: filters.dayOfWeek } };
+      }
+    } else {
+      // Goals and schedule blocks are personal: on any view that can include
+      // other people's tasks, these filters only match the requester's own.
+      if (filters.goalId) where.goal = { is: { userId } };
+      if (filters.scheduleBlockId || filters.dayOfWeek !== undefined) {
+        where.scheduleBlock = {
+          is: {
+            userId,
+            ...(filters.dayOfWeek !== undefined
+              ? { dayOfWeek: filters.dayOfWeek }
+              : {}),
+          },
+        };
+      }
     }
 
     const tasks = await this.prisma.task.findMany({
       where,
       orderBy: [{ status: 'asc' }, { order: 'asc' }, { createdAt: 'desc' }],
-      include: {
-        goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: true,
-      },
+      include: this.taskInclude(userId),
     });
 
     const trackedByTaskId = await this.sumTrackedMinutes(
@@ -81,7 +220,7 @@ export class TasksService {
     );
 
     return tasks.map((task) => ({
-      ...task,
+      ...this.present(userId, task),
       trackedMinutes: trackedByTaskId.get(task.id) ?? 0,
     }));
   }
@@ -120,42 +259,61 @@ export class TasksService {
   }
 
   async findOne(userId: string, taskId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, userId },
-      include: {
-        goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: true,
-      },
-    });
-
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
+    const { task } = await assertTaskAccess(
+      this.prisma,
+      userId,
+      taskId,
+      'read',
+      this.taskInclude(userId),
+    );
 
     const trackedByTaskId = await this.sumTrackedMinutes([task.id]);
 
     return {
-      ...task,
+      ...this.present(userId, task),
       trackedMinutes: trackedByTaskId.get(task.id) ?? 0,
     };
   }
 
   async update(userId: string, taskId: string, dto: UpdateTaskDto) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, userId },
-    });
-    if (!task) {
-      throw new NotFoundException('Task not found');
+    const { task, isCreator } = await assertTaskAccess(
+      this.prisma,
+      userId,
+      taskId,
+      'write',
+    );
+
+    const {
+      id: _id,
+      projectId: dtoProjectId,
+      assigneeId: dtoAssigneeId,
+      ...updateData
+    } = dto;
+
+    // Goals and schedule blocks are personal and belong to the creator.
+    // Another member's edit form never sees them (they come back null), so
+    // whatever it sends for these two keys is dropped rather than allowed to
+    // clear or repoint the creator's links.
+    if (!isCreator) {
+      delete updateData.goalId;
+      delete updateData.scheduleBlockId;
+    } else {
+      await this.validateRelations(userId, dto.goalId, dto.scheduleBlockId);
     }
 
-    await this.validateRelations(userId, dto.goalId, dto.scheduleBlockId);
+    const placement = await this.resolvePlacement(
+      userId,
+      task,
+      isCreator,
+      dtoProjectId,
+      dtoAssigneeId,
+    );
 
-    const { id: _id, ...updateData } = dto;
-
-    return this.prisma.task.update({
+    const updated = await this.prisma.task.update({
       where: { id: taskId },
       data: {
         ...updateData,
+        ...placement,
         // Three distinct cases, and the old `dto.dueDate ? ... : undefined`
         // collapsed the first two: an explicit `null` (clear it) became
         // `undefined`, which Prisma reads as "leave unchanged", so a due date
@@ -170,18 +328,98 @@ export class TasksService {
               ? new Date(dto.dueDate)
               : undefined,
       },
-      include: {
-        goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: true,
-      },
+      include: this.taskInclude(userId),
     });
+
+    return this.present(userId, updated);
   }
 
-  async reorder(userId: string, ids: string[]) {
+  /**
+   * Works out the projectId / assigneeId part of an update. Returns only the
+   * keys that actually change, so an ordinary personal-task edit writes
+   * exactly what it did before.
+   *
+   *  - Only the creator may move a task between projects (or back to
+   *    personal), and only into a project they can write to.
+   *  - An assignee must be a member of the task's (new) project. Moving a
+   *    task clears an inherited assignee who is not a member there; an
+   *    explicitly requested one who is not a member is a 400.
+   */
+  private async resolvePlacement(
+    userId: string,
+    task: { projectId?: string | null; assigneeId?: string | null },
+    isCreator: boolean,
+    dtoProjectId: string | null | undefined,
+    dtoAssigneeId: string | null | undefined,
+  ): Promise<{ projectId?: string | null; assigneeId?: string | null }> {
+    const out: { projectId?: string | null; assigneeId?: string | null } = {};
+    const currentProjectId = task.projectId ?? null;
+    let nextProjectId = currentProjectId;
+
+    if (dtoProjectId !== undefined && (dtoProjectId ?? null) !== currentProjectId) {
+      if (!isCreator) {
+        throw new ForbiddenException(
+          'Only the task creator can move it to another project',
+        );
+      }
+      if (dtoProjectId) {
+        await assertProjectAccess(this.prisma, userId, dtoProjectId, 'write');
+      }
+      nextProjectId = dtoProjectId ?? null;
+      out.projectId = nextProjectId;
+    }
+    const moved = out.projectId !== undefined;
+
+    if (nextProjectId === null) {
+      if (dtoAssigneeId) {
+        throw new BadRequestException('assigneeId requires projectId');
+      }
+      if (dtoAssigneeId === null || (moved && task.assigneeId)) {
+        out.assigneeId = null;
+      }
+      return out;
+    }
+
+    if (dtoAssigneeId !== undefined) {
+      if (dtoAssigneeId) await this.assertAssignable(nextProjectId, dtoAssigneeId);
+      out.assigneeId = dtoAssigneeId;
+    } else if (moved && task.assigneeId) {
+      const stillMember = await getProjectRole(
+        this.prisma,
+        task.assigneeId,
+        nextProjectId,
+      );
+      if (!stillMember) out.assigneeId = null;
+    }
+    return out;
+  }
+
+  /**
+   * Personal reorder (no projectId) is the old per-user reorder, limited to
+   * personal tasks so it can never write to a project the user may have
+   * left. A project board reorder needs write access and only touches tasks
+   * in that project.
+   */
+  async reorder(userId: string, ids: string[], projectId?: string) {
+    if (projectId) {
+      if (typeof projectId !== 'string') {
+        throw new BadRequestException('projectId must be a string');
+      }
+      await assertProjectAccess(this.prisma, userId, projectId, 'write');
+      return this.prisma.$transaction(
+        ids.map((id, index) =>
+          this.prisma.task.updateMany({
+            where: { id, projectId },
+            data: { order: index },
+          }),
+        ),
+      );
+    }
+
     return this.prisma.$transaction(
       ids.map((id, index) =>
         this.prisma.task.updateMany({
-          where: { id, userId },
+          where: { id, userId, projectId: null },
           data: { order: index },
         }),
       ),
@@ -189,14 +427,24 @@ export class TasksService {
   }
 
   async complete(userId: string, taskId: string, dto: CompleteTaskDto) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, userId },
-      include: { goal: true, scheduleBlock: true },
-    });
+    const { task } = await assertTaskAccess(
+      this.prisma,
+      userId,
+      taskId,
+      'write',
+      { goal: true, scheduleBlock: true },
+    );
 
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
+    // The completion entry is the ACTOR's time entry, so it may only carry
+    // the actor's own goal and schedule block. On a personal task those are
+    // always the actor's; on a project task completed by someone other than
+    // the creator they are the creator's, and are left off.
+    const ownGoalId =
+      task.goalId && task.goal?.userId === userId ? task.goalId : null;
+    const ownScheduleBlockId =
+      task.scheduleBlockId && task.scheduleBlock?.userId === userId
+        ? task.scheduleBlockId
+        : null;
 
     const logDate = dto.date ? new Date(dto.date) : new Date();
     const dayOfWeek = logDate.getDay();
@@ -241,8 +489,8 @@ export class TasksService {
           dayOfWeek,
           notes: dto.notes || 'Logged from task completion',
           userId,
-          goalId: task.goalId,
-          scheduleBlockId: task.scheduleBlockId,
+          goalId: ownGoalId,
+          scheduleBlockId: ownScheduleBlockId,
           taskId: task.id,
           source: TimeEntrySource.COMPLETION,
         },
@@ -260,20 +508,17 @@ export class TasksService {
         actualMinutes: dto.actualMinutes,
         completedAt: logDate,
       },
-      include: {
-        goal: { select: { id: true, title: true, color: true } },
-        scheduleBlock: true,
-      },
+      include: this.taskInclude(userId),
     });
 
     // Update goal progress with only the remaining time
     // Note: Tracked time entries already updated the goal, so we only add remaining time
-    if (task.goalId && remainingMinutes > 0) {
-      await this.goalsService.updateProgress(task.goalId, userId);
+    if (ownGoalId && remainingMinutes > 0) {
+      await this.goalsService.updateProgress(ownGoalId, userId);
     }
 
     return {
-      task: updatedTask,
+      task: this.present(userId, updatedTask),
       timeEntry,
       alreadyTrackedMinutes,
       remainingMinutes,
@@ -282,23 +527,28 @@ export class TasksService {
   }
 
   async restore(userId: string, taskId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, userId },
-      include: { goal: true },
-    });
+    const { task } = await assertTaskAccess(
+      this.prisma,
+      userId,
+      taskId,
+      'write',
+      { goal: true },
+    );
 
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
-
-    // Find the completion time entry
+    // Find the completion time entry. Scoped to the actor: on a personal
+    // task that is every completion entry there is, and on a project task it
+    // stops one member's restore from deleting time another member logged.
     const completionEntry = await this.prisma.timeEntry.findFirst({
       where: {
         taskId: taskId,
+        userId,
         source: TimeEntrySource.COMPLETION,
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    const ownGoalId =
+      task.goalId && task.goal?.userId === userId ? task.goalId : null;
 
     // Transaction to ensure consistency
     await this.prisma.$transaction(async (tx) => {
@@ -319,13 +569,13 @@ export class TasksService {
 
       // Recompute loggedHours from the live SUM after the deletion so the
       // goal stays in sync regardless of which entries existed before.
-      if (task.goalId) {
+      if (ownGoalId) {
         const agg = await tx.timeEntry.aggregate({
-          where: { goalId: task.goalId },
+          where: { goalId: ownGoalId },
           _sum: { duration: true },
         });
         await tx.goal.update({
-          where: { id: task.goalId },
+          where: { id: ownGoalId },
           data: { loggedHours: (agg._sum.duration ?? 0) / 60 },
         });
       }
@@ -335,12 +585,7 @@ export class TasksService {
   }
 
   async delete(userId: string, taskId: string) {
-    const task = await this.prisma.task.findFirst({
-      where: { id: taskId, userId },
-    });
-    if (!task) {
-      throw new NotFoundException('Task not found');
-    }
+    await assertTaskAccess(this.prisma, userId, taskId, 'delete');
 
     await this.prisma.task.delete({
       where: { id: taskId },
@@ -351,8 +596,8 @@ export class TasksService {
 
   private async validateRelations(
     userId: string,
-    goalId?: string,
-    scheduleBlockId?: string,
+    goalId?: string | null,
+    scheduleBlockId?: string | null,
   ) {
     if (goalId) {
       const goal = await this.prisma.goal.findFirst({

@@ -55,6 +55,13 @@ export class TasksController {
     required: false,
     description: '0 (Sun) - 6 (Sat)',
   })
+  @ApiQuery({ name: 'scope', enum: ['mine', 'personal'], required: false })
+  @ApiQuery({ name: 'projectId', required: false })
+  @ApiQuery({
+    name: 'assignee',
+    required: false,
+    description: 'With projectId: me, unassigned, or a userId',
+  })
   async findAll(
     @Request() req: AuthenticatedRequest,
     @Query() query: ListTasksQueryDto,
@@ -72,9 +79,9 @@ export class TasksController {
   @ApiOperation({ summary: 'Reorder tasks' })
   async reorder(
     @Request() req: AuthenticatedRequest,
-    @Body() body: { ids: string[] },
+    @Body() body: { ids: string[]; projectId?: string },
   ) {
-    return this.tasksService.reorder(req.user.sub, body.ids);
+    return this.tasksService.reorder(req.user.sub, body.ids, body.projectId);
   }
 
   @Put(':id')
