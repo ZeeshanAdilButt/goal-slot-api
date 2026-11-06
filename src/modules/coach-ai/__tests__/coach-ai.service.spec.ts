@@ -386,6 +386,19 @@ class FakePrisma {
     },
   };
 
+  // Apply outcomes CoachProposalsService.recordApply writes, read back into
+  // the chat history as a note on the assistant turn that proposed them.
+  applyAuditRows: any[] = [];
+  auditLog = {
+    findMany: async ({ where }: any) =>
+      this.applyAuditRows.filter(
+        (r) =>
+          r.userId === where?.userId &&
+          r.action === where?.action &&
+          (where?.entityId?.in ?? []).includes(r.entityId),
+      ),
+  };
+
   // Notes page titles. Rows carry a `content` too, so a test can prove the
   // service never asks for it: `findMany` honours the `select` it is given
   // and returns ONLY the requested columns, exactly as Prisma would. The
@@ -1213,9 +1226,7 @@ describe('CoachAiService', () => {
           if (mode === 'narrative') {
             await drain(service.streamNarrative('user_1', '2026-W22', false));
           } else {
-            await drain(
-              service.streamChatReply('user_1', '2026-W22', 'hi'),
-            );
+            await drain(service.streamChatReply('user_1', '2026-W22', 'hi'));
           }
         },
         user: () => userMsg,

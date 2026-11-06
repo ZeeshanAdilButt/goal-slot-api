@@ -33,6 +33,11 @@ import {
   SYSTEM_PROMPT,
 } from './coach-ai.prompts';
 import { buildRelativeDateReference, todayContextLine } from './relative-dates';
+import {
+  renderApplyNote,
+  renderFreeTime,
+  renderScheduleByTitle,
+} from './schedule-context';
 
 /**
  * Coach AI service — orchestrates BYOK lookup, token-budget enforcement,
@@ -55,7 +60,7 @@ type ExtractedInsight = {
   mediaTopic?: string;
 };
 
-interface ContextBundle {
+export interface ContextBundle {
   habitsProfile: HabitsProfile | null;
   recentCheckins: unknown[];
   recentJournal: unknown[];
@@ -537,10 +542,11 @@ export class CoachAiService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const context = await this.buildContextBundle(userId, scopeKey, {
-      includeNoteTitles: true,
-    });
-    const messages = this.buildChatMessages(context, history);
+    const [context, applyNotes] = await Promise.all([
+      this.buildContextBundle(userId, scopeKey, { includeNoteTitles: true }),
+      this.loadApplyNotes(userId, history),
+    ]);
+    const messages = this.buildChatMessages(context, history, applyNotes);
 
     const decryptedKey =
       resolved.kind === 'byok'
@@ -1248,32 +1254,42 @@ export class CoachAiService {
 
   private buildChatMessages(
     ctx: ContextBundle,
-    history: Array<{ role: CoachRole; content: string }>,
+    history: Array<{ id?: string; role: CoachRole; content: string }>,
+    applyNotes: Map<string, string> = new Map(),
   ): LlmChatMessage[] {
-    const nonce = newUntrustedNonce();
-    const messages: LlmChatMessage[] = [
-      {
-        role: 'system',
-        content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
-      },
-      { role: 'user', content: buildUserContextMessage(ctx, 'chat', nonce) },
-      // The user-context message above plays the role of "Context" the chat
-      // system prompt references; subsequent turns are the chat itself.
-    ];
-    for (const m of history) {
-      if (m.role === CoachRole.USER) {
-        // The user's own turns ARE the legitimate instruction channel, so they
-        // are not fenced as untrusted data. The one thing defanged is the
-        // `coach-proposal` fence token: users paste whole schedules in here
-        // from elsewhere, and a pasted fence that the model echoes would be
-        // parsed by the client as a real approval card.
-        messages.push({ role: 'user', content: sanitizeUntrusted(m.content) });
-      } else if (m.role === CoachRole.ASSISTANT) {
-        messages.push({ role: 'assistant', content: m.content });
+    return buildCoachChatMessages(ctx, history, applyNotes);
+  }
+
+  /**
+   * The latest Apply outcome per assistant message in this history, rendered
+   * as the note buildCoachChatMessages appends to that turn. Read from the
+   * AuditLog rows CoachProposalsService.recordApply writes. Best-effort: a
+   * failure here costs the model the note, never the reply.
+   */
+  private async loadApplyNotes(
+    userId: string,
+    history: Array<{ id?: string; role: CoachRole }>,
+  ): Promise<Map<string, string>> {
+    const ids = history
+      .filter((m) => m.role === CoachRole.ASSISTANT && m.id)
+      .map((m) => m.id as string);
+    const notes = new Map<string, string>();
+    if (ids.length === 0) return notes;
+    try {
+      const rows = await this.prisma.auditLog.findMany({
+        where: { userId, action: 'coach.apply', entityId: { in: ids } },
+        orderBy: { createdAt: 'asc' },
+        select: { entityId: true, metadata: true },
+      });
+      for (const r of rows) {
+        if (!r.entityId) continue;
+        const note = renderApplyNote((r.metadata ?? {}) as any);
+        if (note) notes.set(r.entityId, note); // later rows win
       }
-      // SYSTEM_NARRATIVE messages are intentionally omitted from chat history.
+    } catch (err) {
+      this.logger.warn(`Apply notes unavailable userId=${userId}: ${err}`);
     }
-    return messages;
+    return notes;
   }
 
   // ----- Insight extraction -----
@@ -1549,7 +1565,49 @@ export function formatMemoryBlock(
   return lines.reverse().join('\n');
 }
 
-function buildUserContextMessage(
+/**
+ * The full message list for one chat turn: system prompt, the context
+ * message, then the conversation, with each assistant turn followed by what
+ * happened when the user applied its proposal (if they did). Pure and
+ * exported so the schedule scenario evals build the exact prompt production
+ * sends.
+ */
+export function buildCoachChatMessages(
+  ctx: ContextBundle,
+  history: Array<{ id?: string; role: CoachRole; content: string }>,
+  applyNotes: Map<string, string> = new Map(),
+): LlmChatMessage[] {
+  const nonce = newUntrustedNonce();
+  const messages: LlmChatMessage[] = [
+    {
+      role: 'system',
+      content: `${CHAT_SYSTEM_PROMPT}\n\n${injectionGuardPrompt()}`,
+    },
+    { role: 'user', content: buildUserContextMessage(ctx, 'chat', nonce) },
+    // The user-context message above plays the role of "Context" the chat
+    // system prompt references; subsequent turns are the chat itself.
+  ];
+  for (const m of history) {
+    if (m.role === CoachRole.USER) {
+      // The user's own turns ARE the legitimate instruction channel, so they
+      // are not fenced as untrusted data. The one thing defanged is the
+      // `coach-proposal` fence token: users paste whole schedules in here
+      // from elsewhere, and a pasted fence that the model echoes would be
+      // parsed by the client as a real approval card.
+      messages.push({ role: 'user', content: sanitizeUntrusted(m.content) });
+    } else if (m.role === CoachRole.ASSISTANT) {
+      const note = m.id ? applyNotes.get(m.id) : undefined;
+      messages.push({
+        role: 'assistant',
+        content: note ? `${m.content}${note}` : m.content,
+      });
+    }
+    // SYSTEM_NARRATIVE messages are intentionally omitted from chat history.
+  }
+  return messages;
+}
+
+export function buildUserContextMessage(
   ctx: ContextBundle,
   mode: 'narrative' | 'chat',
   nonce: string,
@@ -1640,6 +1698,12 @@ function buildUserContextMessage(
   const allBlocksSection = allBlocks.length
     ? allBlocks.map(scheduleLine).join('\n')
     : '  (no schedule blocks yet)';
+  const byTitleSection = renderScheduleByTitle(allBlocks);
+  const freeTimeSection = renderFreeTime(
+    allBlocks,
+    sanitizeSingleLine(h?.wakeTime ?? '07:00', 20),
+    sanitizeSingleLine(h?.bedtime ?? '23:00', 20),
+  );
   const unlinkedBlocks = allBlocks.filter((b) => !b.goalId);
   const unlinkedSection = unlinkedBlocks.length
     ? unlinkedBlocks.map(scheduleLine).join('\n')
@@ -1741,6 +1805,12 @@ function buildUserContextMessage(
     '',
     '## Full weekly schedule (id, title, day, time, category, goalId — use these ids verbatim for ANY schedule block action, never invent or guess one)',
     fence(allBlocksSection),
+    '',
+    '## The same schedule grouped by block title. Use THIS to find every occurrence of a block the user names: which days it is on, which it is NOT on, its exact time and length, and the id for each day. When the user says "on all weekdays" or "every day" about a named block, the days it actually occurs on are listed here; never add a day that is not.',
+    fence(byTitleSection),
+    '',
+    '## Free time per day (gaps of 15 minutes or more inside the waking window). The ONLY place a time you pick yourself may come from, other than the slot of the block being replaced or a time the user stated.',
+    fence(freeTimeSection),
     '',
     '## UNLINKED schedule blocks (no goalId, user cannot log time against them)',
     fence(unlinkedSection),
