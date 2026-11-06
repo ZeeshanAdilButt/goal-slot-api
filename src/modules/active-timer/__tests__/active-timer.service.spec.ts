@@ -134,9 +134,13 @@ class FakePrisma {
       this.tasksRows.filter(
         (t) => t.id === where.id && t.userId === where.userId,
       ).length,
+    // Task attribution is looked up by id and the access decision (owner,
+    // or writer on the task's project) is made in code, so `userId` is only
+    // honoured when a query actually filters on it.
     findFirst: async ({ where }: any) =>
       this.tasksRows.find(
-        (t) => t.id === where.id && t.userId === where.userId,
+        (t) =>
+          t.id === where.id && (!where.userId || t.userId === where.userId),
       ) ?? null,
   };
 
