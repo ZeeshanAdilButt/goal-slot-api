@@ -1012,3 +1012,62 @@ describe('Coach schedule scenarios: the apply log the Coach reads next turn', ()
     expect(r.error).toMatch(/"Work" \(Monday 11:00 AM to 4:00 PM\)/);
   });
 });
+
+describe('Coach schedule scenarios: a mistyped block id', () => {
+  it('repairs an id one character off when exactly one block with that title is that close', async () => {
+    const { prisma, apply } = build();
+    const sat = prisma.add({
+      id: 'dd271118-e27e-4595-a9e4-dcd66a7dc84f',
+      title: 'Community Time',
+      dayOfWeek: 6,
+      startTime: '16:00',
+      endTime: '17:00',
+    });
+    prisma.add({
+      id: '3a4b1b2c-91d0-4c3e-8f7a-5e2b9c1d0a77',
+      title: 'Community Time',
+      dayOfWeek: 0,
+      startTime: '16:00',
+      endTime: '17:00',
+    });
+
+    const [r] = await apply([del(sat.id.slice(0, -1), 'Community Time')]);
+
+    expect(r.ok).toBe(true);
+    expect(r.warning).toMatch(/mistyped/);
+    expect(prisma.on(6)).toEqual([]);
+    expect(prisma.on(0)).toEqual(['16:00-17:00 Community Time']);
+  });
+
+  it('still refuses a fabricated id, even with a real title', async () => {
+    const { prisma, apply } = build();
+    prisma.add({
+      title: 'Community Time',
+      dayOfWeek: 6,
+      startTime: '16:00',
+      endTime: '17:00',
+    });
+
+    const [r] = await apply([
+      del('27aa93aa-fbcb-4ad1-a602-a394e646f0c2', 'Community Time'),
+    ]);
+
+    expect(r.ok).toBe(false);
+    expect(prisma.blocks).toHaveLength(1);
+  });
+
+  it('does not repair when the title does not match the near-miss block', async () => {
+    const { prisma, apply } = build();
+    const b = prisma.add({
+      title: 'Book',
+      dayOfWeek: 2,
+      startTime: '09:00',
+      endTime: '11:00',
+    });
+
+    const [r] = await apply([del(b.id.slice(0, -1), 'Community Time')]);
+
+    expect(r.ok).toBe(false);
+    expect(prisma.blocks).toHaveLength(1);
+  });
+});

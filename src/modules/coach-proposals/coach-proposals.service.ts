@@ -45,6 +45,7 @@ import {
 import {
   isScheduleAction,
   planScheduleBatch,
+  repairMistypedIds,
   SchedulePlan,
 } from './schedule-batch-plan';
 
@@ -166,20 +167,23 @@ export class CoachProposalsService {
 
   async apply(
     userId: string,
-    actions: CoachProposedAction[],
+    proposed: CoachProposedAction[],
     opts: { confirmedDeleteIds?: string[]; sourceMessageId?: string } = {},
   ): Promise<CoachActionResult[]> {
     // Blast-radius check for the whole batch, before anything is dispatched.
     // It has to run here rather than inside the loop: dispatch is sequential
     // and deliberately not transactional, so a cap that tripped mid-batch
     // would leave the earlier actions already written.
-    assertProposalBatchSafe(actions, opts);
+    assertProposalBatchSafe(proposed, opts);
 
     // Schedule preflight: simulate the batch against the user's real blocks
     // and refuse it, before writing anything, if any id is not theirs or the
     // finished schedule would not be valid. See schedule-batch-plan.ts for
     // the conversation that made this necessary.
-    const plan = await this.planSchedule(userId, actions);
+    const planned = await this.planSchedule(userId, proposed);
+    const plan = planned?.plan ?? null;
+    // With any mistyped block ids repaired (see repairMistypedIds).
+    const actions = planned?.actions ?? proposed;
     if (plan && plan.issues.size > 0) {
       const refused: CoachActionResult[] = actions.map((a, i) => {
         const label = plan.labels.get(i);
@@ -266,7 +270,13 @@ export class CoachProposalsService {
           resultId: outcome.id,
           ...(label ? { label } : {}),
           ...(outcome.alreadyDone ? { alreadyDone: true } : {}),
-          ...(outcome.warning ? { warning: outcome.warning } : {}),
+          ...(outcome.warning || plan?.repaired?.has(i)
+            ? {
+                warning:
+                  outcome.warning ??
+                  'The Coach mistyped this block id; it was matched to the block with the same title.',
+              }
+            : {}),
         });
         pendingRefs.delete(i);
         deferred.delete(i);
@@ -357,8 +367,12 @@ export class CoachProposalsService {
    */
   private async planSchedule(
     userId: string,
-    actions: CoachProposedAction[],
-  ): Promise<SchedulePlan | null> {
+    proposed: CoachProposedAction[],
+  ): Promise<{
+    plan: SchedulePlan & { repaired: Map<number, string> };
+    actions: CoachProposedAction[];
+  } | null> {
+    const actions = proposed;
     if (!actions.some(isScheduleAction)) return null;
     const blocks = await this.prisma.scheduleBlock.findMany({
       where: { userId },
@@ -372,13 +386,25 @@ export class CoachProposalsService {
       },
     });
     const known = new Set(blocks.map((b) => b.id));
-    const unknownDeleteIds = actions
+    const unknownIds = actions
       .filter(
-        (a) => a.type === 'DELETE_SCHEDULE_BLOCK' && a.id && !known.has(a.id),
+        (a) =>
+          (a.type === 'DELETE_SCHEDULE_BLOCK' ||
+            a.type === 'UPDATE_SCHEDULE_BLOCK') &&
+          a.id &&
+          !known.has(a.id),
       )
       .map((a) => a.id!);
-    const tombstones = await this.findTombstones(userId, unknownDeleteIds);
-    return planScheduleBatch({ blocks, tombstones, actions });
+    // Tombstones first: an id this user's earlier apply deleted is gone on
+    // purpose and must never be treated as a typo for a sibling block.
+    const tombstones = await this.findTombstones(userId, unknownIds);
+    const { actions: fixed, repaired } = repairMistypedIds(
+      actions,
+      blocks,
+      tombstones,
+    );
+    const plan = planScheduleBatch({ blocks, tombstones, actions: fixed });
+    return { plan: { ...plan, repaired }, actions: fixed };
   }
 
   /**

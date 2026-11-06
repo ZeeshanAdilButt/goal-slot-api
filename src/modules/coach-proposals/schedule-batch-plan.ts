@@ -337,6 +337,72 @@ export function planScheduleBatch(input: {
   return { issues, alreadyDeleted, labels };
 }
 
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    for (let j = 1; j <= b.length; j++) {
+      curr[j] = Math.min(
+        prev[j] + 1,
+        curr[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+/**
+ * Repair a schedule-block id the model copied with a typo.
+ *
+ * Seen in the scenario evals: a model emitted
+ * `dd271118-e27e-4595-a9e4-dcd66a7dc84`, one character short of the real id,
+ * with `expectedTitle: "Community Time"`. Refusing the batch is safe but
+ * leaves the user with a dead card for a slip a human would never make.
+ *
+ * Deliberately narrow, so it can never turn a made-up id into a real one:
+ *   - only ids that match none of the user's blocks and no tombstone (a
+ *     re-applied delete whose block is gone must never be "repaired" onto a
+ *     sibling occurrence with the same title);
+ *   - only when the action carries expectedTitle;
+ *   - exactly ONE of the user's blocks has that title (case/whitespace
+ *     insensitive) AND an id within 2 edits of the one given.
+ * Two random uuids differ in ~34 of 36 characters, so a fabricated id is
+ * nowhere near any real one; that is the case the preflight still refuses.
+ */
+export function repairMistypedIds(
+  actions: CoachProposedAction[],
+  blocks: PlanBlock[],
+  /** Ids a tombstone shows were deleted earlier: gone on purpose, never "mistyped". */
+  tombstones: Set<string> = new Set(),
+): { actions: CoachProposedAction[]; repaired: Map<number, string> } {
+  const known = new Set(blocks.map((b) => b.id));
+  const repaired = new Map<number, string>();
+  const out = actions.map((a, i) => {
+    if (
+      (a.type !== 'DELETE_SCHEDULE_BLOCK' &&
+        a.type !== 'UPDATE_SCHEDULE_BLOCK') ||
+      !a.id ||
+      known.has(a.id) ||
+      tombstones.has(a.id) ||
+      !a.expectedTitle
+    ) {
+      return a;
+    }
+    const title = normalizeTitle(a.expectedTitle);
+    const near = blocks.filter(
+      (b) =>
+        normalizeTitle(b.title) === title && editDistance(b.id, a.id!) <= 2,
+    );
+    if (near.length !== 1) return a;
+    repaired.set(i, near[0].id);
+    return { ...a, id: near[0].id };
+  });
+  return { actions: out, repaired };
+}
+
 export function isScheduleAction(a: CoachProposedAction): boolean {
   return (
     a.type === 'CREATE_SCHEDULE_BLOCK' ||
