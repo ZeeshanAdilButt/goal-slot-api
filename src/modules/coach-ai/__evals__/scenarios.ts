@@ -181,32 +181,43 @@ export const SCENARIOS: Scenario[] = [
     expectProposal: true,
     check: (r, blocks) => {
       const final = applyInMemory(blocks, r);
-      const deletes = allActions(r).filter(
-        (a) => a.type === 'DELETE_SCHEDULE_BLOCK',
-      );
+      // The replacements are either new blocks or, when the Coach used
+      // SPLIT_SCHEDULE_BLOCK, the original block re-titled as the first
+      // piece. Both count; what matters is what sits in the slot afterwards.
+      const replacements = (day: number) =>
+        final.filter(
+          (b) =>
+            b.dayOfWeek === day &&
+            !/Reading & Labs/.test(b.title) &&
+            (b.id.startsWith('new-') || readingIds.includes(b.id)),
+        );
       const reading = onDays(final, /Reading & Labs/, [2, 4]);
-      const newOnes = final.filter(
-        (b) => b.id.startsWith('new-') && [2, 4].includes(b.dayOfWeek),
-      );
+      const perDay = [2, 4].map(replacements);
+      const newOnes = perDay.flat();
       return [
         ...fail(
-          !(
-            deletes.length === 2 &&
-            readingIds.every((id) => deletes.some((d) => d.id === id))
-          ) && reading.length > 0,
+          reading.length > 0,
           'Reading & Labs is not replaced on both days it occurs (Tue and Thu)',
         ),
         ...fail(
-          newOnes.length < 4,
-          `expected 2 new blocks on each of Tue and Thu, found ${newOnes.length}`,
+          perDay.some((d) => d.length !== 2),
+          `expected 2 replacement blocks on each of Tue and Thu, found ${perDay.map((d) => d.length).join(' and ')}`,
         ),
         ...fail(
           newOnes.some((b) => !insideSlot(b, '07:00', '09:00')),
-          'a new block is placed outside the 7:00 to 9:00 AM slot it replaces',
+          'a replacement block is placed outside the 7:00 to 9:00 AM slot it replaces',
         ),
         ...fail(
           newOnes.some((b) => minutes(b) !== 30),
-          'a new block is not 30 minutes',
+          'a replacement block is not 30 minutes',
+        ),
+        ...fail(
+          perDay.some(
+            (d) =>
+              d.length === 2 &&
+              [d[0].startTime, d[1].startTime].sort().join() !== '07:00,07:30',
+          ),
+          'the two replacements do not sit back to back from 7:00 AM',
         ),
         ...fail(
           claimsBulletsInsideBlock(r.prose),
@@ -544,8 +555,8 @@ export const SCENARIOS: Scenario[] = [
       { role: 'user', content: 'no, do it on every day it is on' },
     ],
     expectProposal: true,
-    check: (r) => {
-      const ids = touchedIds(r);
+    check: (r, blocks) => {
+      const ids = touchedIds(r, blocks);
       return fail(
         !readingIds.every((id) => ids.has(id)),
         'does not rename both Tuesday and Thursday',

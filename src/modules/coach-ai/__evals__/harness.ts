@@ -10,6 +10,7 @@ import {
   normalizeTitle,
 } from '../../coach-proposals/schedule-batch-plan';
 import { CoachProposedAction } from '../../coach-proposals/dto/apply-proposals.dto';
+import { expandSplits, IssueSink } from '../proposal-guard';
 
 /**
  * Shared machinery for the Coach schedule scenario evals: build the exact
@@ -149,6 +150,24 @@ export function allActions(r: ParsedReply): CoachProposedAction[] {
 }
 
 /**
+ * The actions production would actually apply for this reply: splits
+ * expanded the way the chat guard expands them, then one-character id typos
+ * repaired. Every check works on these, so a model that uses
+ * SPLIT_SCHEDULE_BLOCK is judged on the blocks it really produces.
+ */
+export function effectiveActions(
+  r: ParsedReply,
+  blocks: EvalBlock[],
+): { actions: CoachProposedAction[]; expansionIssues: string[] } {
+  const sink = new IssueSink();
+  const expanded = expandSplits(allActions(r), blocks, sink);
+  return {
+    actions: repairMistypedIds(expanded, blocks).actions,
+    expansionIssues: sink.model,
+  };
+}
+
+/**
  * Checks that hold for ANY schedule proposal, whatever the scenario:
  * strict JSON, ids that exist with the title the action claims, and a batch
  * the real apply path would accept against this schedule.
@@ -162,9 +181,10 @@ export function universalChecks(blocks: EvalBlock[], r: ParsedReply): string[] {
       `${r.nonStrict} proposal block(s) are not strict JSON (comments or trailing commas)`,
     );
   const byId = new Map(blocks.map((b) => [b.id, b]));
-  // Production repairs a one-or-two-character id typo when the title pins
-  // the block down (repairMistypedIds), so the eval judges what would apply.
-  const actions = repairMistypedIds(allActions(r), blocks).actions;
+  const { actions, expansionIssues } = effectiveActions(r, blocks);
+  failures.push(
+    ...expansionIssues.map((x) => `split could not be expanded: ${x}`),
+  );
   actions.forEach((a, i) => {
     if (
       a.type === 'DELETE_SCHEDULE_BLOCK' ||
@@ -199,7 +219,7 @@ export function applyInMemory(
   r: ParsedReply,
 ): EvalBlock[] {
   const state = new Map(blocks.map((b) => [b.id, { ...b }]));
-  const actions = repairMistypedIds(allActions(r), blocks).actions;
+  const { actions } = effectiveActions(r, blocks);
   for (const a of actions)
     if (a.type === 'DELETE_SCHEDULE_BLOCK' && a.id) state.delete(a.id);
   for (const a of actions) {
@@ -248,10 +268,8 @@ export function minutes(b: { startTime: string; endTime: string }): number {
   return toMinutes(b.endTime) - toMinutes(b.startTime);
 }
 
-export function touchedIds(r: ParsedReply, blocks?: EvalBlock[]): Set<string> {
-  const actions = blocks
-    ? repairMistypedIds(allActions(r), blocks).actions
-    : allActions(r);
+export function touchedIds(r: ParsedReply, blocks: EvalBlock[]): Set<string> {
+  const { actions } = effectiveActions(r, blocks);
   return new Set(actions.filter((a) => a.id).map((a) => a.id as string));
 }
 

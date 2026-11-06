@@ -2,9 +2,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { checkProposal, repairInstruction } from '../proposal-guard';
 import { guardProposalStream } from '../proposal-stream';
-import { CoachAiService } from '../coach-ai.service';
-import { REAL_WEEK } from '../__evals__/scenarios';
-import { idsOf, parseReply } from '../__evals__/harness';
+import { CoachAiService, proseOnly } from '../coach-ai.service';
+import { REAL_WEEK, SCENARIOS } from '../__evals__/scenarios';
+import { idsOf, parseReply, universalChecks } from '../__evals__/harness';
 import { LlmStreamChunk } from '../../../shared/services/llm/llm.interface';
 
 const recorded4oMini = JSON.parse(
@@ -314,6 +314,176 @@ describe('CoachAiService.finalizeProposal', () => {
     expect(parseReply(r.text).proposals).toHaveLength(0);
     expect(r.text.trim()).toBe(
       'Should Study start at 8:00 AM, or end at 12:00 PM?',
+    );
+  });
+});
+
+const split = (
+  id: string | undefined,
+  expectedTitle: string | undefined,
+  payload: unknown,
+) =>
+  JSON.stringify({
+    actions: [{ type: 'SPLIT_SCHEDULE_BLOCK', id, expectedTitle, payload }],
+  });
+const TWO_LABS = {
+  allOccurrences: true,
+  pieces: [
+    { title: 'Soft Skills Lab', minutes: 30 },
+    { title: 'Tech Lab', minutes: 30 },
+  ],
+};
+
+describe('SPLIT_SCHEDULE_BLOCK anchor (CodeRabbit #125)', () => {
+  it('refuses a real id whose block does not have the expected title, instead of splitting it', () => {
+    const workId = idsOf(REAL_WEEK, 'Work', [2])[0];
+    const r = checkProposal(split(workId, READING, TWO_LABS), REAL_WEEK);
+
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]).toMatch(
+      /is "Work", not "Reading & Labs \(Core Engineering\)"/,
+    );
+    expect(
+      r.actions.some((a) => idsOf(REAL_WEEK, 'Work').includes(a.id ?? '')),
+    ).toBe(false);
+  });
+
+  it('accepts an unknown id when the title names the block exactly, and splits every occurrence', () => {
+    const r = checkProposal(
+      split('not-a-real-id', READING, TWO_LABS),
+      REAL_WEEK,
+    );
+
+    expect(r.issues).toEqual([]);
+    expect(
+      r.actions
+        .filter((a) => a.type === 'UPDATE_SCHEDULE_BLOCK')
+        .map((a) => a.id)
+        .sort(),
+    ).toEqual([...idsOf(REAL_WEEK, READING)].sort());
+  });
+
+  it('refuses a one-occurrence split by title when the title is on several days', () => {
+    const r = checkProposal(
+      split('not-a-real-id', READING, { ...TWO_LABS, allOccurrences: false }),
+      REAL_WEEK,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]).toMatch(/needs that occurrence's id/);
+  });
+});
+
+describe('SPLIT_SCHEDULE_BLOCK pieces (CodeRabbit #125)', () => {
+  const tue = () => idsOf(REAL_WEEK, READING, [2])[0];
+
+  it('coerces whole-number strings', () => {
+    const r = checkProposal(
+      split(tue(), READING, {
+        pieces: [
+          { title: 'Soft Skills Lab', minutes: '30' },
+          { title: 'Tech Lab', minutes: 30 },
+        ],
+      }),
+      REAL_WEEK,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it.each([
+    [{ title: 'Tech Lab', minutes: 22.5 }],
+    [{ title: 'Tech Lab', minutes: 'half an hour' }],
+    [{ title: 42, minutes: 30 }],
+    [{ minutes: 30 }],
+  ])('reports a bad piece instead of silently dropping it: %j', (bad) => {
+    const r = checkProposal(
+      split(tue(), READING, {
+        pieces: [{ title: 'Soft Skills Lab', minutes: 30 }, bad],
+      }),
+      REAL_WEEK,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]).toMatch(/invalid pieces: piece 2/);
+    // Nothing from this split reaches the card: no half-built proposal.
+    expect(r.actions.some((a) => a.type === 'CREATE_SCHEDULE_BLOCK')).toBe(
+      false,
+    );
+  });
+});
+
+describe('what reaches the user (CodeRabbit #125)', () => {
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-/i;
+  const TYPES = /(UPDATE|DELETE|CREATE|SPLIT)_SCHEDULE_BLOCK/;
+
+  it('user-facing reasons never name an id or an action type', () => {
+    const r = checkProposal(proposalBody(recorded4oMini), REAL_WEEK);
+    expect(r.userIssues.length).toBe(r.issues.length);
+    for (const x of r.userIssues) {
+      expect(x).not.toMatch(UUID);
+      expect(x).not.toMatch(TYPES);
+    }
+    expect(r.userIssues[0]).toBe(
+      'A change to "Reading & Labs" pointed at a block that is not in your schedule.',
+    );
+  });
+
+  it('proseOnly strips every fence, an unclosed one included, and never cuts inside one', () => {
+    expect(
+      proseOnly('Fine.\n```coach-proposal\n{"actions":[]}\n```\nMore.'),
+    ).toBe('Fine.\n\nMore.');
+    expect(proseOnly('Ask? ```coach-proposal\n{"actions": [')).toBe('Ask?');
+    const long = proseOnly('word '.repeat(300));
+    expect(long.length).toBeLessThanOrEqual(601);
+    expect(long).not.toContain('`');
+  });
+});
+
+describe('CoachAiService.finalizeProposal repair tail (CodeRabbit #125)', () => {
+  const service = new CoachAiService({} as any, {} as any, {} as any);
+  it('drops a second proposal fence the repair reply puts after its block', async () => {
+    const replies = [
+      '```coach-proposal\n' +
+        GOOD +
+        '\n```\nAlso:\n```coach-proposal\n{"actions":[{"type":"DELETE_SCHEDULE_BLOCK","id":"x"}]}\n```\nWant 3 hours of Study?',
+    ];
+    const r = await (service as any).finalizeProposal({
+      body: proposalBody(recorded4oMini),
+      prose: '',
+      blocks: REAL_WEEK,
+      provider: {
+        streamCompletion: async function* () {
+          yield { delta: replies.shift() ?? '', done: false };
+          yield { delta: '', done: true };
+        },
+      },
+      model: 'm',
+      messages: [],
+      userId: 'u',
+    });
+    expect((r.text.match(/```coach-proposal/g) ?? []).length).toBe(1);
+    expect(r.text).toContain('Want 3 hours of Study?');
+    expect(r.text).not.toContain('"id":"x"');
+  });
+});
+
+describe('eval harness judges SPLIT replies on what they produce (CodeRabbit #125)', () => {
+  it('a correct split reply passes replace-one-with-two', () => {
+    const s = SCENARIOS.find((x) => x.id === 'replace-one-with-two')!;
+    const text =
+      'Reading & Labs is on Tue and Thu, so I changed it on both. Blocks only hold a title, so the lab topics go in the title. This frees 8:00 to 9:00 AM on both days; want to leave it free?\n\n```coach-proposal\n' +
+      split(idsOf(REAL_WEEK, READING, [2])[0], READING, {
+        allOccurrences: true,
+        pieces: [
+          { title: 'Soft Skills', minutes: 30 },
+          {
+            title: 'Tech Labs: System Design, DB, SD Challenges, AI Agents',
+            minutes: 30,
+          },
+        ],
+      }) +
+      '\n```';
+    const r = parseReply(text);
+    expect([...universalChecks(s.blocks, r), ...s.check(r, s.blocks)]).toEqual(
+      [],
     );
   });
 });
