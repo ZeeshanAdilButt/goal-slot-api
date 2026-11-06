@@ -11,6 +11,8 @@ import {
   IsArray,
   ArrayMinSize,
   ArrayMaxSize,
+  ArrayUnique,
+  IsInt,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -116,6 +118,30 @@ export class CreateScheduleBlocksBatchDto {
   @ValidateNested({ each: true })
   @Type(() => CreateScheduleBlockDto)
   blocks: CreateScheduleBlockDto[];
+}
+
+/**
+ * Body of POST /schedule/:id/days: the exact set of weekdays the block's
+ * series should cover. Duplicates are rejected rather than silently merged so
+ * a client bug shows up instead of being papered over.
+ */
+export class SetScheduleBlockDaysDto {
+  @ApiProperty({
+    type: [Number],
+    example: [1, 3, 5],
+    description:
+      'Days of week (0=Sunday ... 6=Saturday) the series must cover exactly. Must include the block own day.',
+    minItems: 1,
+    maxItems: 7,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(7)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  days: number[];
 }
 
 export class UpdateScheduleBlockDto extends PartialType(
