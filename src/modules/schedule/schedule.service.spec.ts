@@ -1,4 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ScheduleService } from './schedule.service';
 
 // Regression cover for the schedule-block goal IDOR.
@@ -42,6 +46,7 @@ class FakePrisma {
   ];
 
   created: Row[] = [];
+  deleted: Row[] = [];
   updated: Array<{ where: any; data: any }> = [];
   updatedMany: Array<{ where: any; data: any }> = [];
 
@@ -55,6 +60,9 @@ class FakePrisma {
       if (cond === undefined) return true;
       if (cond && typeof cond === 'object' && 'not' in cond) {
         return row[key] !== cond.not;
+      }
+      if (cond && typeof cond === 'object' && 'in' in cond) {
+        return (cond.in as unknown[]).includes(row[key]);
       }
       return row[key] === cond;
     });
@@ -85,7 +93,19 @@ class FakePrisma {
     },
     update: async ({ where, data }: any) => {
       this.updated.push({ where, data });
+      // Applied to the stored row too, so a later read in the same
+      // transaction sees it (the set-days tests read the series back).
+      const row = this.scheduleBlocks.find((b) => b.id === where.id);
+      if (row) Object.assign(row, data);
       return { ...where, ...data };
+    },
+    deleteMany: async ({ where }: any) => {
+      const doomed = this.scheduleBlocks.filter((b) => this.matches(b, where));
+      this.deleted.push(...doomed);
+      this.scheduleBlocks = this.scheduleBlocks.filter(
+        (b) => !doomed.includes(b),
+      );
+      return { count: doomed.length };
     },
     updateMany: async ({ where, data }: any) => {
       this.updatedMany.push({ where, data });
@@ -659,5 +679,383 @@ describe('ScheduleService.createBatch atomic group create', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.created).toHaveLength(0);
+  });
+});
+
+// POST /schedule/:id/days: the Edit Block dialog's day picker. The series the
+// block belongs to must end up covering exactly the requested days.
+describe('ScheduleService.setSeriesDays', () => {
+  const SRC = 'src-block';
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  function block(id: string, dayOfWeek: number, extra: Partial<Row> = {}): Row {
+    return {
+      id,
+      userId: ATTACKER,
+      title: 'Soft Skills Lab',
+      startTime: '07:00',
+      endTime: '07:30',
+      dayOfWeek,
+      category: 'LEARNING',
+      color: '#123456',
+      goalId: OWN_GOAL,
+      isPrivate: true,
+      isRecurring: false,
+      seriesId: 'series-1',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-02T00:00:00Z'),
+      ...extra,
+    };
+  }
+
+  // The fake has no real transaction to roll back, so snapshot the table on
+  // entry and restore it when the callback throws, the way Postgres would.
+  function setup(rows: Row[]) {
+    const { prisma, service } = buildService();
+    prisma.scheduleBlocks = rows;
+    const run = prisma.$transaction;
+    prisma.$transaction = (async (fn: any, opts: any) => {
+      const snapshot = [...prisma.scheduleBlocks];
+      const createdBefore = prisma.created.length;
+      const deletedBefore = prisma.deleted.length;
+      const updatedBefore = prisma.updated.length;
+      try {
+        return await run(fn, opts);
+      } catch (error) {
+        prisma.scheduleBlocks = snapshot;
+        prisma.created.length = createdBefore;
+        prisma.deleted.length = deletedBefore;
+        prisma.updated.length = updatedBefore;
+        throw error;
+      }
+    }) as any;
+    return { prisma, service };
+  }
+
+  const days = (blocks: Array<{ dayOfWeek: unknown }>) =>
+    blocks.map((b) => b.dayOfWeek);
+
+  it('adds days to a single block with no series: mints a seriesId on the source and the copies', async () => {
+    const { prisma, service } = setup([block(SRC, 1, { seriesId: null })]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 3, 5]);
+
+    expect(result.added).toEqual([3, 5]);
+    expect(result.removed).toEqual([]);
+    const minted = prisma.updated[0].data.seriesId;
+    expect(minted).toMatch(UUID_RE);
+    expect(prisma.updated[0].where).toEqual({ id: SRC });
+    expect(prisma.created).toHaveLength(2);
+    expect(prisma.created.every((b) => b.seriesId === minted)).toBe(true);
+    expect(days(result.blocks)).toEqual([1, 3, 5]);
+    expect(result.blocks.every((b) => b.seriesId === minted)).toBe(true);
+  });
+
+  it('copies every user-editable field and none of the per-block ones', async () => {
+    const { prisma, service } = setup([block(SRC, 1)]);
+
+    await service.setSeriesDays(ATTACKER, SRC, [1, 2]);
+
+    expect(prisma.created).toHaveLength(1);
+    expect(prisma.created[0]).toEqual({
+      title: 'Soft Skills Lab',
+      startTime: '07:00',
+      endTime: '07:30',
+      dayOfWeek: 2,
+      category: 'LEARNING',
+      color: '#123456',
+      goalId: OWN_GOAL,
+      isPrivate: true,
+      isRecurring: false,
+      seriesId: 'series-1',
+      userId: ATTACKER,
+      // Supplied by the fake in place of the database default; the service
+      // sends no id, createdAt or updatedAt of its own.
+      id: 'new-block-0',
+    });
+  });
+
+  it('reuses the seriesId a lone block already has instead of minting another', async () => {
+    const { prisma, service } = setup([block(SRC, 1, { seriesId: 'own-id' })]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 4]);
+
+    expect(prisma.updated).toHaveLength(0);
+    expect(prisma.created[0].seriesId).toBe('own-id');
+    expect(days(result.blocks)).toEqual([1, 4]);
+  });
+
+  it('adds days to an existing series, only the missing ones', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('wed', 3)]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 3, 5]);
+
+    expect(result.added).toEqual([5]);
+    expect(result.removed).toEqual([]);
+    expect(prisma.created).toHaveLength(1);
+    expect(prisma.created[0].dayOfWeek).toBe(5);
+    expect(days(result.blocks)).toEqual([1, 3, 5]);
+  });
+
+  it('removes days: deletes the series block on each dropped day, keeps the source', async () => {
+    const { prisma, service } = setup([
+      block(SRC, 1),
+      block('wed', 3),
+      block('fri', 5),
+    ]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1]);
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([3, 5]);
+    expect(prisma.deleted.map((b) => b.id).sort()).toEqual(['fri', 'wed']);
+    expect(result.blocks.map((b) => b.id)).toEqual([SRC]);
+  });
+
+  it('adds and removes in one call', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('wed', 3)]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 4]);
+
+    expect(result.added).toEqual([4]);
+    expect(result.removed).toEqual([3]);
+    expect(days(result.blocks)).toEqual([1, 4]);
+    expect(prisma.deleted.map((b) => b.id)).toEqual(['wed']);
+    expect(prisma.created).toHaveLength(1);
+  });
+
+  it('fails the whole request and writes nothing when one added day conflicts', async () => {
+    const { prisma, service } = setup([
+      block(SRC, 1),
+      block('wed', 3),
+      // Unrelated block already sitting in the slot on Saturday.
+      block('sat-other', 6, { seriesId: 'other-series' }),
+    ]);
+
+    // Wednesday is dropped and Friday is addable, but Saturday conflicts.
+    await expect(
+      service.setSeriesDays(ATTACKER, SRC, [1, 5, 6]),
+    ).rejects.toThrow(
+      'Time slot conflicts with an existing schedule block on Saturday: "Soft Skills Lab" (Saturday 7:00 AM to 7:30 AM)',
+    );
+
+    expect(prisma.created).toHaveLength(0);
+    expect(prisma.updated).toHaveLength(0);
+    expect(prisma.deleted).toHaveLength(0);
+    // Table is back to what it was, Wednesday's block included.
+    expect(prisma.scheduleBlocks.map((b) => b.id).sort()).toEqual(
+      ['sat-other', SRC, 'wed'].sort(),
+    );
+  });
+
+  it('only conflicts on overlapping times: an adjacent block does not block an added day', async () => {
+    const { service } = setup([
+      block(SRC, 1),
+      block('sat-next', 6, {
+        seriesId: 'other-series',
+        startTime: '07:30',
+        endTime: '08:00',
+      }),
+    ]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 6]);
+
+    expect(result.added).toEqual([6]);
+  });
+
+  it('deletes removed blocks before checking added slots, so a block this call removes never counts as a conflict', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('wed', 3)]);
+    const deletedAtConflictCheck: number[] = [];
+    const realFindMany = prisma.scheduleBlock.findMany;
+    prisma.scheduleBlock.findMany = (async (args: any) => {
+      // The conflict check is the only findMany filtered by dayOfWeek.
+      if (args.where.dayOfWeek !== undefined) {
+        deletedAtConflictCheck.push(prisma.deleted.length);
+      }
+      return realFindMany(args);
+    }) as any;
+
+    await service.setSeriesDays(ATTACKER, SRC, [1, 4]);
+
+    expect(deletedAtConflictCheck).toEqual([1]);
+  });
+
+  it('rejects with 400 when the source day is not in days, and writes nothing', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('wed', 3)]);
+
+    const attempt = service.setSeriesDays(ATTACKER, SRC, [3, 5]);
+
+    await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+    await expect(attempt).rejects.toThrow(
+      'Use a normal update to move a block to another day.',
+    );
+    expect(prisma.created).toHaveLength(0);
+    expect(prisma.deleted).toHaveLength(0);
+  });
+
+  it('answers 404 for another user block and for a missing one, never leaking either', async () => {
+    const { prisma, service } = setup([
+      block('victim-block', 1, { userId: VICTIM, seriesId: 'victim-series' }),
+    ]);
+
+    await expect(
+      service.setSeriesDays(ATTACKER, 'victim-block', [1, 2]),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.setSeriesDays(ATTACKER, 'does-not-exist', [1, 2]),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.created).toHaveLength(0);
+    expect(prisma.deleted).toHaveLength(0);
+  });
+
+  it('never touches another user blocks that happen to share the seriesId', async () => {
+    const { prisma, service } = setup([
+      block(SRC, 1),
+      block('victim-fri', 5, { userId: VICTIM }),
+    ]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1]);
+
+    expect(result.removed).toEqual([]);
+    expect(prisma.deleted).toHaveLength(0);
+    expect(result.blocks.map((b) => b.id)).toEqual([SRC]);
+  });
+
+  it('is idempotent: the same days again change nothing', async () => {
+    const { prisma, service } = setup([block(SRC, 1, { seriesId: null })]);
+
+    await service.setSeriesDays(ATTACKER, SRC, [1, 3, 5]);
+    const createdAfterFirst = prisma.created.length;
+    const updatedAfterFirst = prisma.updated.length;
+    const second = await service.setSeriesDays(ATTACKER, SRC, [5, 3, 1]);
+
+    expect(second.added).toEqual([]);
+    expect(second.removed).toEqual([]);
+    expect(days(second.blocks)).toEqual([1, 3, 5]);
+    expect(prisma.created).toHaveLength(createdAfterFirst);
+    expect(prisma.updated).toHaveLength(updatedAfterFirst);
+    expect(prisma.deleted).toHaveLength(0);
+  });
+
+  it('is a no-op for a lone block asked for only its own day', async () => {
+    const { prisma, service } = setup([block(SRC, 1, { seriesId: null })]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1]);
+
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.blocks.map((b) => b.id)).toEqual([SRC]);
+    expect(prisma.created).toHaveLength(0);
+    expect(prisma.updated).toHaveLength(0);
+  });
+
+  it('treats a day the series already holds twice as present and never adds a third', async () => {
+    const { prisma, service } = setup([
+      block(SRC, 1),
+      block('mon-2', 1, { startTime: '09:00', endTime: '10:00' }),
+    ]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 3]);
+
+    expect(result.added).toEqual([3]);
+    expect(prisma.created.map((b) => b.dayOfWeek)).toEqual([3]);
+
+    const again = await service.setSeriesDays(ATTACKER, SRC, [1, 3]);
+    expect(again.added).toEqual([]);
+    expect(prisma.created).toHaveLength(1);
+  });
+
+  it('removes every series block on a dropped day, even when it holds two', async () => {
+    const { prisma, service } = setup([
+      block(SRC, 1),
+      block('wed-1', 3),
+      block('wed-2', 3, { startTime: '09:00', endTime: '10:00' }),
+    ]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1]);
+
+    expect(result.removed).toEqual([3]);
+    expect(prisma.deleted.map((b) => b.id).sort()).toEqual(['wed-1', 'wed-2']);
+  });
+
+  it('collapses duplicate days handed to the service directly', async () => {
+    const { prisma, service } = setup([block(SRC, 1)]);
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 3, 3, 1]);
+
+    expect(result.added).toEqual([3]);
+    expect(prisma.created).toHaveLength(1);
+  });
+
+  it('asks for the Serializable isolation level', async () => {
+    const { prisma, service } = setup([block(SRC, 1)]);
+    const spy = jest.spyOn(prisma, '$transaction');
+
+    await service.setSeriesDays(ATTACKER, SRC, [1]);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'Serializable' }),
+    );
+  });
+
+  it('retries a P2034 serialization failure and succeeds once the retry wins', async () => {
+    const { prisma, service } = setup([block(SRC, 1)]);
+    const run = prisma.$transaction;
+    let attempts = 0;
+    prisma.$transaction = (async (fn: any, opts: any) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw { code: 'P2034', message: 'Transaction write conflict' };
+      }
+      return run(fn, opts);
+    }) as any;
+
+    const result = await service.setSeriesDays(ATTACKER, SRC, [1, 2]);
+
+    expect(attempts).toBe(2);
+    expect(result.added).toEqual([2]);
+    expect(prisma.created).toHaveLength(1);
+  });
+
+  it('gives up after exhausting retries on repeated P2034 failures', async () => {
+    const { prisma, service } = setup([block(SRC, 1)]);
+    let attempts = 0;
+    prisma.$transaction = (async () => {
+      attempts += 1;
+      throw { code: 'P2034', message: 'Transaction write conflict' };
+    }) as any;
+
+    await expect(
+      service.setSeriesDays(ATTACKER, SRC, [1, 2]),
+    ).rejects.toMatchObject({ code: 'P2034' });
+    expect(attempts).toBe(4);
+  });
+
+  it('applies the plan limit to the net block count, after removals', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('tue', 2)]);
+    prisma.scheduleBlock.count = (async () =>
+      prisma.scheduleBlocks.filter((b) => b.userId === ATTACKER).length) as any;
+    const limit = jest.spyOn((service as any).authService, 'checkPlanLimit');
+
+    await service.setSeriesDays(ATTACKER, SRC, [1, 3]);
+
+    expect(limit).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledWith(ATTACKER, 'schedules', 1);
+  });
+
+  it('writes nothing when the plan limit refuses the added days', async () => {
+    const { prisma, service } = setup([block(SRC, 1), block('tue', 2)]);
+    (service as any).authService.checkPlanLimit = async () => {
+      throw new ForbiddenException('plan limit');
+    };
+
+    await expect(
+      service.setSeriesDays(ATTACKER, SRC, [1, 3]),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.created).toHaveLength(0);
+    expect(prisma.scheduleBlocks.map((b) => b.id).sort()).toEqual([SRC, 'tue']);
   });
 });
