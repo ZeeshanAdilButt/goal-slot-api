@@ -606,6 +606,10 @@ export class ScheduleService {
     removed: number[];
   }> {
     const targetDays = [...new Set(days)].sort((a, b) => a - b);
+    // Before the transaction, like createBatch: the plan check reads through
+    // the root client, and doing that while a transaction holds a pooled
+    // connection would make one request hold two.
+    await this.assertSeriesDaysWithinPlan(userId, blockId, targetDays);
     try {
       return await this.prisma.$transaction(
         (tx) => this.applySeriesDays(tx, userId, blockId, targetDays),
@@ -616,6 +620,42 @@ export class ScheduleService {
         return this.setSeriesDays(userId, blockId, days, attempt + 1);
       }
       throw error;
+    }
+  }
+
+  /**
+   * Plan-limit gate for the days a set-days call would add, counted against
+   * the block total AFTER the call's removals so swapping days at the limit
+   * still works. Read-only; a missing block or a bad day set is left for the
+   * transaction to report with the right error.
+   */
+  private async assertSeriesDaysWithinPlan(
+    userId: string,
+    blockId: string,
+    targetDays: number[],
+  ): Promise<void> {
+    const source = await this.prisma.scheduleBlock.findFirst({
+      where: { id: blockId, userId },
+    });
+    if (!source || !targetDays.includes(source.dayOfWeek)) return;
+    const series = source.seriesId
+      ? await this.prisma.scheduleBlock.findMany({
+          where: { userId, seriesId: source.seriesId },
+        })
+      : [source];
+    const present = new Set(series.map((b) => b.dayOfWeek));
+    const added = targetDays.filter((d) => !present.has(d));
+    if (added.length === 0) return;
+    const removedCount = series.filter(
+      (b) => !targetDays.includes(b.dayOfWeek),
+    ).length;
+    const total = await this.prisma.scheduleBlock.count({ where: { userId } });
+    for (let i = 0; i < added.length; i++) {
+      await this.authService.checkPlanLimit(
+        userId,
+        'schedules',
+        total - removedCount + i,
+      );
     }
   }
 
@@ -680,19 +720,6 @@ export class ScheduleService {
             `Time slot conflicts with an existing schedule block on ${DAY_NAMES[dayOfWeek]}: ${describeBlock(conflict)}`,
           );
         }
-      }
-
-      // Same gate as createBatch, applied to the net block count after the
-      // removals above, so swapping days at the limit still works.
-      const currentSchedules = await tx.scheduleBlock.count({
-        where: { userId },
-      });
-      for (let i = 0; i < added.length; i++) {
-        await this.authService.checkPlanLimit(
-          userId,
-          'schedules',
-          currentSchedules + i,
-        );
       }
 
       if (!seriesId) {
